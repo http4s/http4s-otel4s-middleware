@@ -8,6 +8,8 @@ ThisBuild / developers := List(
   tlGitHubDev("christopherdavenport", "Christopher Davenport")
 )
 
+ThisBuild / tlCiReleaseBranches := Seq("main")
+
 // true by default, set to false to publish to s01.oss.sonatype.org
 ThisBuild / tlSonatypeUseLegacyHost := true
 
@@ -29,7 +31,7 @@ val munitCatsEffectV = "1.0.7"
 
 // Projects
 lazy val `natchez-http4s-otel` = tlCrossRootProject
-  .aggregate(core.jvm, core.js)
+  .aggregate(core)
 
 lazy val core = crossProject(JVMPlatform, JSPlatform)
   .crossType(CrossType.Pure)
