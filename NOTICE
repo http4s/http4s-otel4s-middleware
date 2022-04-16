@@ -1,3 +1,8 @@
 Natchez-Http4s-Otel
 Copyright 2022 Christopher Davenport
 Licensed under the MIT License(see LICENSE)
+
+This software contains portions of code derived from natchez-http4s
+https://github.com/tpolecat/natchez-http4s
+Copyright (c) 2021 by Rob Norris
+Licensed under the MIT License(see licenses/license_natchez-http4s)
