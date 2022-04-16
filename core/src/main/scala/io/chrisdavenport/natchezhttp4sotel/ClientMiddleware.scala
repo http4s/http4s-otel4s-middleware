@@ -28,7 +28,7 @@ object ClientMiddleware {
           knl <- Resource.eval(span.kernel)
           knlHeaders = Headers(knl.toHeaders.map { case (k, v) => Header.Raw(CIString(k), v) } .toSeq)
           newReq = req.withHeaders(knlHeaders ++ req.headers)
-          resp <- poll(client.run(req)).guaranteeCase{
+          resp <- poll(client.run(newReq)).guaranteeCase{
             case Outcome.Succeeded(fa) => 
               Resource.eval(span.put("exit.case" -> "succeeded")) >> 
               fa.flatMap(resp => 
