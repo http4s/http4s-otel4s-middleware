@@ -55,7 +55,7 @@ object OTHttpTags {
         .groupBy(r => (r.name))
         .toList
         .map{
-          case (name, list) => ("http." ++ messageType ++ ".header.string." ++ name.toString.replace("-", "_"), list.map(_.value).mkString(", "))
+          case (name, list) => ("http." ++ messageType ++ ".header.string." ++ name.toString.toLowerCase.replace("-", "_"), list.map(_.value).mkString(", "))
         }.map{ case (name, s) => name -> TraceValue.stringToTraceValue(s)} // We add a string as a prefix, because the otel standard is an array so 
           // that way we don't have bad values in the canonical space we'll want to use when we can.
     }
