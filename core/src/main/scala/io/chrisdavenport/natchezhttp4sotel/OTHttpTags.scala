@@ -110,6 +110,7 @@ object OTHttpTags {
     )
   }
 
+  // https://github.com/open-telemetry/opentelemetry-specification/blob/a50def370ef444029a12ea637769229768daeaf8/specification/trace/semantic_conventions/exceptions.md
   object Errors {
     def error(e: Throwable): List[(String, TraceValue)] = {
       val error = ("error", TraceValue.boolToTraceValue(true)).some
