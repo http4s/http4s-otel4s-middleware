@@ -113,9 +113,9 @@ object OTHttpTags {
   object Errors {
     def error(e: Throwable): List[(String, TraceValue)] = {
       val error = ("error", TraceValue.boolToTraceValue(true)).some
-      val message: Option[(String, TraceValue)] = Option(e.getMessage()).map(m => "error.message" -> m)
-      val className: Option[(String, TraceValue)] = Option(e.getClass()).flatMap(c => Option(c.getName())).map(c => "error.class" -> c)
-      val stacktrace = ("error.stacktrace" -> TraceValue.stringToTraceValue(printStackTrace(e))).some
+      val message: Option[(String, TraceValue)] = Option(e.getMessage()).map(m => "exception.message" -> m)
+      val className: Option[(String, TraceValue)] = Option(e.getClass()).flatMap(c => Option(c.getName())).map(c => "exception.type" -> c)
+      val stacktrace = ("exception.stacktrace" -> TraceValue.stringToTraceValue(printStackTrace(e))).some
       List(error, message, className, stacktrace).flatten // List[Option[A]] => List[A] using internal speedery
     }
   }
