@@ -45,7 +45,8 @@ object ServerMiddleware {
       isKernelHeader: CIString => Boolean = name => !ExcludedHeaders.contains(name),
       reqHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
       respHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
-      routeClassifier: Request[F] => Option[String] = {(_: Request[F]) => None}
+      routeClassifier: Request[F] => Option[String] = {(_: Request[F]) => None},
+      serverSpanName: Request[F] => String = {(req: Request[F]) => s"Http Server - ${req.method}"}
     )(
       f: Trace[F] => G[Http[G, F]]
     ): Http[G, F] = cats.data.Kleisli{(req: Request[F]) => 
@@ -58,7 +59,7 @@ object ServerMiddleware {
       val kernel = Kernel(kernelHeaders)
 
       MonadCancelThrow[G].uncancelable(poll => 
-        ep.continueOrElseRoot(req.uri.path.toString, kernel).mapK(fk).use{span => 
+        ep.continueOrElseRoot(serverSpanName(req), kernel).mapK(fk).use{span => 
           val init = request(req, reqHeaders, routeClassifier)
           fk(span.put(init:_*)) >>
           fk(GenFiberLocal[F].local(span)).map(fromFiberLocal(_))
@@ -88,6 +89,7 @@ object ServerMiddleware {
 
   def request[F[_]](request: Request[F], headers: Set[CIString], routeClassifier: Request[F] => Option[String]): List[(String, TraceValue)] = {
     val builder = new ListBuffer[(String, TraceValue)]()
+    builder += OTHttpTags.Common.kind("server")
     builder += OTHttpTags.Common.method(request.method)
     builder += OTHttpTags.Common.url(request.uri)
     builder += OTHttpTags.Common.target(request.uri)

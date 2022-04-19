@@ -16,14 +16,15 @@ object ClientMiddleware {
   def trace[F[_]: natchez.Trace: MonadCancelThrow](
     ep: EntryPoint[F], // This is to escape from F Trace to Resource[F, *] timing. Which is critical
     reqHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
-    respHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded
+    respHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
+    clientSpanName: Request[F] => String = {(req: Request[F]) => s"Http Client - ${req.method}"}
   )(client: Client[F]): Client[F] = 
     Client[F]{(req: Request[F]) => 
       val base = request(req, reqHeaders)
       MonadCancelThrow[Resource[F, *]].uncancelable(poll => 
         for {
           baggage <- Resource.eval(Trace[F].kernel)
-          span <- ep.continueOrElseRoot(req.uri.path.toString, baggage)
+          span <- ep.continueOrElseRoot(clientSpanName(req), baggage)
           _ <- Resource.eval(span.put(base:_*))
           knl <- Resource.eval(span.kernel)
           knlHeaders = Headers(knl.toHeaders.map { case (k, v) => Header.Raw(CIString(k), v) } .toSeq)
@@ -62,6 +63,7 @@ object ClientMiddleware {
 
   def request[F[_]](request: Request[F], headers: Set[CIString]): List[(String, TraceValue)] = {
     val builder = new ListBuffer[(String, TraceValue)]()
+    builder += OTHttpTags.Common.kind("client")
     builder += OTHttpTags.Common.method(request.method)
     builder += OTHttpTags.Common.url(request.uri)
     builder += OTHttpTags.Common.target(request.uri)
