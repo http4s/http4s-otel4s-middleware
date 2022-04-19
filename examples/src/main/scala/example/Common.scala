@@ -24,9 +24,7 @@ trait Common {
     }
 
   // Our routes, in abstract F with a Trace constraint.
-  def routes[F[_]: Trace](client: Client[F])(
-    implicit ev: MonadError[F, Throwable]
-  ): HttpRoutes[F] = {
+  def routes[F[_]: Trace: Concurrent](client: Client[F]): HttpRoutes[F] = {
     object dsl extends Http4sDsl[F]; import dsl._ // bleh
     HttpRoutes.of[F] {
 
@@ -36,9 +34,12 @@ trait Common {
           res <- Ok(str)
         } yield res
       case GET -> Root / "client" / "hello" / name => 
-        client.toHttpApp.run(Request(Method.GET, uri"http://localhost:8080/hello" / name))
+        client.expect[String](Request[F](Method.GET, uri"http://localhost:8080/hello" / name))
+          .flatMap(Ok(_))
+      case GET -> Root / "client" / "proxy" / "hello" / name => 
+        client.toHttpApp.run(Request[F](Method.GET, uri"http://localhost:8080/client/hello" / name))
       case GET -> Root / "fail" =>
-        ev.raiseError(new RuntimeException("💥 Boom!"))
+        Concurrent[F].raiseError(new RuntimeException("💥 Boom!"))
 
     }
   }

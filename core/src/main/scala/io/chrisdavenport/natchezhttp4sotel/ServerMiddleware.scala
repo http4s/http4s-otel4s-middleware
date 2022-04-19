@@ -21,17 +21,29 @@ object ServerMiddleware {
     ep: EntryPoint[F], 
     isKernelHeader: CIString => Boolean = name => !ExcludedHeaders.contains(name),
     reqHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
-    respHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded
+    respHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
+    routeClassifier: Request[F] => Option[String] = {(_: Request[F]) => None},
+    serverSpanName: Request[F] => String = {(req: Request[F]) => s"Http Server - ${req.method}"},
+    additionalRequestTags: Request[F] => Seq[(String, TraceValue)] = {(_: Request[F]) => Seq()},
+    additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()},
   )(f: Trace[F] => HttpApp[F]): HttpApp[F] = 
-    MakeSureYouKnowWhatYouAreDoing.tracedF(ep, FunctionK.id[F], isKernelHeader, reqHeaders, respHeaders)(f.andThen(_.pure[F]))
+    MakeSureYouKnowWhatYouAreDoing.tracedF(ep, FunctionK.id[F], isKernelHeader, reqHeaders, respHeaders, 
+      routeClassifier, serverSpanName, additionalRequestTags, additionalResponseTags
+    )(f.andThen(_.pure[F]))
 
   def httpRoutes[F[_]: MonadCancelThrow: GenFiberLocal](
     ep: EntryPoint[F], 
     isKernelHeader: CIString => Boolean = name => !ExcludedHeaders.contains(name),
     reqHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
-    respHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded
+    respHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
+    routeClassifier: Request[F] => Option[String] = {(_: Request[F]) => None},
+    serverSpanName: Request[F] => String = {(req: Request[F]) => s"Http Server - ${req.method}"},
+    additionalRequestTags: Request[F] => Seq[(String, TraceValue)] = {(_: Request[F]) => Seq()},
+    additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()},
   )(f: Trace[F] => HttpRoutes[F]): HttpRoutes[F] = 
-    MakeSureYouKnowWhatYouAreDoing.tracedF(ep, OptionT.liftK, isKernelHeader, reqHeaders, respHeaders)(f.andThen(_.pure[OptionT[F, *]]))
+    MakeSureYouKnowWhatYouAreDoing.tracedF(ep, OptionT.liftK, isKernelHeader, reqHeaders, respHeaders,
+      routeClassifier, serverSpanName, additionalRequestTags, additionalResponseTags
+    )(f.andThen(_.pure[OptionT[F, *]]))
 
   object MakeSureYouKnowWhatYouAreDoing {
     // This effect to generate routes will run on every request.
@@ -45,7 +57,10 @@ object ServerMiddleware {
       isKernelHeader: CIString => Boolean = name => !ExcludedHeaders.contains(name),
       reqHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
       respHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
-      routeClassifier: Request[F] => Option[String] = {(_: Request[F]) => None}
+      routeClassifier: Request[F] => Option[String] = {(_: Request[F]) => None},
+      serverSpanName: Request[F] => String = {(req: Request[F]) => s"Http Server - ${req.method}"},
+      additionalRequestTags: Request[F] => Seq[(String, TraceValue)] = {(_: Request[F]) => Seq()},
+      additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()},
     )(
       f: Trace[F] => G[Http[G, F]]
     ): Http[G, F] = cats.data.Kleisli{(req: Request[F]) => 
@@ -58,8 +73,8 @@ object ServerMiddleware {
       val kernel = Kernel(kernelHeaders)
 
       MonadCancelThrow[G].uncancelable(poll => 
-        ep.continueOrElseRoot(req.uri.path.toString, kernel).mapK(fk).use{span => 
-          val init = request(req, reqHeaders, routeClassifier)
+        ep.continueOrElseRoot(serverSpanName(req), kernel).mapK(fk).use{span => 
+          val init = request(req, reqHeaders, routeClassifier) ++ additionalRequestTags(req)
           fk(span.put(init:_*)) >>
           fk(GenFiberLocal[F].local(span)).map(fromFiberLocal(_))
             .flatMap( trace =>
@@ -67,7 +82,7 @@ object ServerMiddleware {
                 case Outcome.Succeeded(fa) => 
                   fk(span.put("exit.case" -> "succeeded")) >>
                   fa.flatMap{resp => 
-                    val out = response(resp, respHeaders)
+                    val out = response(resp, respHeaders) ++ additionalResponseTags(resp)
                     fk(span.put(out:_*))
                   }
                 case Outcome.Errored(e) => 
@@ -88,6 +103,7 @@ object ServerMiddleware {
 
   def request[F[_]](request: Request[F], headers: Set[CIString], routeClassifier: Request[F] => Option[String]): List[(String, TraceValue)] = {
     val builder = new ListBuffer[(String, TraceValue)]()
+    builder += OTHttpTags.Common.kind("server")
     builder += OTHttpTags.Common.method(request.method)
     builder += OTHttpTags.Common.url(request.uri)
     builder += OTHttpTags.Common.target(request.uri)
