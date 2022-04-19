@@ -17,10 +17,12 @@ object ClientMiddleware {
     ep: EntryPoint[F], // This is to escape from F Trace to Resource[F, *] timing. Which is critical
     reqHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
     respHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded,
-    clientSpanName: Request[F] => String = {(req: Request[F]) => s"Http Client - ${req.method}"}
+    clientSpanName: Request[F] => String = {(req: Request[F]) => s"Http Client - ${req.method}"},
+    additionalRequestTags: Request[F] => Seq[(String, TraceValue)] = {(_: Request[F]) => Seq()},
+    additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()},
   )(client: Client[F]): Client[F] = 
     Client[F]{(req: Request[F]) => 
-      val base = request(req, reqHeaders)
+      val base = request(req, reqHeaders) ++ additionalRequestTags(req)
       MonadCancelThrow[Resource[F, *]].uncancelable(poll => 
         for {
           baggage <- Resource.eval(Trace[F].kernel)
@@ -34,15 +36,14 @@ object ClientMiddleware {
               Resource.eval(span.put("exit.case" -> "succeeded")) >> 
               fa.flatMap(resp => 
                 Resource.eval(
-                  span.put(response(resp, respHeaders):_*)
+                  span.put((response(resp, respHeaders) ++ additionalResponseTags(resp)):_*)
                 )
               )
             case Outcome.Errored(e) => 
               val exitCase: (String, TraceValue) = ("exit.case" -> TraceValue.stringToTraceValue("errored"))
               val error = OTHttpTags.Errors.error(e)
               Resource.eval(
-                span.put(exitCase) >>
-                span.put(error:_*)
+                span.put((exitCase :: error):_*)
               )
             case Outcome.Canceled() => 
               // Canceled isn't always an error, but it generally is for http

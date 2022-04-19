@@ -24,7 +24,7 @@ val catsV = "2.7.0"
 val catsEffectV = "3.3.11"
 val fs2V = "3.2.7"
 val http4sV = "0.23.7"
-val natchezV = "0.1.4"
+val natchezV = "0.1.6"
 val munitCatsEffectV = "1.0.7"
 
 val slf4jV    = "1.7.30"
