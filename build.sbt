@@ -23,11 +23,12 @@ ThisBuild / testFrameworks += new TestFramework("munit.Framework")
 val catsV = "2.7.0"
 val catsEffectV = "3.3.11"
 val fs2V = "3.2.7"
-val http4sV = "0.23.7"
+val http4sV = "0.23.11-473-e7e64cb-SNAPSHOT"
 val natchezV = "0.1.6"
 val munitCatsEffectV = "1.0.7"
 
 val slf4jV    = "1.7.30"
+
 
 // Projects
 lazy val `natchez-http4s-otel` = tlCrossRootProject
@@ -38,6 +39,8 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
   .in(file("core"))
   .settings(
     name := "natchez-http4s-otel",
+
+    resolvers += "Sonatype OSS Snapshots" at "https://s01.oss.sonatype.org/content/repositories/snapshots",
 
     libraryDependencies ++= Seq(
       "org.typelevel"               %%% "cats-core"                  % catsV,

@@ -9,6 +9,7 @@ import natchez._
 import scala.collection.mutable.ListBuffer
 import org.http4s.headers._
 import org.http4s.client._
+import org.http4s.client.middleware.Retry
 
 
 object ClientMiddleware {
@@ -92,6 +93,9 @@ object ClientMiddleware {
         OTHttpTags.Common.peerPort(sa.port)
       
     }
+    request.attributes.lookup(Retry.AttemptCountKey).foreach{count => 
+      builder += OTHttpTags.Common.retryCount(count)
+    }
     builder ++= 
       OTHttpTags.Headers.request(request.headers, headers)
     
@@ -108,6 +112,10 @@ object ClientMiddleware {
     }
     // Due to negotiation. Only the response knows what protocol was selected
     builder += OTHttpTags.Common.flavor(response.httpVersion)
+    response.attributes.lookup(Retry.AttemptCountKey).foreach{count => 
+      builder += OTHttpTags.Common.retryCount(count)
+    }
+
     builder ++= 
       OTHttpTags.Headers.response(response.headers, headers)
     
