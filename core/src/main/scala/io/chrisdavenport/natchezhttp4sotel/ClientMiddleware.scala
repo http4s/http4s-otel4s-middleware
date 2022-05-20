@@ -9,9 +9,12 @@ import natchez._
 import scala.collection.mutable.ListBuffer
 import org.http4s.headers._
 import org.http4s.client._
+import org.typelevel.vault.Key
 
 
 object ClientMiddleware {
+
+  val ExtraTagsKey: Key[List[(String, TraceValue)]] = Key.newKey[cats.effect.SyncIO, List[(String, TraceValue)]].unsafeRunSync()
 
   def trace[F[_]: natchez.Trace: MonadCancelThrow](
     ep: EntryPoint[F], // This is to escape from F Trace to Resource[F, *] timing. Which is critical
@@ -22,7 +25,7 @@ object ClientMiddleware {
     additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()},
   )(client: Client[F]): Client[F] = 
     Client[F]{(req: Request[F]) => 
-      val base = request(req, reqHeaders) ++ additionalRequestTags(req)
+      val base: List[(String, TraceValue)] = request(req, reqHeaders) ++ additionalRequestTags(req)
       MonadCancelThrow[Resource[F, *]].uncancelable(poll => 
         for {
           baggage <- Resource.eval(Trace[F].kernel)
@@ -94,7 +97,8 @@ object ClientMiddleware {
     }
     builder ++= 
       OTHttpTags.Headers.request(request.headers, headers)
-    
+
+    builder ++= request.attributes.lookup(ExtraTagsKey).toList.flatten
 
     builder.toList   
   }
@@ -110,7 +114,7 @@ object ClientMiddleware {
     builder += OTHttpTags.Common.flavor(response.httpVersion)
     builder ++= 
       OTHttpTags.Headers.response(response.headers, headers)
-    
+    builder ++= response.attributes.lookup(ExtraTagsKey).toList.flatten
     
     builder.toList
   }
