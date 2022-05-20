@@ -20,9 +20,10 @@ object ClientMiddleware {
     clientSpanName: Request[F] => String = {(req: Request[F]) => s"Http Client - ${req.method}"},
     additionalRequestTags: Request[F] => Seq[(String, TraceValue)] = {(_: Request[F]) => Seq()},
     additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()},
+    includeUrl: Request[F] => Boolean = {(_: Request[F]) => true}
   )(client: Client[F]): Client[F] = 
     Client[F]{(req: Request[F]) => 
-      val base = request(req, reqHeaders) ++ additionalRequestTags(req)
+      val base = request(req, reqHeaders, includeUrl) ++ additionalRequestTags(req)
       MonadCancelThrow[Resource[F, *]].uncancelable(poll => 
         for {
           baggage <- Resource.eval(Trace[F].kernel)
@@ -62,12 +63,14 @@ object ClientMiddleware {
       )
     }
 
-  def request[F[_]](request: Request[F], headers: Set[CIString]): List[(String, TraceValue)] = {
+  def request[F[_]](request: Request[F], headers: Set[CIString], includeUrl: Request[F] => Boolean): List[(String, TraceValue)] = {
     val builder = new ListBuffer[(String, TraceValue)]()
     builder += OTHttpTags.Common.kind("client")
     builder += OTHttpTags.Common.method(request.method)
-    builder += OTHttpTags.Common.url(request.uri)
-    builder += OTHttpTags.Common.target(request.uri)
+    if (includeUrl(request)) {
+      builder += OTHttpTags.Common.url(request.uri)
+      builder += OTHttpTags.Common.target(request.uri)
+    }
     val host = request.headers.get[Host].getOrElse{
       val key = RequestKey.fromRequest(request)
       Host(key.authority.host.value, key.authority.port)

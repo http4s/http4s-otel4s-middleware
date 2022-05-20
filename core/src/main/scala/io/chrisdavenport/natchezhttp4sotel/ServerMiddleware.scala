@@ -26,9 +26,10 @@ object ServerMiddleware {
     serverSpanName: Request[F] => String = {(req: Request[F]) => s"Http Server - ${req.method}"},
     additionalRequestTags: Request[F] => Seq[(String, TraceValue)] = {(_: Request[F]) => Seq()},
     additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()},
+    includeUrl: Request[F] => Boolean = {(_: Request[F]) => true}
   )(f: Trace[F] => HttpApp[F]): HttpApp[F] = 
     MakeSureYouKnowWhatYouAreDoing.tracedF(ep, FunctionK.id[F], isKernelHeader, reqHeaders, respHeaders, 
-      routeClassifier, serverSpanName, additionalRequestTags, additionalResponseTags
+      routeClassifier, serverSpanName, additionalRequestTags, additionalResponseTags, includeUrl
     )(f.andThen(_.pure[F]))
 
   def httpRoutes[F[_]: MonadCancelThrow: GenFiberLocal](
@@ -40,9 +41,10 @@ object ServerMiddleware {
     serverSpanName: Request[F] => String = {(req: Request[F]) => s"Http Server - ${req.method}"},
     additionalRequestTags: Request[F] => Seq[(String, TraceValue)] = {(_: Request[F]) => Seq()},
     additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()},
+    includeUrl: Request[F] => Boolean = {(_: Request[F]) => true}
   )(f: Trace[F] => HttpRoutes[F]): HttpRoutes[F] = 
     MakeSureYouKnowWhatYouAreDoing.tracedF(ep, OptionT.liftK, isKernelHeader, reqHeaders, respHeaders,
-      routeClassifier, serverSpanName, additionalRequestTags, additionalResponseTags
+      routeClassifier, serverSpanName, additionalRequestTags, additionalResponseTags, includeUrl
     )(f.andThen(_.pure[OptionT[F, *]]))
 
   object MakeSureYouKnowWhatYouAreDoing {
@@ -61,6 +63,7 @@ object ServerMiddleware {
       serverSpanName: Request[F] => String = {(req: Request[F]) => s"Http Server - ${req.method}"},
       additionalRequestTags: Request[F] => Seq[(String, TraceValue)] = {(_: Request[F]) => Seq()},
       additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()},
+      includeUrl: Request[F] => Boolean = {(_: Request[F]) => true}
     )(
       f: Trace[F] => G[Http[G, F]]
     ): Http[G, F] = cats.data.Kleisli{(req: Request[F]) => 
@@ -74,7 +77,7 @@ object ServerMiddleware {
 
       MonadCancelThrow[G].uncancelable(poll => 
         ep.continueOrElseRoot(serverSpanName(req), kernel).mapK(fk).use{span => 
-          val init = request(req, reqHeaders, routeClassifier) ++ additionalRequestTags(req)
+          val init = request(req, reqHeaders, routeClassifier, includeUrl) ++ additionalRequestTags(req)
           fk(span.put(init:_*)) >>
           fk(GenFiberLocal[F].local(span)).map(fromFiberLocal(_))
             .flatMap( trace =>
@@ -101,12 +104,14 @@ object ServerMiddleware {
     }
   }
 
-  def request[F[_]](request: Request[F], headers: Set[CIString], routeClassifier: Request[F] => Option[String]): List[(String, TraceValue)] = {
+  def request[F[_]](request: Request[F], headers: Set[CIString], routeClassifier: Request[F] => Option[String], includeUrl: Request[F] => Boolean): List[(String, TraceValue)] = {
     val builder = new ListBuffer[(String, TraceValue)]()
     builder += OTHttpTags.Common.kind("server")
     builder += OTHttpTags.Common.method(request.method)
-    builder += OTHttpTags.Common.url(request.uri)
-    builder += OTHttpTags.Common.target(request.uri)
+    if (includeUrl(request)) {
+      builder += OTHttpTags.Common.url(request.uri)
+      builder += OTHttpTags.Common.target(request.uri)
+    }
     val host = request.headers.get[Host].getOrElse{
       val key = RequestKey.fromRequest(request)
       Host(key.authority.host.value, key.authority.port)
