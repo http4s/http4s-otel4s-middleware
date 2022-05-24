@@ -40,8 +40,6 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
   .settings(
     name := "natchez-http4s-otel",
 
-    resolvers += "Sonatype OSS Snapshots" at "https://s01.oss.sonatype.org/content/repositories/snapshots",
-
     libraryDependencies ++= Seq(
       "org.typelevel"               %%% "cats-core"                  % catsV,
       "org.typelevel"               %%% "cats-effect"                % catsEffectV,
