@@ -1,3 +1,5 @@
+import com.typesafe.tools.mima.core._
+
 ThisBuild / tlBaseVersion := "0.2" // your current series x.y
 
 ThisBuild / organization := "io.chrisdavenport"
@@ -39,6 +41,10 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
   .in(file("core"))
   .settings(
     name := "natchez-http4s-otel",
+    mimaBinaryIssueFilters ++= Seq(
+      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.natchezhttp4sotel.ClientMiddleware.request"),
+      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.natchezhttp4sotel.ServerMiddleware.request")
+    ),
 
     libraryDependencies ++= Seq(
       "org.typelevel"               %%% "cats-core"                  % catsV,
