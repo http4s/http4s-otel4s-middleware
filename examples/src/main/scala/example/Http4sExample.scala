@@ -33,8 +33,8 @@ object Http4sExample extends IOApp with Common {
     for {
       iClient <- EmberClientBuilder.default[F].build
       ep <- entryPoint[F]
-      app = ServerMiddleware.httpApp(ep){implicit T: natchez.Trace[F] => 
-        val client = ClientMiddleware.trace(ep)(iClient)
+      app = ServerMiddleware.default(ep).buildHttpApp{implicit T: natchez.Trace[F] => 
+        val client = ClientMiddleware.default(ep).build(iClient)
         routes(client).orNotFound
       }
       sv <- EmberServerBuilder.default[F].withPort(port"8080").withHttpApp(app).build
