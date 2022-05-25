@@ -9,6 +9,7 @@ import natchez._
 import scala.collection.mutable.ListBuffer
 import org.http4s.headers._
 import org.http4s.client._
+import org.http4s.client.middleware.Retry
 
 
 object ClientMiddleware {
@@ -92,12 +93,17 @@ object ClientMiddleware {
         OTHttpTags.Common.peerPort(sa.port)
       
     }
+    retryCount(request.attributes).foreach{count => 
+      builder += OTHttpTags.Common.retryCount(count)
+    }
     builder ++= 
       OTHttpTags.Headers.request(request.headers, headers)
     
 
     builder.toList   
   }
+
+
 
   def response[F[_]](response: Response[F], headers: Set[CIString]): List[(String, TraceValue)] = {
     val builder = new ListBuffer[(String, TraceValue)]()
@@ -108,13 +114,20 @@ object ClientMiddleware {
     }
     // Due to negotiation. Only the response knows what protocol was selected
     builder += OTHttpTags.Common.flavor(response.httpVersion)
+    retryCount(response.attributes).foreach{count => 
+      builder += OTHttpTags.Common.retryCount(count)
+    }
+
     builder ++= 
       OTHttpTags.Headers.response(response.headers, headers)
-    
     
     builder.toList
   }
 
-
+  private def retryCount(vault: org.typelevel.vault.Vault): Option[Int] = {
+    // AttemptCountKey is 1,2,3,4 for the initial request,
+    // since we want to do retries. We substract by 1 to get 0,1,2,3.
+    vault.lookup(Retry.AttemptCountKey).map(i => i - 1)
+  }
 
 }
