@@ -12,11 +12,15 @@ import org.http4s.client._
 import org.typelevel.vault.Key
 import org.http4s.client.middleware.Retry
 
-
 object ClientMiddleware {
 
+  @deprecated("0.3.0", "Use default without entrypoint")
   def default[F[_]: natchez.Trace: MonadCancelThrow](ep: EntryPoint[F]): ClientMiddlewareBuilder[F] = {
-    new ClientMiddlewareBuilder[F](ep, Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
+    new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
+  }
+
+  def default[F[_]: natchez.Trace: MonadCancelThrow]: ClientMiddlewareBuilder[F] = {
+    new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
   }
 
   object Defaults {
@@ -29,7 +33,6 @@ object ClientMiddleware {
   }  
 
   final class ClientMiddlewareBuilder[F[_]: Trace: MonadCancelThrow] private[ClientMiddleware] (
-    private val ep: EntryPoint[F],
     private val reqHeaders: Set[CIString],
     private val respHeaders: Set[CIString],
     private val clientSpanName: Request[F] => String,
@@ -38,7 +41,6 @@ object ClientMiddleware {
     private val includeUrl: Request[F] => Boolean
   ){ self => 
     private def copy(
-      ep: EntryPoint[F] = self.ep,
       reqHeaders: Set[CIString] = self.reqHeaders,
       respHeaders: Set[CIString] = self.respHeaders,
       clientSpanName: Request[F] => String = self.clientSpanName,
@@ -46,7 +48,7 @@ object ClientMiddleware {
       additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = self.additionalResponseTags ,
       includeUrl: Request[F] => Boolean = self.includeUrl,
     ): ClientMiddlewareBuilder[F] = 
-      new ClientMiddlewareBuilder[F](ep, reqHeaders, respHeaders, clientSpanName, additionalRequestTags, additionalResponseTags, includeUrl)
+      new ClientMiddlewareBuilder[F](reqHeaders, respHeaders, clientSpanName, additionalRequestTags, additionalResponseTags, includeUrl)
 
     def withRequestHeaders(reqHeaders: Set[CIString]) = copy(reqHeaders = reqHeaders)
 
