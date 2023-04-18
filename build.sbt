@@ -63,7 +63,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
 
 
       "org.typelevel"               %%% "munit-cats-effect"        % munitCatsEffectV         % Test,
-
+      "org.tpolecat"                %%% "natchez-testkit"      % natchezV % Test,
     )
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},

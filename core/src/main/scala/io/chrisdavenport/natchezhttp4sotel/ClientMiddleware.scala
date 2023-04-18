@@ -30,7 +30,13 @@ object ClientMiddleware {
     def additionalRequestTags[F[_]]: Request[F] => Seq[(String, TraceValue)] = {(_: Request[F]) => Seq()}
     def additionalResponseTags[F[_]]: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()}
     def includeUrl[F[_]]: Request[F] => Boolean = {(_: Request[F]) => true}
-  }  
+  }
+
+  object Keys {
+    private val internalSpanKey = Key.newKey[cats.effect.SyncIO, Any].unsafeRunSync()
+
+    def spanKey[F[_]]: Key[F ~> F] = internalSpanKey.asInstanceOf[Key[F ~> F]]
+  }
 
   final class ClientMiddlewareBuilder[F[_]: Trace: MonadCancelThrow] private[ClientMiddleware] (
     private val reqHeaders: Set[CIString],
@@ -64,44 +70,44 @@ object ClientMiddleware {
     
     def withIncludeUrl(includeUrl: Request[F] => Boolean ) = copy(includeUrl = includeUrl)
 
-    def build: Client[F] => Client[F] = { (client: Client[F]) => 
+    def build: Client[F] => Client[F] = { (client: Client[F]) =>
       Client[F]{(req: Request[F]) => 
         val base = request(req, reqHeaders, includeUrl) ++ additionalRequestTags(req)
         MonadCancelThrow[Resource[F, *]].uncancelable(poll => 
           for {
             fk <- natchez.Trace[F].spanR(clientSpanName(req))
-            _ <- Resource.eval(Trace[F].put(base:_*))
-            knl <- Resource.eval(Trace[F].kernel)
+            _ <- Resource.eval(fk(Trace[F].put(base:_*)))
+            knl <- Resource.eval(fk(Trace[F].kernel))
             knlHeaders = Headers(knl.toHeaders.map { case (k, v) => Header.Raw(k, v) } .toSeq)
             newReq = req.withHeaders(knlHeaders ++ req.headers)
             resp <- poll(client.run(newReq)).guaranteeCase{
-              case Outcome.Succeeded(fa) => 
-                Resource.eval(Trace[F].put("exit.case" -> "succeeded")) >>
+              case Outcome.Succeeded(fa) =>
+                Resource.eval(fk(Trace[F].put("exit.case" -> "succeeded"))) >>
                 fa.flatMap(resp => 
                   Resource.eval(
-                    Trace[F].put((response(resp, respHeaders) ++ additionalResponseTags(resp)):_*)
+                    fk(Trace[F].put((response(resp, respHeaders) ++ additionalResponseTags(resp)):_*))
                   )
                 )
               case Outcome.Errored(e) => 
                 val exitCase: (String, TraceValue) = ("exit.case" -> TraceableValue[String].toTraceValue("errored"))
                 val error = OTHttpTags.Errors.error(e)
                 Resource.eval(
-                  Trace[F].put((exitCase :: error):_*)
+                  fk(Trace[F].put((exitCase :: error):_*))
                 )
               case Outcome.Canceled() => 
                 // Canceled isn't always an error, but it generally is for http
                 // TODO decide if this should add error, we do for the server side.
-                Resource.eval(Trace[F].put("exit.case" -> "canceled", "canceled" -> true))
+                Resource.eval(fk(Trace[F].put("exit.case" -> "canceled", "canceled" -> true)))
               
             }
             // Automatically handle client processing errors. Since this is after the response,
             // the error case will only get hit if the use block of the resulting resource happens,
             // which is the request processing stage.
             _ <- Resource.makeCase(Applicative[F].unit){
-              case (_, Resource.ExitCase.Errored(e)) => Trace[F].put(OTHttpTags.Errors.error(e):_*)
+              case (_, Resource.ExitCase.Errored(e)) => fk(Trace[F].put(OTHttpTags.Errors.error(e):_*))
               case (_, _) => Applicative[F].unit
             }
-          } yield resp
+          } yield resp.withAttribute(Keys.spanKey[F], fk)
         )
       }
     }
