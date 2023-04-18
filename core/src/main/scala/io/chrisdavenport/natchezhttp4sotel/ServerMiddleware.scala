@@ -82,7 +82,7 @@ object ServerMiddleware {
 
         val kernel = Kernel(kernelHeaders)
 
-        MonadCancelThrow[G].uncancelable(poll => 
+        MonadCancelThrow[G].uncancelable(poll =>
           ep.continueOrElseRoot(serverSpanName(req), kernel).mapK(fk).use{span =>
             val init = request(req, reqHeaders, routeClassifier, includeUrl) ++ additionalRequestTags(req)
             fk(span.put(init:_*)) >>
@@ -285,7 +285,7 @@ object ServerMiddleware {
               local.get.flatMap { old =>
                 local
                   .set(child)
-                  .bracket(_ => fa.onError(child.attachError(_)))(_ => local.set(old))
+                  .bracket(_ => fa.onError{ case e => child.attachError(e)})(_ => local.set(old))
               }
 
           }
