@@ -18,6 +18,9 @@ ThisBuild / tlSonatypeUseLegacyHost := true
 ThisBuild / crossScalaVersions := Seq("2.12.15", "2.13.8", "3.2.2")
 ThisBuild / scalaVersion := "3.2.2"
 
+ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"))
+ThisBuild / tlJdkRelease := Some(8)
+
 ThisBuild / testFrameworks += new TestFramework("munit.Framework")
 
 val catsV = "2.9.0"
