@@ -15,19 +15,18 @@ ThisBuild / tlCiReleaseBranches := Seq("main")
 // true by default, set to false to publish to s01.oss.sonatype.org
 ThisBuild / tlSonatypeUseLegacyHost := true
 
-val Scala213 = "2.13.8"
-
-ThisBuild / crossScalaVersions := Seq("2.12.15", Scala213, "3.1.2")
-ThisBuild / scalaVersion := Scala213
+ThisBuild / crossScalaVersions := Seq("2.12.15", "2.13.8", "3.2.2")
+ThisBuild / scalaVersion := "3.2.2"
 
 ThisBuild / testFrameworks += new TestFramework("munit.Framework")
 
-val catsV = "2.7.0"
-val catsEffectV = "3.3.11"
-val fs2V = "3.2.7"
-val http4sV = "0.23.12"
+val catsV = "2.9.0"
+val catsEffectV = "3.4.9"
+val fs2V = "3.6.1"
+val http4sV = "0.23.18"
+val fiberLocalV = "0.1.1"
 val natchezV = "0.1.6"
-val munitCatsEffectV = "1.0.7"
+val munitCatsEffectV = "2.0.0-M3"
 
 val slf4jV    = "1.7.30"
 
@@ -56,11 +55,11 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
       "org.http4s"                  %%% "http4s-server"        % http4sV,
       "org.http4s"                  %%% "http4s-client"        % http4sV,
 
-      "io.chrisdavenport"           %%% "fiberlocal"           % "0.1.1",
+      "io.chrisdavenport"           %%% "fiberlocal"           % fiberLocalV,
       "org.tpolecat"                %%% "natchez-core"         % natchezV,
 
 
-      "org.typelevel"               %%% "munit-cats-effect-3"        % munitCatsEffectV         % Test,
+      "org.typelevel"               %%% "munit-cats-effect"        % munitCatsEffectV         % Test,
 
     )
   ).jsSettings(
