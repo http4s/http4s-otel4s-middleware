@@ -3,6 +3,13 @@ package io.chrisdavenport.natchezhttp4sotel
 private[natchezhttp4sotel] object helpers {
   import java.io.{OutputStream, FilterOutputStream, ByteArrayOutputStream, PrintStream}
 
+
+  def listStackTrace(e: Throwable): List[String] = {
+    e.getStackTrace().toList.map(
+      element => element.toString()
+    )
+  }
+
   def printStackTrace(e: Throwable): String = {
     val baos = new ByteArrayOutputStream
     val fs   = new AnsiFilterStream(baos)

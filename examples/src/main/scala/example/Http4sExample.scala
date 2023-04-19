@@ -6,8 +6,13 @@ import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.server.Server
 import org.http4s.implicits._
 import io.chrisdavenport.natchezhttp4sotel._
-import io.chrisdavenport.fiberlocal.GenFiberLocal
 import com.comcast.ip4s._
+
+import io.opentelemetry.api.GlobalOpenTelemetry
+import org.typelevel.otel4s.Attribute
+import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.java.OtelJava
+import org.typelevel.otel4s.trace.Tracer
 
 /**
  * Start up Jaeger thus:
@@ -28,13 +33,22 @@ import com.comcast.ip4s._
 */
 object Http4sExample extends IOApp with Common {
 
+  def globalOtel4s[F[_]: Async: LiftIO]: Resource[F, Otel4s[F]] =
+    Resource
+      .eval(Sync[F].delay(GlobalOpenTelemetry.get))
+      .evalMap(OtelJava.forAsync[F])
+
+
+  def tracer[F[_]: Async: LiftIO]: Resource[F, Tracer[F]] =
+    globalOtel4s[F].evalMap(_.tracerProvider.tracer("Http4sExample").get)
+
+
   // Our main app resource
-  def server[F[_]: Async: GenFiberLocal]: Resource[F, Server] =
+  def server[F[_]: Async: Tracer]: Resource[F, Server] =
     for {
-      iClient <- EmberClientBuilder.default[F].build
-      ep <- entryPoint[F]
-      app = ServerMiddleware.default(ep).buildHttpApp{implicit T: natchez.Trace[F] => 
-        val client = ClientMiddleware.default.build(iClient)
+      client <- EmberClientBuilder.default[F].build
+        .map(ClientMiddleware.default.build)
+      app = ServerMiddleware.default[F].buildHttpApp{
         routes(client).orNotFound
       }
       sv <- EmberServerBuilder.default[F].withPort(port"8080").withHttpApp(app).build
@@ -42,6 +56,6 @@ object Http4sExample extends IOApp with Common {
 
   // Done!
   def run(args: List[String]): IO[ExitCode] =
-    server[IO].use(_ => IO.never)
+    tracer[IO].flatMap{implicit T: Tracer[IO] => server[IO]}.use(_ => IO.never)
 
 }

@@ -28,7 +28,10 @@ val catsEffectV = "3.4.9"
 val fs2V = "3.6.1"
 val http4sV = "0.23.18"
 val fiberLocalV = "0.1.2"
-val natchezV = "0.3.1"
+
+val openTelemetryV = "1.22.0"
+val otel4sV = "0.2.1"
+
 val munitCatsEffectV = "2.0.0-M3"
 
 val slf4jV    = "1.7.30"
@@ -38,7 +41,7 @@ val slf4jV    = "1.7.30"
 lazy val `natchez-http4s-otel` = tlCrossRootProject
   .aggregate(core, examples)
 
-lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+lazy val core = crossProject(JVMPlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
   .settings(
@@ -59,14 +62,11 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.http4s"                  %%% "http4s-client"        % http4sV,
 
       "io.chrisdavenport"           %%% "fiberlocal"           % fiberLocalV,
-      "org.tpolecat"                %%% "natchez-core"         % natchezV,
+      "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
 
 
       "org.typelevel"               %%% "munit-cats-effect"        % munitCatsEffectV         % Test,
-      "org.tpolecat"                %%% "natchez-testkit"      % natchezV % Test,
     )
-  ).jsSettings(
-    scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},
   )
 
 lazy val examples = project.in(file("examples"))
@@ -75,12 +75,16 @@ lazy val examples = project.in(file("examples"))
   .settings(
     scalacOptions        -= "-Xfatal-warnings",
     libraryDependencies ++= Seq(
-      "org.tpolecat" %% "natchez-jaeger"      % natchezV,
+      "org.typelevel"    %% "otel4s-java" % otel4sV,
+      "io.opentelemetry" % "opentelemetry-exporter-otlp" % openTelemetryV % Runtime,
+      "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure" % s"${openTelemetryV}-alpha" % Runtime,
       "org.http4s"   %% "http4s-dsl"          % http4sV,
       "org.http4s"   %% "http4s-ember-server" % http4sV,
       "org.http4s"   %% "http4s-ember-client" % http4sV,
       "org.slf4j"     % "slf4j-simple"        % slf4jV,
-    )
+    ),
+    run / fork := true,
+    javaOptions += "-Dotel.java.global-autoconfigure.enabled=true"
   )
 
 lazy val site = project.in(file("site"))
