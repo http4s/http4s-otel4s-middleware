@@ -29,6 +29,8 @@ class ClientMiddewareTests extends TraceSuite {
       def expectedHistory = List(
         (Lineage.Root, NatchezCommand.CreateRootSpan("root", Kernel(Map()), Span.Options.Defaults)),
         (Lineage.Root, NatchezCommand.CreateSpan("Http Client - GET", None, Span.Options.Defaults)),
+
+        // Outgoing Request
         (Lineage.Root / "Http Client - GET", NatchezCommand.Put(List(
           "span.kind" -> "client",
           "http.method" -> "GET",
@@ -37,22 +39,19 @@ class ClientMiddewareTests extends TraceSuite {
           "http.host" -> "localhost"
         ))),
         (Lineage.Root / "Http Client - GET", NatchezCommand.AskKernel(Kernel(Map.empty))),
+
+        // Talk to Remote
         (Lineage.Root / "Http Client - GET", NatchezCommand.Put(List("exit.case" -> "succeeded"))),
         (Lineage.Root / "Http Client - GET", NatchezCommand.Put(List(
           "http.status_code" -> 200,
           "http.flavor" -> "1.1"
         ))),
+        // Use Block
         (Lineage.Root / "Http Client - GET", NatchezCommand.Put(List("mainUse" -> "test"))),
         (Lineage.Root, NatchezCommand.Put(List("mainUseNoFk" -> "test"))),
 
+        // Cleaning up
         (Lineage.Root, NatchezCommand.ReleaseSpan("Http Client - GET")),
-
-        // (Lineage.Root, NatchezCommand.CreateSpan("spanR", None, Span.Options.Defaults)),
-        // (Lineage.Root, NatchezCommand.CreateSpan("span", None, Span.Options.Defaults)),
-        // (Lineage.Root / "spanR", NatchezCommand.Put(List("question" -> "ultimate"))),
-        // (Lineage.Root / "span", NatchezCommand.Put(List("answer" -> 42))),
-        // (Lineage.Root, NatchezCommand.ReleaseSpan("span")),
-        // (Lineage.Root, NatchezCommand.ReleaseSpan("spanR")),
         (Lineage.Root, NatchezCommand.ReleaseRootSpan("root"))
       )
     }
