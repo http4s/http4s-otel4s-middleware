@@ -20,11 +20,9 @@ class ClientMiddewareTests extends TraceSuite {
         tracedClient.run(Request[F](Method.GET)).use{ resp =>
           val fk = resp.attributes.lookup(ClientMiddleware.Keys.spanKey[F]).get
 
-          // fk(Trace[F].put("mainUse" -> "test")) >>
-          // Trace[F].span("Drain Body")(
-            // Trace[F].put("subSpan" -> "test") >>
-            resp.body.compile.drain
-          // )
+          fk(Trace[F].put("mainUse" -> "test")) >>
+          Trace[F].put("mainUseNoFk" -> "test") >>
+          resp.body.compile.drain
         }
       }
 
@@ -44,6 +42,9 @@ class ClientMiddewareTests extends TraceSuite {
           "http.status_code" -> 200,
           "http.flavor" -> "1.1"
         ))),
+        (Lineage.Root / "Http Client - GET", NatchezCommand.Put(List("mainUse" -> "test"))),
+        (Lineage.Root, NatchezCommand.Put(List("mainUseNoFk" -> "test"))),
+
         (Lineage.Root, NatchezCommand.ReleaseSpan("Http Client - GET")),
 
         // (Lineage.Root, NatchezCommand.CreateSpan("spanR", None, Span.Options.Defaults)),
