@@ -84,7 +84,9 @@ lazy val examples = project.in(file("examples"))
       "org.slf4j"     % "slf4j-simple"        % slf4jV,
     ),
     run / fork := true,
-    javaOptions += "-Dotel.java.global-autoconfigure.enabled=true"
+    javaOptions += "-Dotel.service.name=jaeger-example",
+    javaOptions += "-Dotel.metrics.exporter=none",
+    javaOptions += "-Dotel.java.global-autoconfigure.enabled=true",
   )
 
 lazy val site = project.in(file("site"))

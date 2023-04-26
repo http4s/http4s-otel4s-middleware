@@ -13,6 +13,7 @@ import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Otel4s
 import org.typelevel.otel4s.java.OtelJava
 import org.typelevel.otel4s.trace.Tracer
+import org.typelevel.otel4s.TextMapPropagator
 
 /**
  * Start up Jaeger thus:
@@ -39,12 +40,15 @@ object Http4sExample extends IOApp with Common {
       .evalMap(OtelJava.forAsync[F])
 
 
-  def tracer[F[_]: Async: LiftIO]: Resource[F, Tracer[F]] =
-    globalOtel4s[F].evalMap(_.tracerProvider.tracer("Http4sExample").get)
+  def tracer[F[_]](otel: Otel4s[F]): F[Tracer[F]] =
+    otel.tracerProvider.tracer("Http4sExample").get
+
+  def propagator[F[_]](otel: Otel4s[F]): TextMapPropagator[F] =
+    otel.propagators.textMapPropagator
 
 
   // Our main app resource
-  def server[F[_]: Async: Tracer]: Resource[F, Server] =
+  def server[F[_]: Async: Tracer: TextMapPropagator]: Resource[F, Server] =
     for {
       client <- EmberClientBuilder.default[F].build
         .map(ClientMiddleware.default.build)
@@ -56,6 +60,12 @@ object Http4sExample extends IOApp with Common {
 
   // Done!
   def run(args: List[String]): IO[ExitCode] =
-    tracer[IO].flatMap{implicit T: Tracer[IO] => server[IO]}.use(_ => IO.never)
+    globalOtel4s[IO].flatMap{
+      otel4s =>
+        Resource.eval(tracer(otel4s)).flatMap{ implicit T: Tracer[IO] =>
+          implicit val P: TextMapPropagator[IO] = propagator(otel4s)
+          server[IO]
+        }
+    }.use(_ => IO.never)
 
 }

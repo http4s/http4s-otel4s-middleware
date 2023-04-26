@@ -19,6 +19,7 @@ import org.typelevel.otel4s.trace.TracerProvider
 import org.typelevel.otel4s.trace.SpanContext
 import scodec.bits.ByteVector
 import org.typelevel.otel4s.trace.SamplingDecision
+import cats.effect.kernel.CancelScope.Uncancelable
 
 object ServerMiddleware {
 
@@ -70,69 +71,38 @@ object ServerMiddleware {
 
 
     final class MakeSureYouKnowWhatYouAreDoing{
-      def buildTracedF[G[_]: MonadCancelThrow](fk: F ~> G)(f: Http[G, F]): Http[G, F] = {
-        cats.data.Kleisli{(req: Request[F]) => 
-        val kernelHeaders = req.headers.headers
-          .collect {
-            case header if isKernelHeader(header.name) => header.name -> header.value
-          }
-          .toMap
 
-        val spanId = kernelHeaders.get(CIString("X-B3-TraceId")).flatMap( hexString=>
-          scodec.bits.ByteVector.fromHex(hexString).tupleRight(hexString)
-        )
-        val traceId = kernelHeaders.get(CIString("X-B3-TraceId")).flatMap(hexString =>
-            scodec.bits.ByteVector.fromHex(hexString).tupleRight(hexString)
-        )
-        val sampled = kernelHeaders.get(CIString("X-B3-Sampled")).flatMap{
-          case "1" => true.some
-          case "0" => false.some
-          case _  => None
-        }
 
-        val spanContext = (spanId, traceId, sampled).mapN{ case ((spanBV, spanHex), (traceBV, traceHex), sampledB) =>
-          new SpanContext{
+      def buildTracedF[G[_]: MonadCancelThrow: Tracer](fk: F ~> G)(f: Http[G, F]): Http[G, F] = {
+        cats.data.Kleisli{(req: Request[F]) =>
+          val init = request(req, reqHeaders, routeClassifier, includeUrl) ++ additionalRequestTags(req)
+          MonadCancelThrow[G].uncancelable( poll =>
+            Tracer[G].joinOrRoot(req.headers){
+              Tracer[G].span(serverSpanName(req), init:_*).use{span =>
+                poll(f.run(req))
+                  .guaranteeCase{
+                    case Outcome.Succeeded(fa) =>
+                      span.addAttribute(Attribute("exit.case","succeeded")) >>
+                      fa.flatMap{resp =>
+                        val out = response(resp, respHeaders) ++ additionalResponseTags(resp)
+                        span.addAttributes(out:_*)
+                      }
+                    case Outcome.Errored(e) =>
+                      span.addAttribute(Attribute("exit.case", "errored")) >>
+                      span.addAttributes(OTHttpTags.Errors.error(e):_*)
+                    case Outcome.Canceled() =>
+                      span.addAttributes(
+                        Attribute("exit.case", "canceled"),
+                        Attribute("canceled", true),
+                        Attribute("error", true) // A cancelled http is an error for the server. The connection got cut for some reason.
+                      )
+                  }
 
-            def traceId: ByteVector = traceBV
-
-            def traceIdHex: String = traceHex
-            def spanId: ByteVector = spanBV
-            def spanIdHex: String = spanHex
-
-            def samplingDecision: SamplingDecision = SamplingDecision.fromBoolean(sampledB)
-            def isValid: Boolean = true
-            def isRemote: Boolean = true
+              }
+            }(helpers.textMapGetter)
+          )
         }
       }
-
-        MonadCancelThrow[G].uncancelable{poll =>
-
-          val init = request(req, reqHeaders, routeClassifier, includeUrl) ++ additionalRequestTags(req)
-          val base = Tracer[F].spanBuilder(serverSpanName(req))
-          Resource.make(fk(spanContext.fold(base)(base.withParent(_)).addAttributes(init:_*).build.startUnmanaged))(s =>fk(s.`end`)).use{
-            span =>
-              poll(f.run(req)).guaranteeCase{
-                case _ => Applicative[G].unit
-                  // case Outcome.Succeeded(fa) =>
-                  //   fk(.put("exit.case" -> "succeeded")) >>
-                  //   fa.flatMap{resp =>
-                  //     val out = response(resp, respHeaders) ++ additionalResponseTags(resp)
-                  //     fk(span.put(out:_*))
-                  //   }
-                  // case Outcome.Errored(e) =>
-                  //   fk(span.put("exit.case" -> "errored")) >>
-                  //   fk(span.put(OTHttpTags.Errors.error(e):_*))
-                  // case Outcome.Canceled() =>
-                  //   fk(span.put(
-                  //     "exit.case" -> "canceled",
-                  //     "canceled" -> true,
-                  //     "error" -> true // A cancelled http is an error for the server. The connection got cut for some reason.
-                  //   ))
-                }
-            }
-            }
-          }
-        }
     }
 
     def MakeSureYouKnowWhatYouAreDoing = new MakeSureYouKnowWhatYouAreDoing()
@@ -140,8 +110,8 @@ object ServerMiddleware {
     def buildHttpApp(f: HttpApp[F]): HttpApp[F] =
       MakeSureYouKnowWhatYouAreDoing.buildTracedF(FunctionK.id)(f)
 
-    def buildHttpRoutes(f: HttpRoutes[F]): HttpRoutes[F] =
-      MakeSureYouKnowWhatYouAreDoing.buildTracedF(OptionT.liftK)(f)
+    // def buildHttpRoutes(f: HttpRoutes[F]): HttpRoutes[F] =
+    //   MakeSureYouKnowWhatYouAreDoing.buildTracedF(OptionT.liftK)(f)
 
   }
 

@@ -1,6 +1,53 @@
 package io.chrisdavenport.natchezhttp4sotel
 
+import org.typelevel.otel4s.trace.TracerProvider
+import org.typelevel.otel4s.TextMapGetter
+
 private[natchezhttp4sotel] object helpers {
+
+  implicit val textMapGetter: TextMapGetter[org.http4s.Headers] = new TextMapGetter[org.http4s.Headers] {
+
+    def get(carrier: org.http4s.Headers, key: String): Option[String] =
+      carrier.get(org.typelevel.ci.CIString(key)).map(_.head.value)
+    def keys(carrier: org.http4s.Headers): List[String] = carrier.headers.map(_.name.toString)
+  }
+
+
+  import org.typelevel.otel4s.trace.Tracer
+  import cats.data.OptionT
+
+  def liftImplicit[F[_]](tracer: Tracer[F]): Tracer[OptionT[F, *]] = new Tracer[OptionT[F, *]]{
+    /** As seen from class $anon, the missing signatures are as follows.
+    *  For convenience, these are usable as stub implementations.
+    */
+    def childScope[A]
+    (parent: org.typelevel.otel4s.trace.SpanContext)
+      (fa: cats.data.OptionT[F, A]): cats.data.OptionT[F, A] = ???
+    def currentSpanContext:
+    cats.data.OptionT[F, Option[org.typelevel.otel4s.trace.SpanContext]] = ???
+    def joinOrRoot[A, C]
+    (carrier: C)
+      (fa: cats.data.OptionT[F, A])
+        (implicit evidence$1: org.typelevel.otel4s.TextMapGetter[C]):
+          cats.data.OptionT[F, A] = ???
+    override def meta: org.typelevel.otel4s.trace.Tracer.Meta[cats.data.OptionT[F, *]] = ???
+    def noopScope[A](fa: cats.data.OptionT[F, A]): cats.data.OptionT[F, A] = ???
+    def rootScope[A](fa: cats.data.OptionT[F, A]): cats.data.OptionT[F, A] = ???
+    override def spanBuilder(name: String):org.typelevel.otel4s.trace.SpanBuilder.Aux[cats.data.OptionT[F, *],
+        org.typelevel.otel4s.trace.Span[cats.data.OptionT[F, *]]
+      ] = ???
+  }
+
+  def provider[F[_]](t: TracerProvider[F]): TracerProvider[OptionT[F, *]] = new TracerProvider[OptionT[F, *]] {
+    def tracer(name: String): org.typelevel.otel4s.trace.TracerBuilder[cats.data.OptionT[F,*]] = ???
+  }
+
+
+
+
+
+
+
   import java.io.{OutputStream, FilterOutputStream, ByteArrayOutputStream, PrintStream}
 
 

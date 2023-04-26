@@ -13,11 +13,12 @@ import org.http4s.headers._
 import org.http4s.client._
 import org.typelevel.vault.Key
 import org.http4s.client.middleware.Retry
+import org.typelevel.otel4s.{TextMapPropagator, TextMapSetter}
 
 object ClientMiddleware {
 
 
-  def default[F[_]: Tracer: MonadCancelThrow]: ClientMiddlewareBuilder[F] = {
+  def default[F[_]: Tracer: TextMapPropagator: MonadCancelThrow]: ClientMiddlewareBuilder[F] = {
     new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
   }
 
@@ -30,7 +31,7 @@ object ClientMiddleware {
     def includeUrl[F[_]]: Request[F] => Boolean = {(_: Request[F]) => true}
   }
 
-  final class ClientMiddlewareBuilder[F[_]: Tracer: MonadCancelThrow] private[ClientMiddleware] (
+  final class ClientMiddlewareBuilder[F[_]: Tracer: TextMapPropagator: MonadCancelThrow] private[ClientMiddleware] (
     private val reqHeaders: Set[CIString],
     private val respHeaders: Set[CIString],
     private val clientSpanName: Request[F] => String,
@@ -63,24 +64,18 @@ object ClientMiddleware {
     def withIncludeUrl(includeUrl: Request[F] => Boolean ) = copy(includeUrl = includeUrl)
 
     def build: Client[F] => Client[F] = { (client: Client[F]) =>
-      Client[F]{(req: Request[F]) => 
+      Client[F]{(req: Request[F]) => // Resource[F, Response[F]]
+
         val base = request(req, reqHeaders, includeUrl) ++ additionalRequestTags(req)
         MonadCancelThrow[Resource[F, *]].uncancelable{poll =>
 
             for {
-              // ctx <-
+              // How to span Resource more effectively
               span <- Resource.make(Tracer[F].span(clientSpanName(req)).startUnmanaged)(_.`end`)
               _ <- Resource.eval(span.addAttributes(base:_*))
               ctx = span.context
-
-              knlHeaders = {
-                Headers(
-                  "X-B3-TraceId" -> ctx.traceIdHex,
-                  "X-B3-ParentSpanId" -> "", // TODO how to get parenSpanId
-                  "X-B3-SpanId" -> ctx.spanIdHex,
-                  "X-B3-Sampled" -> { if (ctx.samplingDecision.isSampled) "1" else "0" }
-                )
-              }
+              vault = ctx.storeInContext(org.typelevel.vault.Vault.empty)
+              knlHeaders <- Resource.eval(injectMyDearGod(vault))
 
               newReq = req.withHeaders(knlHeaders ++ req.headers)
               resp <- poll(client.run(newReq)).guaranteeCase{
@@ -114,6 +109,17 @@ object ClientMiddleware {
         }
       }
     }
+  }
+
+  private def injectMyDearGod[F[_]: TextMapPropagator: Monad](vault: org.typelevel.vault.Vault): F[Headers] = {
+    import scala.collection.mutable.ListBuffer
+    var myHeaders = collection.mutable.ListBuffer[Header.Raw]()
+    val mapSetter = new TextMapSetter[ListBuffer[Header.Raw]] {
+      def unsafeSet(carrier: ListBuffer[Header.Raw], key: String, value: String) =
+        carrier.addOne(Header.Raw(CIString(key), value))
+    }
+    TextMapPropagator[F].inject(vault, myHeaders)(mapSetter) >>
+    Headers(myHeaders.toList.map(Header.ToRaw.rawToRaw(_)):_*).pure[F]
   }
 
   val ExtraTagsKey: Key[List[Attribute[_]]] = Key.newKey[cats.effect.SyncIO, List[Attribute[_]]].unsafeRunSync()
