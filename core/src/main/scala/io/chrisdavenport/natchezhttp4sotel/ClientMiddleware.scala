@@ -3,6 +3,7 @@ package io.chrisdavenport.natchezhttp4sotel
 import cats._
 import cats.syntax.all._
 import cats.effect.kernel._
+import cats.effect.syntax.all._
 import org.http4s._
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
@@ -13,13 +14,14 @@ import org.http4s.headers._
 import org.http4s.client._
 import org.typelevel.vault.Key
 import org.http4s.client.middleware.Retry
+import org.typelevel.otel4s.trace.Span
 import org.typelevel.otel4s.{TextMapPropagator, TextMapSetter}
 import org.typelevel.vault.Vault
 
 object ClientMiddleware {
 
 
-  def default[F[_]: Tracer: TextMapPropagator: MonadCancelThrow](getContext: F[Vault]): ClientMiddlewareBuilder[F] = {
+  def default[F[_]: Tracer: TextMapPropagator: Concurrent](getContext: F[Vault]): ClientMiddlewareBuilder[F] = {
     new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl, getContext)
   }
 
@@ -32,7 +34,7 @@ object ClientMiddleware {
     def includeUrl[F[_]]: Request[F] => Boolean = {(_: Request[F]) => true}
   }
 
-  final class ClientMiddlewareBuilder[F[_]: Tracer: TextMapPropagator: MonadCancelThrow] private[ClientMiddleware] (
+  final class ClientMiddlewareBuilder[F[_]: Tracer: TextMapPropagator: Concurrent] private[ClientMiddleware] (
     private val reqHeaders: Set[CIString],
     private val respHeaders: Set[CIString],
     private val clientSpanName: Request[F] => String,
@@ -74,13 +76,21 @@ object ClientMiddleware {
 
             for {
               // How to span Resource more effectively
-              span <- Resource.make(Tracer[F].span(clientSpanName(req)).startUnmanaged)(_.`end`)
+              clientContext <- Resource.eval(Deferred[F, (Vault, Span[F])])
+              ended <- Resource.eval(Deferred[F, Unit])
+
+              _ <- {
+                Tracer[F].span(clientSpanName(req)).use{span =>
+                  getVault.flatMap{ vault =>
+                    clientContext.complete(vault -> span)
+                  } >> ended.get
+                }
+              }.background
+              t <- Resource.make(clientContext.get)(_ => ended.complete(()).void)
+              vault = t._1
+              span = t._2
               _ <- Resource.eval(span.addAttributes(base:_*))
-              vault <- Resource.eval(getVault) // Doesn't see my span here for some reason...
-
               knlHeaders <- Resource.eval(injectMyDearGod(vault))
-              _ = println(knlHeaders)
-
               newReq = req.withHeaders(knlHeaders ++ req.headers)
               resp <- poll(client.run(newReq)).guaranteeCase{
                 case Outcome.Succeeded(fa) =>
