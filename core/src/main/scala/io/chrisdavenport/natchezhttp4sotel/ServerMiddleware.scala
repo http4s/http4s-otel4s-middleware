@@ -24,7 +24,7 @@ import cats.effect.kernel.CancelScope.Uncancelable
 object ServerMiddleware {
 
   def default[F[_]: Tracer: MonadCancelThrow]: ServerMiddlewareBuilder[F] =
-    new ServerMiddlewareBuilder[F](Defaults.isKernelHeader, Defaults.reqHeaders, Defaults.respHeaders, Defaults.routeClassifier, Defaults.serverSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl, Function.const(false))
+    new ServerMiddlewareBuilder[F](Defaults.isKernelHeader, Defaults.reqHeaders, Defaults.respHeaders, Defaults.routeClassifier, Defaults.serverSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl, Defaults.doNotTrace)
 
   object Defaults {
     val isKernelHeader: CIString => Boolean = name => !ExcludedHeaders.contains(name)
@@ -35,6 +35,7 @@ object ServerMiddleware {
     def additionalRequestTags[F[_]]: Request[F] => Seq[Attribute[_]] = {(_: Request[F]) => Seq()}
     def additionalResponseTags[F[_]]: Response[F] => Seq[Attribute[_]] = {(_: Response[F]) => Seq()}
     def includeUrl[F[_]]: Request[F] => Boolean = {(_: Request[F]) => true}
+    def doNotTrace: RequestPrelude => Boolean = {(_: RequestPrelude) => false}
   }
 
   final class ServerMiddlewareBuilder[F[_]: Tracer: MonadCancelThrow] private[ServerMiddleware] (
