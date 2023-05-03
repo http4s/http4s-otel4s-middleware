@@ -38,31 +38,13 @@ import cats.mtl.Local
 */
 object Http4sExample extends IOApp with Common {
 
-  private def localForIoLocal[F[_]: MonadCancelThrow: LiftIO, E](
-      ioLocal: IOLocal[E]
-  ): Local[F, E] =
-    new Local[F, E] {
-      def applicative =
-        Applicative[F]
-      def ask[E2 >: E] =
-        Functor[F].widen[E, E2](ioLocal.get.to[F])
-      def local[A](fa: F[A])(f: E => E): F[A] =
-        MonadCancelThrow[F].bracket(ioLocal.modify(e => (f(e), e)).to[F])(_ =>
-          fa
-        )(ioLocal.set(_).to[F])
-    }
-
-  def globalOtel4s[F[_]: Async: LiftIO]: Resource[F, (Otel4s[F], Local[F, Vault])] =
-    Resource
-      .eval(Sync[F].delay(GlobalOpenTelemetry.get))
-      .evalMap{ jOtel =>
-        LiftIO[F].liftIO(IOLocal(Vault.empty))
-          .map { (ioLocal: IOLocal[Vault]) =>
-            val local = localForIoLocal[F, Vault](ioLocal)
-            OtelJava.local[F](jOtel)(Async[F], local) -> local
-          }
+  def globalOtel4s[F[_]: Async: LiftIO]: F[(Otel4s[F], Local[F, Vault])] =
+    Sync[F].delay(GlobalOpenTelemetry.get)
+      .flatMap{ jOtel =>
+        ExternalHelpers.localVault.map( local =>
+          OtelJava.local[F](jOtel)(Async[F], local) -> local
+        )
       }
-
 
   def tracer[F[_]](otel: Otel4s[F]): F[Tracer[F]] =
     otel.tracerProvider.tracer("Http4sExample").get
@@ -84,7 +66,7 @@ object Http4sExample extends IOApp with Common {
 
   // Done!
   def run(args: List[String]): IO[ExitCode] =
-    globalOtel4s[IO].flatMap{
+    Resource.eval(globalOtel4s[IO]).flatMap{
       case (otel4s, local) =>
         implicit val L: Local[IO, Vault] = local
         Resource.eval(tracer(otel4s)).flatMap{ implicit T: Tracer[IO] =>

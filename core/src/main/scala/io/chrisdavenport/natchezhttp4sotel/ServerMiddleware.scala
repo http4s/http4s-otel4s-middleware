@@ -24,7 +24,7 @@ import cats.effect.kernel.CancelScope.Uncancelable
 object ServerMiddleware {
 
   def default[F[_]: Tracer: MonadCancelThrow]: ServerMiddlewareBuilder[F] =
-    new ServerMiddlewareBuilder[F](Defaults.isKernelHeader, Defaults.reqHeaders, Defaults.respHeaders, Defaults.routeClassifier, Defaults.serverSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
+    new ServerMiddlewareBuilder[F](Defaults.isKernelHeader, Defaults.reqHeaders, Defaults.respHeaders, Defaults.routeClassifier, Defaults.serverSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl, Function.const(false))
 
   object Defaults {
     val isKernelHeader: CIString => Boolean = name => !ExcludedHeaders.contains(name)
@@ -46,7 +46,8 @@ object ServerMiddleware {
     additionalRequestTags: Request[F] => Seq[Attribute[_]],
     additionalResponseTags: Response[F] => Seq[Attribute[_]],
     includeUrl: Request[F] => Boolean,
-  ){ self => 
+    doNotTrace: RequestPrelude => Boolean,
+  ){ self =>
 
     private def copy(
       isKernelHeader: CIString => Boolean = self.isKernelHeader,
@@ -57,8 +58,9 @@ object ServerMiddleware {
       additionalRequestTags: Request[F] => Seq[Attribute[_]] = self.additionalRequestTags,
       additionalResponseTags: Response[F] => Seq[Attribute[_]] = self.additionalResponseTags,
       includeUrl: Request[F] => Boolean = self.includeUrl,
-    ): ServerMiddlewareBuilder[F] = 
-      new ServerMiddlewareBuilder[F](isKernelHeader, reqHeaders, respHeaders, routeClassifier, serverSpanName, additionalRequestTags, additionalResponseTags, includeUrl)
+      doNotTrace: RequestPrelude => Boolean = self.doNotTrace,
+    ): ServerMiddlewareBuilder[F] =
+      new ServerMiddlewareBuilder[F](isKernelHeader, reqHeaders, respHeaders, routeClassifier, serverSpanName, additionalRequestTags, additionalResponseTags, includeUrl, doNotTrace)
 
     def withIsKernelHeader(isKernelHeader: CIString => Boolean) = copy(isKernelHeader = isKernelHeader)
     def withRequestHeaders(reqHeaders: Set[CIString]) = copy(reqHeaders = reqHeaders)
@@ -68,6 +70,7 @@ object ServerMiddleware {
     def withAdditionalRequestTags(additionalRequestTags: Request[F] => Seq[Attribute[_]]) = copy(additionalRequestTags = additionalRequestTags)
     def withAdditionalResponseTags(additionalResponseTags: Response[F] => Seq[Attribute[_]]) = copy(additionalResponseTags = additionalResponseTags)
     def withIncludeUrl(includeUrl: Request[F] => Boolean) = copy(includeUrl = includeUrl)
+    def withDoNotTrace(doNotTrace: RequestPrelude => Boolean) = copy(doNotTrace = doNotTrace)
 
 
     final class MakeSureYouKnowWhatYouAreDoing{
@@ -75,32 +78,35 @@ object ServerMiddleware {
 
       def buildTracedF[G[_]: MonadCancelThrow: Tracer](fk: F ~> G)(f: Http[G, F]): Http[G, F] = {
         cats.data.Kleisli{(req: Request[F]) =>
-          val init = request(req, reqHeaders, routeClassifier, includeUrl) ++ additionalRequestTags(req)
-          MonadCancelThrow[G].uncancelable( poll =>
-            Tracer[G].joinOrRoot(req.headers){
-              Tracer[G].span(serverSpanName(req), init:_*).use{span =>
-                poll(f.run(req))
-                  .guaranteeCase{
-                    case Outcome.Succeeded(fa) =>
-                      span.addAttribute(Attribute("exit.case","succeeded")) >>
-                      fa.flatMap{resp =>
-                        val out = response(resp, respHeaders) ++ additionalResponseTags(resp)
-                        span.addAttributes(out:_*)
-                      }
-                    case Outcome.Errored(e) =>
-                      span.addAttribute(Attribute("exit.case", "errored")) >>
-                      span.addAttributes(OTHttpTags.Errors.error(e):_*)
-                    case Outcome.Canceled() =>
-                      span.addAttributes(
-                        Attribute("exit.case", "canceled"),
-                        Attribute("canceled", true),
-                        Attribute("error", true) // A cancelled http is an error for the server. The connection got cut for some reason.
-                      )
-                  }
+          if (doNotTrace(req.requestPrelude)) f(req)
+          else {
+            val init = request(req, reqHeaders, routeClassifier, includeUrl) ++ additionalRequestTags(req)
+            MonadCancelThrow[G].uncancelable( poll =>
+              Tracer[G].joinOrRoot(req.headers){
+                Tracer[G].span(serverSpanName(req), init:_*).use{span =>
+                  poll(f.run(req))
+                    .guaranteeCase{
+                      case Outcome.Succeeded(fa) =>
+                        span.addAttribute(Attribute("exit.case","succeeded")) >>
+                        fa.flatMap{resp =>
+                          val out = response(resp, respHeaders) ++ additionalResponseTags(resp)
+                          span.addAttributes(out:_*)
+                        }
+                      case Outcome.Errored(e) =>
+                        span.addAttribute(Attribute("exit.case", "errored")) >>
+                        span.addAttributes(OTHttpTags.Errors.error(e):_*)
+                      case Outcome.Canceled() =>
+                        span.addAttributes(
+                          Attribute("exit.case", "canceled"),
+                          Attribute("canceled", true),
+                          Attribute("error", true) // A cancelled http is an error for the server. The connection got cut for some reason.
+                        )
+                    }
 
-              }
-            }(helpers.textMapGetter)
-          )
+                }
+              }(helpers.textMapGetter)
+            )
+          }
         }
       }
     }
