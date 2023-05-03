@@ -72,10 +72,10 @@ object Http4sExample extends IOApp with Common {
 
 
   // Our main app resource
-  def server[F[_]: Async: Tracer: TextMapPropagator](getVault: F[Vault]): Resource[F, Server] =
+  def server[F[_]: Async: Tracer: TextMapPropagator: ({type L[M[_]] = Local[M, Vault]})#L]: Resource[F, Server] =
     for {
       client <- EmberClientBuilder.default[F].build
-        .map(ClientMiddleware.default(getVault).build)
+        .map(ClientMiddleware.default.build)
       app = ServerMiddleware.default[F].buildHttpApp{
         routes(client).orNotFound
       }
@@ -86,9 +86,10 @@ object Http4sExample extends IOApp with Common {
   def run(args: List[String]): IO[ExitCode] =
     globalOtel4s[IO].flatMap{
       case (otel4s, local) =>
+        implicit val L: Local[IO, Vault] = local
         Resource.eval(tracer(otel4s)).flatMap{ implicit T: Tracer[IO] =>
           implicit val P: TextMapPropagator[IO] = propagator(otel4s)
-          server[IO](local.ask)
+          server[IO]
         }
     }.use(_ => IO.never)
 

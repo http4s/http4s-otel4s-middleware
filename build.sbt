@@ -63,6 +63,7 @@ lazy val core = crossProject(JVMPlatform)
 
       "io.chrisdavenport"           %%% "fiberlocal"           % fiberLocalV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
+      "org.typelevel" %%% "cats-mtl" % "1.3.1",
 
 
       "org.typelevel"               %%% "munit-cats-effect"        % munitCatsEffectV         % Test,

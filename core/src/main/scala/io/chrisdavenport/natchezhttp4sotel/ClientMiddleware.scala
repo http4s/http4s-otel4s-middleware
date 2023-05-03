@@ -17,12 +17,12 @@ import org.http4s.client.middleware.Retry
 import org.typelevel.otel4s.trace.Span
 import org.typelevel.otel4s.{TextMapPropagator, TextMapSetter}
 import org.typelevel.vault.Vault
+import cats.mtl.Local
 
 object ClientMiddleware {
 
-
-  def default[F[_]: Tracer: TextMapPropagator: Concurrent](getContext: F[Vault]): ClientMiddlewareBuilder[F] = {
-    new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl, getContext)
+  def default[F[_]: Tracer: TextMapPropagator: Concurrent: ({type L[M[_]] = Local[M, Vault]})#L]: ClientMiddlewareBuilder[F] = {
+    new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
   }
 
   object Defaults {
@@ -34,15 +34,14 @@ object ClientMiddleware {
     def includeUrl[F[_]]: Request[F] => Boolean = {(_: Request[F]) => true}
   }
 
-  final class ClientMiddlewareBuilder[F[_]: Tracer: TextMapPropagator: Concurrent] private[ClientMiddleware] (
+  final class ClientMiddlewareBuilder[F[_]: Tracer: TextMapPropagator: Concurrent: ({type L[M[_]] = Local[M, Vault]})#L] private[ClientMiddleware] (
     private val reqHeaders: Set[CIString],
     private val respHeaders: Set[CIString],
     private val clientSpanName: Request[F] => String,
     private val additionalRequestTags: Request[F] => Seq[Attribute[_]],
     private val additionalResponseTags: Response[F] => Seq[Attribute[_]],
     private val includeUrl: Request[F] => Boolean,
-    private val getVault: F[Vault],
-  ){ self => 
+  ){ self =>
     private def copy(
       reqHeaders: Set[CIString] = self.reqHeaders,
       respHeaders: Set[CIString] = self.respHeaders,
@@ -50,9 +49,8 @@ object ClientMiddleware {
       additionalRequestTags: Request[F] => Seq[Attribute[_]] = self.additionalRequestTags,
       additionalResponseTags: Response[F] => Seq[Attribute[_]] = self.additionalResponseTags ,
       includeUrl: Request[F] => Boolean = self.includeUrl,
-      getVault: F[Vault] = self.getVault,
-    ): ClientMiddlewareBuilder[F] = 
-      new ClientMiddlewareBuilder[F](reqHeaders, respHeaders, clientSpanName, additionalRequestTags, additionalResponseTags, includeUrl, getVault)
+    ): ClientMiddlewareBuilder[F] =
+      new ClientMiddlewareBuilder[F](reqHeaders, respHeaders, clientSpanName, additionalRequestTags, additionalResponseTags, includeUrl)
 
     def withRequestHeaders(reqHeaders: Set[CIString]) = copy(reqHeaders = reqHeaders)
 
@@ -81,7 +79,7 @@ object ClientMiddleware {
 
               _ <- {
                 Tracer[F].span(clientSpanName(req)).use{span =>
-                  getVault.flatMap{ vault =>
+                  Local[F, Vault].ask.flatMap{ vault =>
                     clientContext.complete(vault -> span)
                   } >> ended.get
                 }
