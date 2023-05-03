@@ -88,7 +88,7 @@ object ClientMiddleware {
               vault = t._1
               span = t._2
               _ <- Resource.eval(span.addAttributes(base:_*))
-              knlHeaders <- Resource.eval(injectMyDearGod(vault))
+              knlHeaders <- Resource.eval(inject(vault))
               newReq = req.withHeaders(knlHeaders ++ req.headers)
               resp <- poll(client.run(newReq)).guaranteeCase{
                 case Outcome.Succeeded(fa) =>
@@ -123,7 +123,7 @@ object ClientMiddleware {
     }
   }
 
-  private def injectMyDearGod[F[_]: TextMapPropagator: Monad](vault: org.typelevel.vault.Vault): F[Headers] = {
+  private def inject[F[_]: TextMapPropagator: Monad](vault: org.typelevel.vault.Vault): F[Headers] = {
     import scala.collection.mutable.ListBuffer
     var myHeaders = collection.mutable.ListBuffer[Header.Raw]()
     val mapSetter = new TextMapSetter[ListBuffer[Header.Raw]] {
