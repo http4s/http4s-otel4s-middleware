@@ -84,7 +84,7 @@ object ClientMiddleware {
                   } >> ended.get
                 }
               }.background
-              t <- Resource.make(clientContext.get)(_ => ended.complete(()).void)
+              t <- Resource.make(clientContext.get)(_ => ended.complete(()) >> Concurrent[F].cede)
               vault = t._1
               span = t._2
               _ <- Resource.eval(span.addAttributes(base:_*))
