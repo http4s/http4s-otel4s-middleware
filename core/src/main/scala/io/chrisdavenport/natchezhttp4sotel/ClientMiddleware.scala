@@ -14,12 +14,13 @@ import org.http4s.client._
 import org.typelevel.vault.Key
 import org.http4s.client.middleware.Retry
 import org.typelevel.otel4s.{TextMapPropagator, TextMapSetter}
+import org.typelevel.vault.Vault
 
 object ClientMiddleware {
 
 
-  def default[F[_]: Tracer: TextMapPropagator: MonadCancelThrow]: ClientMiddlewareBuilder[F] = {
-    new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
+  def default[F[_]: Tracer: TextMapPropagator: MonadCancelThrow](getContext: F[Vault]): ClientMiddlewareBuilder[F] = {
+    new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl, getContext)
   }
 
   object Defaults {
@@ -37,7 +38,8 @@ object ClientMiddleware {
     private val clientSpanName: Request[F] => String,
     private val additionalRequestTags: Request[F] => Seq[Attribute[_]],
     private val additionalResponseTags: Response[F] => Seq[Attribute[_]],
-    private val includeUrl: Request[F] => Boolean
+    private val includeUrl: Request[F] => Boolean,
+    private val getVault: F[Vault],
   ){ self => 
     private def copy(
       reqHeaders: Set[CIString] = self.reqHeaders,
@@ -46,8 +48,9 @@ object ClientMiddleware {
       additionalRequestTags: Request[F] => Seq[Attribute[_]] = self.additionalRequestTags,
       additionalResponseTags: Response[F] => Seq[Attribute[_]] = self.additionalResponseTags ,
       includeUrl: Request[F] => Boolean = self.includeUrl,
+      getVault: F[Vault] = self.getVault,
     ): ClientMiddlewareBuilder[F] = 
-      new ClientMiddlewareBuilder[F](reqHeaders, respHeaders, clientSpanName, additionalRequestTags, additionalResponseTags, includeUrl)
+      new ClientMiddlewareBuilder[F](reqHeaders, respHeaders, clientSpanName, additionalRequestTags, additionalResponseTags, includeUrl, getVault)
 
     def withRequestHeaders(reqHeaders: Set[CIString]) = copy(reqHeaders = reqHeaders)
 
@@ -73,9 +76,10 @@ object ClientMiddleware {
               // How to span Resource more effectively
               span <- Resource.make(Tracer[F].span(clientSpanName(req)).startUnmanaged)(_.`end`)
               _ <- Resource.eval(span.addAttributes(base:_*))
-              ctx = span.context
-              vault = ctx.storeInContext(org.typelevel.vault.Vault.empty)
+              vault <- Resource.eval(getVault) // Doesn't see my span here for some reason...
+
               knlHeaders <- Resource.eval(injectMyDearGod(vault))
+              _ = println(knlHeaders)
 
               newReq = req.withHeaders(knlHeaders ++ req.headers)
               resp <- poll(client.run(newReq)).guaranteeCase{

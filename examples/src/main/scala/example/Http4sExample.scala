@@ -1,6 +1,8 @@
 package example
 
+import cats._
 import cats.effect._
+import cats.syntax.all._
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.server.Server
@@ -14,6 +16,8 @@ import org.typelevel.otel4s.Otel4s
 import org.typelevel.otel4s.java.OtelJava
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.TextMapPropagator
+import org.typelevel.vault.Vault
+import cats.mtl.Local
 
 /**
  * Start up Jaeger thus:
@@ -34,10 +38,30 @@ import org.typelevel.otel4s.TextMapPropagator
 */
 object Http4sExample extends IOApp with Common {
 
-  def globalOtel4s[F[_]: Async: LiftIO]: Resource[F, Otel4s[F]] =
+  private def localForIoLocal[F[_]: MonadCancelThrow: LiftIO, E](
+      ioLocal: IOLocal[E]
+  ): Local[F, E] =
+    new Local[F, E] {
+      def applicative =
+        Applicative[F]
+      def ask[E2 >: E] =
+        Functor[F].widen[E, E2](ioLocal.get.to[F])
+      def local[A](fa: F[A])(f: E => E): F[A] =
+        MonadCancelThrow[F].bracket(ioLocal.modify(e => (f(e), e)).to[F])(_ =>
+          fa
+        )(ioLocal.set(_).to[F])
+    }
+
+  def globalOtel4s[F[_]: Async: LiftIO]: Resource[F, (Otel4s[F], Local[F, Vault])] =
     Resource
       .eval(Sync[F].delay(GlobalOpenTelemetry.get))
-      .evalMap(OtelJava.forAsync[F])
+      .evalMap{ jOtel =>
+        LiftIO[F].liftIO(IOLocal(Vault.empty))
+          .map { (ioLocal: IOLocal[Vault]) =>
+            val local = localForIoLocal[F, Vault](ioLocal)
+            OtelJava.local[F](jOtel)(Async[F], local) -> local
+          }
+      }
 
 
   def tracer[F[_]](otel: Otel4s[F]): F[Tracer[F]] =
@@ -48,10 +72,10 @@ object Http4sExample extends IOApp with Common {
 
 
   // Our main app resource
-  def server[F[_]: Async: Tracer: TextMapPropagator]: Resource[F, Server] =
+  def server[F[_]: Async: Tracer: TextMapPropagator](getVault: F[Vault]): Resource[F, Server] =
     for {
       client <- EmberClientBuilder.default[F].build
-        .map(ClientMiddleware.default.build)
+        .map(ClientMiddleware.default(getVault).build)
       app = ServerMiddleware.default[F].buildHttpApp{
         routes(client).orNotFound
       }
@@ -61,10 +85,10 @@ object Http4sExample extends IOApp with Common {
   // Done!
   def run(args: List[String]): IO[ExitCode] =
     globalOtel4s[IO].flatMap{
-      otel4s =>
+      case (otel4s, local) =>
         Resource.eval(tracer(otel4s)).flatMap{ implicit T: Tracer[IO] =>
           implicit val P: TextMapPropagator[IO] = propagator(otel4s)
-          server[IO]
+          server[IO](local.ask)
         }
     }.use(_ => IO.never)
 
