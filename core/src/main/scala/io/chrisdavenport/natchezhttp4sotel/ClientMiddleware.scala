@@ -17,11 +17,11 @@ import org.http4s.client.middleware.Retry
 import org.typelevel.otel4s.trace.Span
 import org.typelevel.otel4s.{TextMapPropagator, TextMapSetter}
 import org.typelevel.vault.Vault
-import cats.mtl.Local
+import cats.mtl.Ask
 
 object ClientMiddleware {
 
-  def default[F[_]: Tracer: TextMapPropagator: Concurrent: ({type L[M[_]] = Local[M, Vault]})#L]: ClientMiddlewareBuilder[F] = {
+  def default[F[_]: Tracer: TextMapPropagator: Concurrent: ({type L[M[_]] = Ask[M, Vault]})#L]: ClientMiddlewareBuilder[F] = {
     new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
   }
 
@@ -34,7 +34,7 @@ object ClientMiddleware {
     def includeUrl[F[_]]: Request[F] => Boolean = {(_: Request[F]) => true}
   }
 
-  final class ClientMiddlewareBuilder[F[_]: Tracer: TextMapPropagator: Concurrent: ({type L[M[_]] = Local[M, Vault]})#L] private[ClientMiddleware] (
+  final class ClientMiddlewareBuilder[F[_]: Tracer: TextMapPropagator: Concurrent: ({type L[M[_]] = Ask[M, Vault]})#L] private[ClientMiddleware] (
     private val reqHeaders: Set[CIString],
     private val respHeaders: Set[CIString],
     private val clientSpanName: Request[F] => String,
@@ -79,7 +79,7 @@ object ClientMiddleware {
 
               _ <- {
                 Tracer[F].span(clientSpanName(req)).use{span =>
-                  Local[F, Vault].ask.flatMap{ vault =>
+                  Ask[F, Vault].ask.flatMap{ vault =>
                     clientContext.complete(vault -> span)
                   } >> ended.get
                 }
