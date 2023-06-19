@@ -93,6 +93,7 @@ object OTHttpTags {
       "From", "Host", "Referer", "Referer-Policy", "User-Agent",
       "Allow", "Server",
       "Accept-Ranges", "Range", "If-Range", "Content-Range",
+      "Deprecation",
 
       "Cross-Origin-Embedder-Policy",
       "Cross-Origin-Opener-Policy",
