@@ -6,3 +6,8 @@ This software contains portions of code derived from natchez-http4s
 https://github.com/tpolecat/natchez-http4s
 Copyright (c) 2021 by Rob Norris
 Licensed under the MIT License(see licenses/license_natchez-http4s)
+
+This software contains portions of code derived from natchez
+https://github.com/typelevel/natchez
+Copyright (c) 2019 by Rob Norris
+Licensed under the MIT License(see licenses/license_natchez)

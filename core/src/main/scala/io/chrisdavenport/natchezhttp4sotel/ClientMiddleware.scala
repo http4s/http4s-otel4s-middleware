@@ -12,11 +12,15 @@ import org.http4s.client._
 import org.typelevel.vault.Key
 import org.http4s.client.middleware.Retry
 
-
 object ClientMiddleware {
 
+  @deprecated("0.3.0", "Use default without entrypoint")
   def default[F[_]: natchez.Trace: MonadCancelThrow](ep: EntryPoint[F]): ClientMiddlewareBuilder[F] = {
-    new ClientMiddlewareBuilder[F](ep, Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
+    new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
+  }
+
+  def default[F[_]: natchez.Trace: MonadCancelThrow]: ClientMiddlewareBuilder[F] = {
+    new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
   }
 
   object Defaults {
@@ -26,10 +30,15 @@ object ClientMiddleware {
     def additionalRequestTags[F[_]]: Request[F] => Seq[(String, TraceValue)] = {(_: Request[F]) => Seq()}
     def additionalResponseTags[F[_]]: Response[F] => Seq[(String, TraceValue)] = {(_: Response[F]) => Seq()}
     def includeUrl[F[_]]: Request[F] => Boolean = {(_: Request[F]) => true}
-  }  
+  }
 
-  final class ClientMiddlewareBuilder[F[_]: natchez.Trace: MonadCancelThrow] private[ClientMiddleware] (
-    private val ep: EntryPoint[F],
+  object Keys {
+    private val internalSpanKey = Key.newKey[cats.effect.SyncIO, Any].unsafeRunSync()
+
+    def spanKey[F[_]]: Key[F ~> F] = internalSpanKey.asInstanceOf[Key[F ~> F]]
+  }
+
+  final class ClientMiddlewareBuilder[F[_]: Trace: MonadCancelThrow] private[ClientMiddleware] (
     private val reqHeaders: Set[CIString],
     private val respHeaders: Set[CIString],
     private val clientSpanName: Request[F] => String,
@@ -38,7 +47,6 @@ object ClientMiddleware {
     private val includeUrl: Request[F] => Boolean
   ){ self => 
     private def copy(
-      ep: EntryPoint[F] = self.ep,
       reqHeaders: Set[CIString] = self.reqHeaders,
       respHeaders: Set[CIString] = self.respHeaders,
       clientSpanName: Request[F] => String = self.clientSpanName,
@@ -46,7 +54,7 @@ object ClientMiddleware {
       additionalResponseTags: Response[F] => Seq[(String, TraceValue)] = self.additionalResponseTags ,
       includeUrl: Request[F] => Boolean = self.includeUrl,
     ): ClientMiddlewareBuilder[F] = 
-      new ClientMiddlewareBuilder[F](ep, reqHeaders, respHeaders, clientSpanName, additionalRequestTags, additionalResponseTags, includeUrl)
+      new ClientMiddlewareBuilder[F](reqHeaders, respHeaders, clientSpanName, additionalRequestTags, additionalResponseTags, includeUrl)
 
     def withRequestHeaders(reqHeaders: Set[CIString]) = copy(reqHeaders = reqHeaders)
 
@@ -62,45 +70,44 @@ object ClientMiddleware {
     
     def withIncludeUrl(includeUrl: Request[F] => Boolean ) = copy(includeUrl = includeUrl)
 
-    def build: Client[F] => Client[F] = { (client: Client[F]) => 
+    def build: Client[F] => Client[F] = { (client: Client[F]) =>
       Client[F]{(req: Request[F]) => 
         val base = request(req, reqHeaders, includeUrl) ++ additionalRequestTags(req)
         MonadCancelThrow[Resource[F, *]].uncancelable(poll => 
           for {
-            baggage <- Resource.eval(Trace[F].kernel)
-            span <- ep.continueOrElseRoot(clientSpanName(req), baggage)
-            _ <- Resource.eval(span.put(base:_*))
-            knl <- Resource.eval(span.kernel)
-            knlHeaders = Headers(knl.toHeaders.map { case (k, v) => Header.Raw(CIString(k), v) } .toSeq)
+            fk <- natchez.Trace[F].spanR(clientSpanName(req))
+            _ <- Resource.eval(fk(Trace[F].put(base:_*)))
+            knl <- Resource.eval(fk(Trace[F].kernel))
+            knlHeaders = Headers(knl.toHeaders.map { case (k, v) => Header.Raw(k, v) } .toSeq)
             newReq = req.withHeaders(knlHeaders ++ req.headers)
             resp <- poll(client.run(newReq)).guaranteeCase{
-              case Outcome.Succeeded(fa) => 
-                Resource.eval(span.put("exit.case" -> "succeeded")) >> 
+              case Outcome.Succeeded(fa) =>
+                Resource.eval(fk(Trace[F].put("exit.case" -> "succeeded"))) >>
                 fa.flatMap(resp => 
                   Resource.eval(
-                    span.put((response(resp, respHeaders) ++ additionalResponseTags(resp)):_*)
+                    fk(Trace[F].put((response(resp, respHeaders) ++ additionalResponseTags(resp)):_*))
                   )
                 )
               case Outcome.Errored(e) => 
-                val exitCase: (String, TraceValue) = ("exit.case" -> TraceValue.stringToTraceValue("errored"))
+                val exitCase: (String, TraceValue) = ("exit.case" -> TraceableValue[String].toTraceValue("errored"))
                 val error = OTHttpTags.Errors.error(e)
                 Resource.eval(
-                  span.put((exitCase :: error):_*)
+                  fk(Trace[F].put((exitCase :: error):_*))
                 )
               case Outcome.Canceled() => 
                 // Canceled isn't always an error, but it generally is for http
                 // TODO decide if this should add error, we do for the server side.
-                Resource.eval(span.put("exit.case" -> "canceled", "canceled" -> true)) 
+                Resource.eval(fk(Trace[F].put("exit.case" -> "canceled", "canceled" -> true)))
               
             }
             // Automatically handle client processing errors. Since this is after the response,
             // the error case will only get hit if the use block of the resulting resource happens,
             // which is the request processing stage.
             _ <- Resource.makeCase(Applicative[F].unit){
-              case (_, Resource.ExitCase.Errored(e)) => span.put(OTHttpTags.Errors.error(e):_*)
+              case (_, Resource.ExitCase.Errored(e)) => fk(Trace[F].put(OTHttpTags.Errors.error(e):_*))
               case (_, _) => Applicative[F].unit
             }
-          } yield resp
+          } yield resp.withAttribute(Keys.spanKey[F], fk)
         )
       }
     }

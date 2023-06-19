@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.2" // your current series x.y
+ThisBuild / tlBaseVersion := "0.3" // your current series x.y
 
 ThisBuild / organization := "io.chrisdavenport"
 ThisBuild / organizationName := "Christopher Davenport"
@@ -27,8 +27,8 @@ val catsV = "2.9.0"
 val catsEffectV = "3.4.9"
 val fs2V = "3.6.1"
 val http4sV = "0.23.18"
-val fiberLocalV = "0.1.1"
-val natchezV = "0.1.6"
+val fiberLocalV = "0.1.2"
+val natchezV = "0.3.2"
 val munitCatsEffectV = "2.0.0-M3"
 
 val slf4jV    = "1.7.30"
@@ -38,7 +38,7 @@ val slf4jV    = "1.7.30"
 lazy val `natchez-http4s-otel` = tlCrossRootProject
   .aggregate(core, examples)
 
-lazy val core = crossProject(JVMPlatform, JSPlatform)
+lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
   .settings(
@@ -63,7 +63,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform)
 
 
       "org.typelevel"               %%% "munit-cats-effect"        % munitCatsEffectV         % Test,
-
+      "org.tpolecat"                %%% "natchez-testkit"      % natchezV % Test,
     )
   ).jsSettings(
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},

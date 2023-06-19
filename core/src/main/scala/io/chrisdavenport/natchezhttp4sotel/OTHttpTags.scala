@@ -57,7 +57,7 @@ object OTHttpTags {
         .toList
         .map{
           case (name, list) => ("http." ++ messageType ++ ".header.string." ++ name.toString.toLowerCase.replace("-", "_"), list.map(_.value).mkString(", "))
-        }.map{ case (name, s) => name -> TraceValue.stringToTraceValue(s)} // We add a string as a prefix, because the otel standard is an array so 
+        }.map{ case (name, s) => name -> TraceableValue[String].toTraceValue(s)} // We add a string as a prefix, because the otel standard is an array so
           // that way we don't have bad values in the canonical space we'll want to use when we can.
     }
 
@@ -141,10 +141,10 @@ object OTHttpTags {
   // https://github.com/open-telemetry/opentelemetry-specification/blob/a50def370ef444029a12ea637769229768daeaf8/specification/trace/semantic_conventions/exceptions.md
   object Errors {
     def error(e: Throwable): List[(String, TraceValue)] = {
-      val error = ("error", TraceValue.boolToTraceValue(true)).some
+      val error = ("error", TraceableValue[Boolean].toTraceValue(true)).some
       val message: Option[(String, TraceValue)] = Option(e.getMessage()).map(m => "exception.message" -> m)
       val className: Option[(String, TraceValue)] = Option(e.getClass()).flatMap(c => Option(c.getName())).map(c => "exception.type" -> c)
-      val stacktrace = ("exception.stacktrace" -> TraceValue.stringToTraceValue(printStackTrace(e))).some
+      val stacktrace = ("exception.stacktrace" -> TraceableValue[String].toTraceValue(printStackTrace(e))).some
       List(error, message, className, stacktrace).flatten // List[Option[A]] => List[A] using internal speedery
     }
   }

@@ -12,6 +12,7 @@ import org.http4s.headers._
 import org.http4s.client._
 import io.chrisdavenport.fiberlocal._
 import cats.data.OptionT
+import java.net.URI
 import cats.arrow.FunctionK
 
 object ServerMiddleware {
@@ -75,14 +76,14 @@ object ServerMiddleware {
         cats.data.Kleisli{(req: Request[F]) => 
         val kernelHeaders = req.headers.headers
           .collect {
-            case header if isKernelHeader(header.name) => header.name.toString -> header.value
+            case header if isKernelHeader(header.name) => header.name -> header.value
           }
           .toMap
 
         val kernel = Kernel(kernelHeaders)
 
-        MonadCancelThrow[G].uncancelable(poll => 
-          ep.continueOrElseRoot(serverSpanName(req), kernel).mapK(fk).use{span => 
+        MonadCancelThrow[G].uncancelable(poll =>
+          ep.continueOrElseRoot(serverSpanName(req), kernel).mapK(fk).use{span =>
             val init = request(req, reqHeaders, routeClassifier, includeUrl) ++ additionalRequestTags(req)
             fk(span.put(init:_*)) >>
             fk(GenFiberLocal[F].local(span)).map(fromFiberLocal(_))
@@ -257,27 +258,48 @@ object ServerMiddleware {
     builder.toList
   }
 
-  private def fromFiberLocal[F[_]: MonadCancelThrow](local: FiberLocal[F, Span[F]]): natchez.Trace[F] = 
-    new natchez.Trace[F] {
-      def put(fields: (String, TraceValue)*): F[Unit] =
-        local.get.flatMap(_.put(fields: _*))
+  private def fromFiberLocal[F[_]: MonadCancelThrow](local: FiberLocal[F, Span[F]]): natchez.Trace[F] = {
+      new Trace[F] {
 
-      def kernel: F[Kernel] =
-        local.get.flatMap(_.kernel)
+        override def put(fields: (String, TraceValue)*): F[Unit] =
+          local.get.flatMap(_.put(fields: _*))
 
-      def span[A](name: String)(k: F[A]): F[A] =
-        local.get.flatMap { parent =>
-          parent.span(name).flatMap { child =>
-            Resource.make(local.set(child))(_ => local.set(parent))
-          } .use { _ => k }
-        }
+        override def attachError(err: Throwable, fields: (String, TraceValue)*): F[Unit] =
+          local.get.flatMap(_.attachError(err, fields: _*))
 
-      def traceId: F[Option[String]] =
-        local.get.flatMap(_.traceId)
+        override def log(fields: (String, TraceValue)*): F[Unit] =
+          local.get.flatMap(_.log(fields: _*))
 
-      def traceUri =
-        local.get.flatMap(_.traceUri)
-    }
+        override def log(event: String): F[Unit] =
+          local.get.flatMap(_.log(event))
+
+        override def kernel: F[Kernel] =
+          local.get.flatMap(_.kernel)
+
+        override def spanR(name: String, options: Span.Options): Resource[F, F ~> F] =
+          for {
+            parent <- Resource.eval(local.get)
+            child <- parent.span(name, options)
+          } yield new (F ~> F) {
+            def apply[A](fa: F[A]): F[A] =
+              local.get.flatMap { old =>
+                local
+                  .set(child)
+                  .bracket(_ => fa.onError{ case e => child.attachError(e)})(_ => local.set(old))
+              }
+
+          }
+
+        override def span[A](name: String, options: Span.Options)(k: F[A]): F[A] =
+          spanR(name, options).use(_(k))
+
+        override def traceId: F[Option[String]] =
+          local.get.flatMap(_.traceId)
+
+        override def traceUri: F[Option[URI]] =
+          local.get.flatMap(_.traceUri)
+      }
+  }
 
 
   val ExcludedHeaders: Set[CIString] = {
