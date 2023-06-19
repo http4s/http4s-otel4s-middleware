@@ -28,7 +28,7 @@ val catsEffectV = "3.4.9"
 val fs2V = "3.6.1"
 val http4sV = "0.23.18"
 val fiberLocalV = "0.1.2"
-val natchezV = "0.3.1"
+val natchezV = "0.3.2"
 val munitCatsEffectV = "2.0.0-M3"
 
 val slf4jV    = "1.7.30"
