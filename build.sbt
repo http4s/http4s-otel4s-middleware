@@ -15,8 +15,8 @@ ThisBuild / tlCiReleaseBranches := Seq("main")
 // true by default, set to false to publish to s01.oss.sonatype.org
 ThisBuild / tlSonatypeUseLegacyHost := true
 
-ThisBuild / crossScalaVersions := Seq("2.12.15", "2.13.8", "3.2.2")
-ThisBuild / scalaVersion := "3.2.2"
+ThisBuild / crossScalaVersions := Seq("2.12.18", "2.13.11", "3.3.0")
+ThisBuild / scalaVersion := "3.3.0"
 
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"))
 ThisBuild / tlJdkRelease := Some(8)
@@ -24,9 +24,9 @@ ThisBuild / tlJdkRelease := Some(8)
 ThisBuild / testFrameworks += new TestFramework("munit.Framework")
 
 val catsV = "2.9.0"
-val catsEffectV = "3.4.9"
-val fs2V = "3.6.1"
-val http4sV = "0.23.18"
+val catsEffectV = "3.5.0"
+val fs2V = "3.7.0"
+val http4sV = "0.23.19"
 val fiberLocalV = "0.1.2"
 val natchezV = "0.3.2"
 val munitCatsEffectV = "2.0.0-M3"
