@@ -98,7 +98,7 @@ object ServerMiddleware {
                   case Outcome.Errored(e) => 
                     fk(span.put("exit.case" -> "errored")) >>
                     fk(span.put(OTHttpTags.Errors.error(e):_*))
-                  case Outcome.Canceled() => 
+                  case Outcome.Canceled() =>
                     fk(span.put(
                       "exit.case" -> "canceled",
                       "canceled" -> true,
