@@ -52,16 +52,19 @@ object OTHttpTags {
     // TODO: Otel here is a []string, not a single string. I have chosen this for simplicity, but we can do better.
     // s is a whitelisted set of Headers to include, any headers not there will not appear.
     private def generic(headers: Headers, s: Set[CIString], messageType: String): List[(String, TraceValue)] = {
-      headers.headers.filter(h => s.contains(h.name))
+      headers.headers
         .groupBy(r => (r.name))
         .toList
         .map{
-          case (name, list) => ("http." ++ messageType ++ ".header.string." ++ name.toString.toLowerCase.replace("-", "_"), list.map(_.value).mkString(", "))
+          case (name, list) =>
+            val key = "http." ++ messageType ++ ".header.string." ++ name.toString.toLowerCase.replace("-", "_")
+            if (s.contains(name)) (key, list.map(_.value).mkString(", "))
+            else (key, "<REDACTED>")
         }.map{ case (name, s) => name -> TraceableValue[String].toTraceValue(s)} // We add a string as a prefix, because the otel standard is an array so
           // that way we don't have bad values in the canonical space we'll want to use when we can.
     }
 
-    def request(headers: Headers, s: Set[CIString]): List[(String, TraceValue)] = 
+    def request(headers: Headers, s: Set[CIString]): List[(String, TraceValue)] =
       generic(headers, s, "request")
     def response(headers: Headers, s: Set[CIString]): List[(String, TraceValue)] =
       generic(headers, s, "response")
@@ -74,7 +77,7 @@ object OTHttpTags {
       "Connection", "Keep-Alive",
       "Accept", "Accept-Charset", "Accept-Encoding", "Accept-Language",
       "Expect", "Max-Forwards",
-      
+
       "Access-Control-Allow-Origin",
       "Access-Control-Allow-Credentials",
       "Access-Control-Allow-Headers",
@@ -88,7 +91,7 @@ object OTHttpTags {
       "DNT", "Tk",
       "Content-Disposition",
       "Content-Length", "Content-Type", "Content-Encoding", "Content-Language", "Content-Location",
-      "Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Via",
+      "Forwarded", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Scheme", "X-Forwarded-Port", "Via",
       "Location",
       "From", "Host", "Referer", "Referer-Policy", "User-Agent",
       "Allow", "Server",
@@ -135,7 +138,18 @@ object OTHttpTags {
       "Sec-CH-UA-Mobile",
       "Sec-CH-UA-Model",
       "Sec-CH-UA-Platform",
-      "Sec-CH-UA-Platform-Version"
+      "Sec-CH-UA-Platform-Version",
+
+      "X-Real-Ip",
+      "X-Scheme",
+
+      "X-Request-Start",
+      "X-Runtime",
+
+      "B3",
+      "X-B3-Sampled",
+      "X-B3-SpanId",
+      "X-B3-TraceId",
     ).map(CIString(_))
   }
 
