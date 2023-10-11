@@ -1,8 +1,9 @@
 package example
 
 import cats._
-import cats.effect.{ Trace => _, _ }
+import cats.effect.{Trace => _, _}
 import cats.syntax.all._
+import org.typelevel.otel4s.Attribute
 // import io.jaegertracing.Configuration.ReporterConfiguration
 // import io.jaegertracing.Configuration.SamplerConfiguration
 // import natchez._
@@ -18,11 +19,9 @@ trait Common {
 
   // A dumb subroutine that does some tracing
   def greet[F[_]: Monad: Tracer](input: String) =
-    Tracer[F].span("greet").surround {
+    Tracer[F].span("greet").use { span =>
       for {
-        // _ <- Tracer[F].put("input" -> input)
-        // How to append attributes to current span?
-        _ <- Applicative[F].unit
+        _ <- span.addAttribute(Attribute("input", input))
       } yield s"Hello $input!\n"
     }
 

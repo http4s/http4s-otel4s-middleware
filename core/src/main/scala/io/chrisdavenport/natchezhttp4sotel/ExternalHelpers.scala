@@ -1,16 +1,14 @@
 package io.chrisdavenport.natchezhttp4sotel
 
-import cats.syntax.all._
-import cats.effect._
+import cats.{Applicative, Functor}
+import cats.effect.{IOLocal, LiftIO, MonadCancelThrow}
 import cats.mtl.Local
-import cats._
-import org.typelevel.vault.Vault
+import cats.syntax.functor._
 
 object ExternalHelpers {
 
-  def localVault[F[_]: LiftIO: MonadCancelThrow]: F[Local[F, Vault]] = {
-    LiftIO[F].liftIO(IOLocal(Vault.empty)).map(localForIoLocal(_))
-  }
+  def local[F[_]: LiftIO: MonadCancelThrow, A](value: A): F[Local[F, A]] =
+    LiftIO[F].liftIO(IOLocal(value)).map(localForIoLocal(_))
 
   def localForIoLocal[F[_]: MonadCancelThrow: LiftIO, E](
       ioLocal: IOLocal[E]
@@ -25,6 +23,4 @@ object ExternalHelpers {
           fa
         )(ioLocal.set(_).to[F])
     }
-
-
 }

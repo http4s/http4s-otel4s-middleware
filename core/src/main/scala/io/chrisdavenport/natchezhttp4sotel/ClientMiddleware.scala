@@ -1,27 +1,23 @@
 package io.chrisdavenport.natchezhttp4sotel
 
-import cats._
-import cats.syntax.all._
-import cats.effect.kernel._
-import cats.effect.syntax.all._
-import org.http4s._
+import cats.Applicative
+import cats.effect.kernel.Outcome
+import cats.effect.{Concurrent, MonadCancelThrow, Resource, SyncIO}
+import cats.syntax.flatMap._
+import org.http4s.client.{Client, RequestKey}
+import org.http4s.{Headers, Request, Response}
+import org.http4s.client.middleware.Retry
+import org.http4s.headers.{Host, `User-Agent`}
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.trace.Tracer
+import org.typelevel.vault.Key
 
 import scala.collection.mutable.ListBuffer
-import org.http4s.headers._
-import org.http4s.client._
-import org.typelevel.vault.Key
-import org.http4s.client.middleware.Retry
-import org.typelevel.otel4s.trace.Span
-import org.typelevel.otel4s.{TextMapPropagator, TextMapSetter}
-import org.typelevel.vault.Vault
-import cats.mtl.Ask
 
 object ClientMiddleware {
 
-  def default[F[_]: Tracer: TextMapPropagator: Concurrent: ({type L[M[_]] = Ask[M, Vault]})#L]: ClientMiddlewareBuilder[F] = {
+  def default[F[_]: Tracer: Concurrent]: ClientMiddlewareBuilder[F] = {
     new ClientMiddlewareBuilder[F](Defaults.reqHeaders, Defaults.respHeaders, Defaults.clientSpanName, Defaults.additionalRequestTags, Defaults.additionalResponseTags, Defaults.includeUrl)
   }
 
@@ -34,7 +30,7 @@ object ClientMiddleware {
     def includeUrl[F[_]]: Request[F] => Boolean = {(_: Request[F]) => true}
   }
 
-  final class ClientMiddlewareBuilder[F[_]: Tracer: TextMapPropagator: Concurrent: ({type L[M[_]] = Ask[M, Vault]})#L] private[ClientMiddleware] (
+  final class ClientMiddlewareBuilder[F[_]: Tracer: Concurrent] private[ClientMiddleware] (
     private val reqHeaders: Set[CIString],
     private val respHeaders: Set[CIString],
     private val clientSpanName: Request[F] => String,
@@ -67,35 +63,23 @@ object ClientMiddleware {
     def withIncludeUrl(includeUrl: Request[F] => Boolean ) = copy(includeUrl = includeUrl)
 
     def build: Client[F] => Client[F] = { (client: Client[F]) =>
-      Client[F]{(req: Request[F]) => // Resource[F, Response[F]]
+      Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
 
         val base = request(req, reqHeaders, includeUrl) ++ additionalRequestTags(req)
-        MonadCancelThrow[Resource[F, *]].uncancelable{poll =>
+        MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
 
             for {
-              // How to span Resource more effectively
-              clientContext <- Resource.eval(Deferred[F, (Vault, Span[F])])
-              ended <- Resource.eval(Deferred[F, Unit])
-
-              _ <- {
-                Tracer[F].span(clientSpanName(req)).use{span =>
-                  Ask[F, Vault].ask.flatMap{ vault =>
-                    clientContext.complete(vault -> span)
-                  } >> ended.get
-                }
-              }.background
-              t <- Resource.make(clientContext.get)(_ => ended.complete(()) >> Concurrent[F].cede)
-              vault = t._1
-              span = t._2
-              _ <- Resource.eval(span.addAttributes(base:_*))
-              knlHeaders <- Resource.eval(inject(vault))
-              newReq = req.withHeaders(knlHeaders ++ req.headers)
-              resp <- poll(client.run(newReq)).guaranteeCase{
+              res <- Tracer[F].span(clientSpanName(req)).resource
+              span = res.span
+              _ <- Resource.eval(span.addAttributes(base: _*))
+              traceHeaders <- Resource.eval(Tracer[F].propagate(Headers.empty))
+              newReq = req.withHeaders(traceHeaders ++ req.headers)
+              resp <- poll(client.run(newReq)).guaranteeCase {
                 case Outcome.Succeeded(fa) =>
                   Resource.eval(span.addAttribute(Attribute("exit.case", "succeeded"))) >>
                   fa.flatMap(resp =>
                     Resource.eval(
-                      span.addAttributes((response(resp, respHeaders) ++ additionalResponseTags(resp)):_*)
+                      span.addAttributes(response(resp, respHeaders) ++ additionalResponseTags(resp): _*)
                     )
                   )
                 case Outcome.Errored(e) =>
@@ -123,19 +107,7 @@ object ClientMiddleware {
     }
   }
 
-  private def inject[F[_]: TextMapPropagator: Monad](vault: org.typelevel.vault.Vault): F[Headers] = {
-    import scala.collection.mutable.ListBuffer
-    var myHeaders = collection.mutable.ListBuffer[Header.Raw]()
-    val mapSetter = new TextMapSetter[ListBuffer[Header.Raw]] {
-      def unsafeSet(carrier: ListBuffer[Header.Raw], key: String, value: String) =
-        carrier.addOne(Header.Raw(CIString(key), value))
-    }
-    TextMapPropagator[F].inject(vault, myHeaders)(mapSetter) >>
-    Headers(myHeaders.toList.map(Header.ToRaw.rawToRaw(_)):_*).pure[F]
-  }
-
-  val ExtraTagsKey: Key[List[Attribute[_]]] = Key.newKey[cats.effect.SyncIO, List[Attribute[_]]].unsafeRunSync()
-
+  val ExtraTagsKey: Key[List[Attribute[_]]] = Key.newKey[SyncIO, List[Attribute[_]]].unsafeRunSync()
 
   private[natchezhttp4sotel] def request[F[_]](req: Request[F], headers: Set[CIString]): List[Attribute[_]] = {
     request(req, headers, Function.const[Boolean, Request[F]](true)(_))

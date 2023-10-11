@@ -15,22 +15,25 @@ ThisBuild / tlCiReleaseBranches := Seq("main")
 // true by default, set to false to publish to s01.oss.sonatype.org
 ThisBuild / tlSonatypeUseLegacyHost := true
 
-ThisBuild / crossScalaVersions := Seq("2.12.15", "2.13.8", "3.2.2")
-ThisBuild / scalaVersion := "3.2.2"
+val scala212 = "2.12.18"
+val scala213 = "2.13.12"
+val scala3 = "3.3.1"
+ThisBuild / crossScalaVersions := Seq(scala212, scala213, scala3)
+ThisBuild / scalaVersion := scala3
 
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"))
 ThisBuild / tlJdkRelease := Some(8)
 
 ThisBuild / testFrameworks += new TestFramework("munit.Framework")
 
-val catsV = "2.9.0"
-val catsEffectV = "3.4.9"
-val fs2V = "3.6.1"
-val http4sV = "0.23.18"
-val fiberLocalV = "0.1.2"
+val catsV = "2.10.0"
+val catsEffectV = "3.5.2"
+val catsMtlV = "1.3.1"
+val fs2V = "3.9.2"
+val http4sV = "0.23.23"
 
-val openTelemetryV = "1.22.0"
-val otel4sV = "0.2.1"
+val openTelemetryV = "1.31.0"
+val otel4sV = "0.3.0-RC1"
 
 val munitCatsEffectV = "2.0.0-M3"
 
@@ -61,9 +64,9 @@ lazy val core = crossProject(JVMPlatform)
       "org.http4s"                  %%% "http4s-server"        % http4sV,
       "org.http4s"                  %%% "http4s-client"        % http4sV,
 
-      "io.chrisdavenport"           %%% "fiberlocal"           % fiberLocalV,
-      "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
-      "org.typelevel" %%% "cats-mtl" % "1.3.1",
+      "org.typelevel"               %%% "otel4s-core-trace" % otel4sV,
+      "org.typelevel"               %%% "otel4s-java"       % otel4sV,
+      "org.typelevel"               %%% "cats-mtl" % catsMtlV,
 
 
       "org.typelevel"               %%% "munit-cats-effect"        % munitCatsEffectV         % Test,
@@ -78,7 +81,7 @@ lazy val examples = project.in(file("examples"))
     libraryDependencies ++= Seq(
       "org.typelevel"    %% "otel4s-java" % otel4sV,
       "io.opentelemetry" % "opentelemetry-exporter-otlp" % openTelemetryV % Runtime,
-      "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure" % s"${openTelemetryV}-alpha" % Runtime,
+      "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure" % openTelemetryV % Runtime,
       "org.http4s"   %% "http4s-dsl"          % http4sV,
       "org.http4s"   %% "http4s-ember-server" % http4sV,
       "org.http4s"   %% "http4s-ember-client" % http4sV,

@@ -6,7 +6,6 @@ import org.http4s.headers._
 import com.comcast.ip4s._
 import org.typelevel.ci.CIString
 import cats.syntax.all._
-import io.chrisdavenport.natchezhttp4sotel.helpers.printStackTrace
 // This follows the documents here
 // https://github.com/open-telemetry/opentelemetry-specification/blob/a50def370ef444029a12ea637769229768daeaf8/specification/trace/semantic_conventions/http.md
 // We can update both the link and the tags as standards develop out of experimental

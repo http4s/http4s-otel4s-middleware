@@ -1,25 +1,15 @@
 package io.chrisdavenport.natchezhttp4sotel
 
-import cats._
-import cats.syntax.all._
-import cats.effect.kernel._
+import cats.data.Kleisli
+import cats.effect.kernel.{MonadCancelThrow, Outcome}
 import cats.effect.syntax.all._
+import cats.syntax.all._
+import org.http4s.client.RequestKey
+import org.http4s.headers.{Host, `User-Agent`}
 import org.http4s._
 import org.typelevel.ci.CIString
-import scala.collection.mutable.ListBuffer
-import org.http4s.headers._
-import org.http4s.client._
-import io.chrisdavenport.fiberlocal._
-import cats.data.OptionT
-import java.net.URI
-import cats.arrow.FunctionK
-import org.typelevel.otel4s.Attribute
+import org.typelevel.otel4s.{Attribute, KindTransformer}
 import org.typelevel.otel4s.trace.Tracer
-import org.typelevel.otel4s.trace.TracerProvider
-import org.typelevel.otel4s.trace.SpanContext
-import scodec.bits.ByteVector
-import org.typelevel.otel4s.trace.SamplingDecision
-import cats.effect.kernel.CancelScope.Uncancelable
 
 object ServerMiddleware {
 
@@ -74,61 +64,52 @@ object ServerMiddleware {
     def withDoNotTrace(doNotTrace: RequestPrelude => Boolean) = copy(doNotTrace = doNotTrace)
 
 
-    final class MakeSureYouKnowWhatYouAreDoing{
-
-
-      def buildTracedF[G[_]: MonadCancelThrow: Tracer](fk: F ~> G)(f: Http[G, F]): Http[G, F] = {
-        cats.data.Kleisli{(req: Request[F]) =>
-          if (doNotTrace(req.requestPrelude)) f(req)
-          else {
-            val init = request(req, reqHeaders, routeClassifier, includeUrl) ++ additionalRequestTags(req)
-            MonadCancelThrow[G].uncancelable( poll =>
-              Tracer[G].joinOrRoot(req.headers){
-                Tracer[G].span(serverSpanName(req), init:_*).use{span =>
-                  poll(f.run(req))
-                    .guaranteeCase{
-                      case Outcome.Succeeded(fa) =>
-                        span.addAttribute(Attribute("exit.case","succeeded")) >>
-                        fa.flatMap{resp =>
+    private def buildTracedF[G[_]: MonadCancelThrow](f: Http[G, F])(implicit kt: KindTransformer[F, G]): Http[G, F] =
+      Kleisli { (req: Request[F]) =>
+        if (doNotTrace(req.requestPrelude)) f(req)
+        else {
+          val init = request(req, reqHeaders, routeClassifier, includeUrl) ++ additionalRequestTags(req)
+          MonadCancelThrow[G].uncancelable { poll =>
+            val tracerG = Tracer[F].mapK[G]
+            tracerG.joinOrRoot(req.headers) {
+              tracerG.span(serverSpanName(req), init: _*).use { span =>
+                poll(f.run(req))
+                  .guaranteeCase {
+                    case Outcome.Succeeded(fa) =>
+                      span.addAttribute(Attribute("exit.case", "succeeded")) >>
+                        fa.flatMap { resp =>
                           val out = response(resp, respHeaders) ++ additionalResponseTags(resp)
-                          span.addAttributes(out:_*)
+                          span.addAttributes(out: _*)
                         }
-                      case Outcome.Errored(e) =>
-                        span.addAttribute(Attribute("exit.case", "errored")) >>
-                        span.addAttributes(OTHttpTags.Errors.error(e):_*)
-                      case Outcome.Canceled() =>
-                        span.addAttributes(
-                          Attribute("exit.case", "canceled"),
-                          Attribute("canceled", true),
-                          Attribute("error", true) // A cancelled http is an error for the server. The connection got cut for some reason.
-                        )
-                    }
-
-                }
-              }(helpers.textMapGetter)
-            )
+                    case Outcome.Errored(e) =>
+                      span.addAttribute(Attribute("exit.case", "errored")) >>
+                        span.addAttributes(OTHttpTags.Errors.error(e): _*)
+                    case Outcome.Canceled() =>
+                      span.addAttributes(
+                        Attribute("exit.case", "canceled"),
+                        Attribute("canceled", true),
+                        Attribute("error", true) // A cancelled http is an error for the server. The connection got cut for some reason.
+                      )
+                  }
+              }
+            }
           }
         }
       }
-    }
-
-    def MakeSureYouKnowWhatYouAreDoing = new MakeSureYouKnowWhatYouAreDoing()
 
     def buildHttpApp(f: HttpApp[F]): HttpApp[F] =
-      MakeSureYouKnowWhatYouAreDoing.buildTracedF(FunctionK.id)(f)
+      buildTracedF(f)
 
-    // def buildHttpRoutes(f: HttpRoutes[F]): HttpRoutes[F] =
-    //   MakeSureYouKnowWhatYouAreDoing.buildTracedF(OptionT.liftK)(f)
-
+    def buildHttpRoutes(f: HttpRoutes[F]): HttpRoutes[F] =
+      buildTracedF(f)
   }
-
 
   private[natchezhttp4sotel] def request[F[_]](req: Request[F], headers: Set[CIString], routeClassifier: Request[F] => Option[String]): List[Attribute[_]] = {
     request(req, headers, routeClassifier, Function.const[Boolean, Request[F]](true))
   }
 
   def request[F[_]](request: Request[F], headers: Set[CIString], routeClassifier: Request[F] => Option[String], includeUrl: Request[F] => Boolean): List[Attribute[_]] = {
-    val builder = new ListBuffer[Attribute[_]]()
+    val builder = List.newBuilder[Attribute[_]]
     builder += OTHttpTags.Common.kind("server")
     builder += OTHttpTags.Common.method(request.method)
     if (includeUrl(request)) {
@@ -154,7 +135,6 @@ object ServerMiddleware {
       builder += OTHttpTags.Server.route(s)
     )
 
-
     builder += OTHttpTags.Common.flavor(request.httpVersion)
 
     request.remote.foreach{sa =>
@@ -171,12 +151,11 @@ object ServerMiddleware {
     builder ++= 
       OTHttpTags.Headers.request(request.headers, headers)
 
-
-    builder.toList
+    builder.result()
   }
 
   def response[F[_]](response: Response[F], headers: Set[CIString]): List[Attribute[_]] = {
-    val builder = new ListBuffer[Attribute[_]]()
+    val builder = List.newBuilder[Attribute[_]]
 
     builder += OTHttpTags.Common.status(response.status)
     response.contentLength.foreach(l => 
@@ -185,8 +164,7 @@ object ServerMiddleware {
     builder ++=
       OTHttpTags.Headers.response(response.headers, headers)
 
-    
-    builder.toList
+    builder.result()
   }
 
   val ExcludedHeaders: Set[CIString] = {
