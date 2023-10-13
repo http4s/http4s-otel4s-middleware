@@ -1,26 +1,9 @@
 package io.chrisdavenport.natchezhttp4sotel
 
-import cats.effect.MonadCancelThrow
-import cats.syntax.functor._
-import org.typelevel.otel4s.trace.{Tracer, TracerBuilder, TracerProvider}
-import org.typelevel.otel4s.KindTransformer
-
 import java.io.{OutputStream, FilterOutputStream, ByteArrayOutputStream, PrintStream}
 import scala.util.Using
 
 private[natchezhttp4sotel] object helpers {
-  def builderMapK[F[_]: MonadCancelThrow, G[_]: MonadCancelThrow](b: TracerBuilder[F])(implicit kt: KindTransformer[F, G]): TracerBuilder[G] =
-    new TracerBuilder[G] {
-      def withVersion(version: String): TracerBuilder[G] =
-        builderMapK[F, G](b.withVersion(version))
-      def withSchemaUrl(schemaUrl: String): TracerBuilder[G] =
-        builderMapK[F, G](b.withSchemaUrl(schemaUrl))
-      def get: G[Tracer[G]] = kt.liftK(b.get.map(_.mapK[G]))
-    }
-
-  def providerMapK[F[_]: MonadCancelThrow, G[_]: MonadCancelThrow](tp: TracerProvider[F])(implicit kt: KindTransformer[F, G]): TracerProvider[G] =
-    (name: String) => builderMapK(tp.tracer(name))
-
   def listStackTrace(e: Throwable): List[String] = {
     e.getStackTrace().toList.map(
       element => element.toString()
