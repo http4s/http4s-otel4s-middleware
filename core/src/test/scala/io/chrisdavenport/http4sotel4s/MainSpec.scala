@@ -1,4 +1,4 @@
-package io.chrisdavenport.natchezhttp4sotel
+package io.chrisdavenport.http4sotel4s
 
 import munit.CatsEffectSuite
 // import cats.effect._
