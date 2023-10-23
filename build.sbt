@@ -57,15 +57,16 @@ lazy val core = crossProject(JVMPlatform)
       "co.fs2"                      %%% "fs2-core"                   % fs2V,
       "co.fs2"                      %%% "fs2-io"                     % fs2V,
 
-      "org.http4s"                  %%% "http4s-server"        % http4sV,
-      "org.http4s"                  %%% "http4s-client"        % http4sV,
+      "org.http4s"                  %%% "http4s-server"              % http4sV,
+      "org.http4s"                  %%% "http4s-client"              % http4sV,
 
-      "org.typelevel"               %%% "otel4s-core-trace" % otel4sV,
-      "org.typelevel"               %%% "otel4s-java"       % otel4sV,
-      "org.typelevel"               %%% "cats-mtl" % catsMtlV,
+      "org.typelevel"               %%% "otel4s-core-trace"          % otel4sV,
+      "org.typelevel"               %%% "otel4s-java"                % otel4sV,
+      "org.typelevel"               %%% "cats-mtl"                   % catsMtlV,
 
-
-      "org.typelevel"               %%% "munit-cats-effect"        % munitCatsEffectV         % Test,
+      "io.opentelemetry"            % "opentelemetry-sdk-testing"    % openTelemetryV   % Test,
+      "org.typelevel"               %%% "cats-effect-testkit"        % catsEffectV      % Test,
+      "org.typelevel"               %%% "munit-cats-effect"          % munitCatsEffectV % Test,
     )
   )
 

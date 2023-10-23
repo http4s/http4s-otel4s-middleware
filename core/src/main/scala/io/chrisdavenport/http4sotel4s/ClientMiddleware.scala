@@ -11,7 +11,7 @@ import org.http4s.headers.{Host, `User-Agent`}
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.trace.Tracer
-import org.typelevel.vault.Key
+import org.typelevel.vault.{Key, Vault}
 
 import scala.collection.mutable.ListBuffer
 
@@ -177,7 +177,7 @@ object ClientMiddleware {
     builder.toList
   }
 
-  private def retryCount(vault: org.typelevel.vault.Vault): Option[Int] = {
+  private def retryCount(vault: Vault): Option[Int] = {
     // AttemptCountKey is 1,2,3,4 for the initial request,
     // since we want to do retries. We substract by 1 to get 0,1,2,3.
     vault.lookup(Retry.AttemptCountKey).map(i => i - 1)
