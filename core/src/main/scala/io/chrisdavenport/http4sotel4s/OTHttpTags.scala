@@ -151,16 +151,4 @@ object OTHttpTags {
       "X-B3-TraceId",
     ).map(CIString(_))
   }
-
-  // https://github.com/open-telemetry/opentelemetry-specification/blob/a50def370ef444029a12ea637769229768daeaf8/specification/trace/semantic_conventions/exceptions.md
-  object Errors {
-    def error(e: Throwable): List[Attribute[_]] = {
-      val error: Option[Attribute[Boolean]] = Attribute("error" ,true).some
-      val message: Option[Attribute[String]] = Option(e.getMessage()).map(Attribute("exception.message" , _))
-      val className: Option[Attribute[String]] = Attribute("exception.type" , e.getClass.getName).some
-      val stacktrace: Option[Attribute[String]] = Attribute("exception.stacktrace" , helpers.printStackTrace(e)).some
-      List(error, message, className, stacktrace).flatten // List[Option[A]] => List[A] using internal speedery
-    }
-  }
-
 }

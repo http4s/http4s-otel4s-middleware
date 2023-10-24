@@ -82,8 +82,8 @@ object ServerMiddleware {
                           span.addAttributes(out: _*)
                         }
                     case Outcome.Errored(e) =>
-                      span.addAttribute(Attribute("exit.case", "errored")) >>
-                        span.addAttributes(OTHttpTags.Errors.error(e): _*)
+                      span.recordException(e) >>
+                        span.addAttribute(Attribute("exit.case", "errored"))
                     case Outcome.Canceled() =>
                       span.addAttributes(
                         Attribute("exit.case", "canceled"),

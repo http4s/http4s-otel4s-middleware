@@ -83,10 +83,9 @@ object ClientMiddleware {
                     )
                   )
                 case Outcome.Errored(e) =>
-                  val exitCase: Attribute[String] = Attribute("exit.case", "errored")
-                  val error = OTHttpTags.Errors.error(e)
                   Resource.eval(
-                    span.addAttributes((exitCase :: error):_*)
+                    span.recordException(e) >>
+                      span.addAttribute(Attribute("exit.case", "errored"))
                   )
                 case Outcome.Canceled() =>
                   // Canceled isn't always an error, but it generally is for http
@@ -98,7 +97,7 @@ object ClientMiddleware {
               // the error case will only get hit if the use block of the resulting resource happens,
               // which is the request processing stage.
               _ <- Resource.makeCase(Applicative[F].unit){
-                case (_, Resource.ExitCase.Errored(e)) => span.addAttributes(OTHttpTags.Errors.error(e):_*)
+                case (_, Resource.ExitCase.Errored(e)) => span.recordException(e)
                 case (_, _) => Applicative[F].unit
               }
             } yield resp
