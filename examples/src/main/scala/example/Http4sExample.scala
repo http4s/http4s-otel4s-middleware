@@ -12,6 +12,7 @@ import fs2.io.net.Network
 import io.opentelemetry.api.GlobalOpenTelemetry
 import org.typelevel.otel4s.Otel4s
 import org.typelevel.otel4s.java.OtelJava
+import org.typelevel.otel4s.java.instances._
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.java.context.{Context, LocalContext}
 
@@ -36,10 +37,12 @@ object Http4sExample extends IOApp with Common {
 
   def globalOtel4s[F[_]: Async: LiftIO]: F[(OtelJava[F], LocalContext[F])] =
     Sync[F].delay(GlobalOpenTelemetry.get)
-      .flatMap{ jOtel =>
-        ExternalHelpers.local(Context.root).map(local =>
-          OtelJava.local[F](jOtel)(Async[F], local) -> local
-        )
+      .flatMap { jOtel =>
+        IOLocal(Context.root)
+          .map { implicit ioLocal =>
+            OtelJava.local[F](jOtel) -> implicitly[LocalContext[F]]
+          }
+          .to[F]
       }
 
   def tracer[F[_]](otel: Otel4s[F]): F[Tracer[F]] =
@@ -58,9 +61,9 @@ object Http4sExample extends IOApp with Common {
 
   // Done!
   def run(args: List[String]): IO[ExitCode] =
-    Resource.eval(globalOtel4s[IO]).flatMap{
+    Resource.eval(globalOtel4s[IO]).flatMap {
       case (otel4s, _) =>
-        Resource.eval(tracer(otel4s)).flatMap{ implicit T: Tracer[IO] =>
+        Resource.eval(tracer(otel4s)).flatMap { implicit T: Tracer[IO] =>
           server[IO]
         }
     }.use(_ => IO.never)

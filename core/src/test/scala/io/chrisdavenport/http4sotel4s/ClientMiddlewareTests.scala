@@ -2,7 +2,6 @@ package io.chrisdavenport.http4sotel4s
 
 import munit.CatsEffectSuite
 import cats.effect.{IO, IOLocal}
-import io.chrisdavenport.http4sotel4s.ExternalHelpers._
 import io.opentelemetry.api.common.{AttributeKey => JAttributeKey}
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
 import io.opentelemetry.context.propagation.{ContextPropagators => JContextPropagators}
@@ -15,6 +14,7 @@ import org.http4s._
 import org.http4s.client._
 import org.typelevel.otel4s.java.OtelJava
 import org.typelevel.otel4s.java.context.Context
+import org.typelevel.otel4s.java.instances._
 import org.typelevel.otel4s.trace.{Tracer, TracerProvider}
 
 import scala.jdk.CollectionConverters._
