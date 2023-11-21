@@ -2,26 +2,14 @@ import com.typesafe.tools.mima.core._
 
 ThisBuild / tlBaseVersion := "0.3" // your current series x.y
 
-ThisBuild / organization := "io.chrisdavenport"
-ThisBuild / organizationName := "Christopher Davenport"
 ThisBuild / licenses := Seq(License.MIT)
 ThisBuild / developers := List(
   // your GitHub handle and name
   tlGitHubDev("christopherdavenport", "Christopher Davenport")
 )
 
-ThisBuild / tlCiReleaseBranches := Seq("main")
-
-// true by default, set to false to publish to s01.oss.sonatype.org
-ThisBuild / tlSonatypeUseLegacyHost := true
-
 ThisBuild / crossScalaVersions := Seq("2.12.18", "2.13.11", "3.3.0")
 ThisBuild / scalaVersion := "3.3.0"
-
-ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"))
-ThisBuild / tlJdkRelease := Some(8)
-
-ThisBuild / testFrameworks += new TestFramework("munit.Framework")
 
 val catsV = "2.9.0"
 val catsEffectV = "3.5.0"
@@ -33,21 +21,14 @@ val munitCatsEffectV = "2.0.0-M3"
 
 val slf4jV    = "1.7.30"
 
-
-// Projects
-lazy val `natchez-http4s-otel` = tlCrossRootProject
+lazy val `http4s-otel4s` = tlCrossRootProject
   .aggregate(core, examples)
 
 lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
   .settings(
-    name := "natchez-http4s-otel",
-    mimaBinaryIssueFilters ++= Seq(
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.natchezhttp4sotel.ClientMiddleware.request"),
-      ProblemFilters.exclude[DirectMissingMethodProblem]("io.chrisdavenport.natchezhttp4sotel.ServerMiddleware.request")
-    ),
-
+    name := "http4s-otel4s",
     libraryDependencies ++= Seq(
       "org.typelevel"               %%% "cats-core"                  % catsV,
       "org.typelevel"               %%% "cats-effect"                % catsEffectV,
@@ -84,5 +65,5 @@ lazy val examples = project.in(file("examples"))
   )
 
 lazy val site = project.in(file("site"))
-  .enablePlugins(TypelevelSitePlugin)
+  .enablePlugins(Http4sOrgSitePlugin)
   .dependsOn(core.jvm)
