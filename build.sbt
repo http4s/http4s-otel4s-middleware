@@ -15,8 +15,8 @@ ThisBuild / tlCiReleaseBranches := Seq("main")
 // true by default, set to false to publish to s01.oss.sonatype.org
 ThisBuild / tlSonatypeUseLegacyHost := true
 
-ThisBuild / crossScalaVersions := Seq("2.12.18", "2.13.12", "3.3.0")
-ThisBuild / scalaVersion := "3.3.0"
+ThisBuild / crossScalaVersions := Seq("2.12.18", "2.13.12", "3.3.1")
+ThisBuild / scalaVersion := "3.3.1"
 
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"))
 ThisBuild / tlJdkRelease := Some(8)
