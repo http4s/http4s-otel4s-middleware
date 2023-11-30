@@ -4,10 +4,6 @@ import cats._
 import cats.effect.{Trace => _, _}
 import cats.syntax.all._
 import org.typelevel.otel4s.Attribute
-// import io.jaegertracing.Configuration.ReporterConfiguration
-// import io.jaegertracing.Configuration.SamplerConfiguration
-// import natchez._
-// import natchez.jaeger.Jaeger
 import org.typelevel.otel4s.trace.Tracer
 import org.http4s.dsl.Http4sDsl
 import org.http4s.HttpRoutes
