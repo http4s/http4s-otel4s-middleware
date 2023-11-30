@@ -18,7 +18,7 @@ ThisBuild / tlSonatypeUseLegacyHost := true
 val scala213 = "2.13.12"
 val scala3 = "3.3.1"
 ThisBuild / crossScalaVersions := Seq(scala213, scala3)
-ThisBuild / scalaVersion := scala3
+ThisBuild / scalaVersion := scala213
 
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"))
 ThisBuild / tlJdkRelease := Some(8)
