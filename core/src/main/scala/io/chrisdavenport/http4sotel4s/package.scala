@@ -2,7 +2,7 @@ package io.chrisdavenport
 
 import org.http4s.{Header, Headers}
 import org.typelevel.ci.CIString
-import org.typelevel.otel4s.{TextMapGetter, TextMapUpdater}
+import org.typelevel.otel4s.context.propagation.{TextMapGetter, TextMapUpdater}
 
 package object http4sotel4s {
   implicit val headersTMU: TextMapUpdater[Headers] =
