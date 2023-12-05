@@ -1,13 +1,20 @@
 package example
 
 import cats.effect._
+import cats.syntax.all._
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.server.Server
 import org.http4s.implicits._
-import io.chrisdavenport.natchezhttp4sotel._
-import io.chrisdavenport.fiberlocal.GenFiberLocal
+import io.chrisdavenport.http4sotel4s._
 import com.comcast.ip4s._
+import fs2.io.net.Network
+import io.opentelemetry.api.GlobalOpenTelemetry
+import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.java.OtelJava
+import org.typelevel.otel4s.java.instances._
+import org.typelevel.otel4s.trace.Tracer
+import org.typelevel.otel4s.java.context.{Context, LocalContext}
 
 /**
  * Start up Jaeger thus:
@@ -28,13 +35,25 @@ import com.comcast.ip4s._
 */
 object Http4sExample extends IOApp with Common {
 
+  def globalOtel4s[F[_]: Async: LiftIO]: F[(OtelJava[F], LocalContext[F])] =
+    Sync[F].delay(GlobalOpenTelemetry.get)
+      .flatMap { jOtel =>
+        IOLocal(Context.root)
+          .map { implicit ioLocal =>
+            OtelJava.local[F](jOtel) -> implicitly[LocalContext[F]]
+          }
+          .to[F]
+      }
+
+  def tracer[F[_]](otel: Otel4s[F]): F[Tracer[F]] =
+    otel.tracerProvider.tracer("Http4sExample").get
+
   // Our main app resource
-  def server[F[_]: Async: GenFiberLocal]: Resource[F, Server] =
+  def server[F[_]: Async: Network: Tracer]: Resource[F, Server] =
     for {
-      iClient <- EmberClientBuilder.default[F].build
-      ep <- entryPoint[F]
-      app = ServerMiddleware.default(ep).buildHttpApp{implicit T: natchez.Trace[F] => 
-        val client = ClientMiddleware.default.build(iClient)
+      client <- EmberClientBuilder.default[F].build
+        .map(ClientMiddleware.default.build)
+      app = ServerMiddleware.default[F].buildHttpApp {
         routes(client).orNotFound
       }
       sv <- EmberServerBuilder.default[F].withPort(port"8080").withHttpApp(app).build
@@ -42,6 +61,11 @@ object Http4sExample extends IOApp with Common {
 
   // Done!
   def run(args: List[String]): IO[ExitCode] =
-    server[IO].use(_ => IO.never)
+    Resource.eval(globalOtel4s[IO]).flatMap {
+      case (otel4s, _) =>
+        Resource.eval(tracer(otel4s)).flatMap { implicit T: Tracer[IO] =>
+          server[IO]
+        }
+    }.use(_ => IO.never)
 
 }

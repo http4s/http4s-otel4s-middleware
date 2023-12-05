@@ -1,16 +1,16 @@
-package io.chrisdavenport.natchezhttp4sotel
+package io.chrisdavenport.http4sotel4s
 
-private[natchezhttp4sotel] object helpers {
-  import java.io.{OutputStream, FilterOutputStream, ByteArrayOutputStream, PrintStream}
+import java.io.{OutputStream, FilterOutputStream, ByteArrayOutputStream, PrintStream}
+import scala.util.Using
 
+private[http4sotel4s] object helpers {
   def printStackTrace(e: Throwable): String = {
     val baos = new ByteArrayOutputStream
-    val fs   = new AnsiFilterStream(baos)
-    val ps   = new PrintStream(fs, true, "UTF-8")
-    e.printStackTrace(ps)
-    ps.close
-    fs.close
-    baos.close
+    Using.resource(new AnsiFilterStream(baos)) { fs =>
+      Using.resource(new PrintStream(fs, true, "UTF-8")) { ps =>
+        e.printStackTrace(ps)
+      }
+    }
     new String(baos.toByteArray, "UTF-8")
   }
 
