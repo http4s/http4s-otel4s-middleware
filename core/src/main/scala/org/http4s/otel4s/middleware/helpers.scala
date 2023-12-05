@@ -1,9 +1,9 @@
-package io.chrisdavenport.http4sotel4s
+package org.http4s.otel4s.middleware
 
 import java.io.{OutputStream, FilterOutputStream, ByteArrayOutputStream, PrintStream}
 import scala.util.Using
 
-private[http4sotel4s] object helpers {
+private[middleware] object helpers {
   def printStackTrace(e: Throwable): String = {
     val baos = new ByteArrayOutputStream
     Using.resource(new AnsiFilterStream(baos)) { fs =>

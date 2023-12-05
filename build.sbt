@@ -1,14 +1,11 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.3" // your current series x.y
+ThisBuild / tlBaseVersion := "0.1" // your current series x.y
 
-ThisBuild / organization := "io.chrisdavenport"
-ThisBuild / organizationName := "Christopher Davenport"
+ThisBuild / organization := "org.http4s"
+ThisBuild / organizationName := "http4s.org"
 ThisBuild / licenses := Seq(License.MIT)
-ThisBuild / developers := List(
-  // your GitHub handle and name
-  tlGitHubDev("christopherdavenport", "Christopher Davenport")
-)
+ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
 
 ThisBuild / tlCiReleaseBranches := Seq("main")
 
@@ -40,14 +37,14 @@ val slf4jV    = "1.7.36"
 
 
 // Projects
-lazy val `natchez-http4s-otel` = tlCrossRootProject
+lazy val `http4s-otel4s-middleware` = tlCrossRootProject
   .aggregate(core, examples)
 
 lazy val core = crossProject(JVMPlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
   .settings(
-    name := "http4s-otel4s",
+    name := "http4s-otel4s-middleware",
 
     libraryDependencies ++= Seq(
       "org.typelevel"               %%% "cats-core"                  % catsV,
@@ -60,12 +57,12 @@ lazy val core = crossProject(JVMPlatform)
       "org.http4s"                  %%% "http4s-client"              % http4sV,
 
       "org.typelevel"               %%% "otel4s-core-trace"          % otel4sV,
-      "org.typelevel"               %%% "otel4s-java"                % otel4sV,
       "org.typelevel"               %%% "cats-mtl"                   % catsMtlV,
 
       "io.opentelemetry"            % "opentelemetry-sdk-testing"    % openTelemetryV   % Test,
       "org.typelevel"               %%% "cats-effect-testkit"        % catsEffectV      % Test,
       "org.typelevel"               %%% "munit-cats-effect"          % munitCatsEffectV % Test,
+      "org.typelevel"               %%% "otel4s-java"                % otel4sV          % Test,
     )
   )
 
