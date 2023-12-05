@@ -36,7 +36,7 @@ val otel4sV = "0.3.0"
 
 val munitCatsEffectV = "2.0.0-M3"
 
-val slf4jV    = "1.7.30"
+val slf4jV    = "1.7.36"
 
 
 // Projects
