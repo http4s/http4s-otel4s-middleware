@@ -5,7 +5,6 @@ import org.typelevel.otel4s.Attribute
 import org.http4s.headers._
 import com.comcast.ip4s._
 import org.typelevel.ci.CIString
-import cats.syntax.all._
 // This follows the documents here
 // https://github.com/open-telemetry/opentelemetry-specification/blob/a50def370ef444029a12ea637769229768daeaf8/specification/trace/semantic_conventions/http.md
 // We can update both the link and the tags as standards develop out of experimental
@@ -27,7 +26,7 @@ object OTHttpTags {
     def responseContentLength(cl: Long): Attribute[Long] = Attribute("http.response_content_length" , cl)
     def retryCount(i: Int): Attribute[Long] = Attribute("http.retry_count" , i.toLong)
     def peerIp(ip: IpAddress): Attribute[String] = Attribute("net.peer.ip" , ip.toString()) // TODO: Check that this is the right way
-    def peerPort(port: Port): Attribute[Long] = Attribute("net.peer.port" , port.value)
+    def peerPort(port: Port): Attribute[Long] = Attribute("net.peer.port" , port.value.toLong)
   }
 
   object Client {
