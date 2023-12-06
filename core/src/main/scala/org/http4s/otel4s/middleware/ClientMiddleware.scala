@@ -1,4 +1,4 @@
-package io.chrisdavenport.http4sotel4s
+package org.http4s.otel4s.middleware
 
 import cats.Applicative
 import cats.effect.kernel.Outcome
@@ -30,7 +30,7 @@ object ClientMiddleware {
     def includeUrl[F[_]]: Request[F] => Boolean = {(_: Request[F]) => true}
   }
 
-  final class ClientMiddlewareBuilder[F[_]: Tracer: Concurrent] private[ClientMiddleware] (
+  final class ClientMiddlewareBuilder[F[_]: Tracer: Concurrent] private[ClientMiddleware](
     private val reqHeaders: Set[CIString],
     private val respHeaders: Set[CIString],
     private val clientSpanName: Request[F] => String,
@@ -108,7 +108,7 @@ object ClientMiddleware {
 
   val ExtraTagsKey: Key[List[Attribute[_]]] = Key.newKey[SyncIO, List[Attribute[_]]].unsafeRunSync()
 
-  private[http4sotel4s] def request[F[_]](req: Request[F], headers: Set[CIString]): List[Attribute[_]] = {
+  private[middleware] def request[F[_]](req: Request[F], headers: Set[CIString]): List[Attribute[_]] = {
     request(req, headers, Function.const[Boolean, Request[F]](true)(_))
   }
   def request[F[_]](request: Request[F], headers: Set[CIString], includeUrl: Request[F] => Boolean): List[Attribute[_]] = {

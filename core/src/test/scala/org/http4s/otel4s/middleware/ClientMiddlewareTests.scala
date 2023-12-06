@@ -1,4 +1,4 @@
-package io.chrisdavenport.http4sotel4s
+package org.http4s.otel4s.middleware
 
 import munit.CatsEffectSuite
 import cats.effect.{IO, IOLocal}

@@ -6,10 +6,10 @@ import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.server.Server
 import org.http4s.implicits._
-import io.chrisdavenport.http4sotel4s._
 import com.comcast.ip4s._
 import fs2.io.net.Network
 import io.opentelemetry.api.GlobalOpenTelemetry
+import org.http4s.otel4s.middleware.{ClientMiddleware, ServerMiddleware}
 import org.typelevel.otel4s.Otel4s
 import org.typelevel.otel4s.java.OtelJava
 import org.typelevel.otel4s.java.instances._

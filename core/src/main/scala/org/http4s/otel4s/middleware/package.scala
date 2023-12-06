@@ -1,10 +1,10 @@
-package io.chrisdavenport
+package org.http4s.otel4s
 
 import org.http4s.{Header, Headers}
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.context.propagation.{TextMapGetter, TextMapUpdater}
 
-package object http4sotel4s {
+package object middleware {
   implicit val headersTMU: TextMapUpdater[Headers] =
     (carrier: Headers, key: String, value: String) => carrier.put(Header.Raw(CIString(key), value))
   implicit val headersTMG: TextMapGetter[Headers] =

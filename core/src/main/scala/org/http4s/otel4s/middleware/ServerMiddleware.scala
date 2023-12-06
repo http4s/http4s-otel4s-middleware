@@ -1,4 +1,4 @@
-package io.chrisdavenport.http4sotel4s
+package org.http4s.otel4s.middleware
 
 import cats.data.Kleisli
 import cats.effect.kernel.{MonadCancelThrow, Outcome}
@@ -28,7 +28,7 @@ object ServerMiddleware {
     def doNotTrace: RequestPrelude => Boolean = {(_: RequestPrelude) => false}
   }
 
-  final class ServerMiddlewareBuilder[F[_]: Tracer: MonadCancelThrow] private[ServerMiddleware] (
+  final class ServerMiddlewareBuilder[F[_]: Tracer: MonadCancelThrow] private[ServerMiddleware](
     isKernelHeader: CIString => Boolean,
     reqHeaders: Set[CIString],
     respHeaders: Set[CIString],
@@ -104,7 +104,7 @@ object ServerMiddleware {
       buildTracedF(f)
   }
 
-  private[http4sotel4s] def request[F[_]](req: Request[F], headers: Set[CIString], routeClassifier: Request[F] => Option[String]): List[Attribute[_]] = {
+  private[middleware] def request[F[_]](req: Request[F], headers: Set[CIString], routeClassifier: Request[F] => Option[String]): List[Attribute[_]] = {
     request(req, headers, routeClassifier, Function.const[Boolean, Request[F]](true))
   }
 

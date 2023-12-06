@@ -1,4 +1,4 @@
-package io.chrisdavenport.http4sotel4s
+package org.http4s.otel4s.middleware
 
 import org.http4s._
 import org.typelevel.otel4s.Attribute
