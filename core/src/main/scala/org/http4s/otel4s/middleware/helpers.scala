@@ -16,7 +16,10 @@
 
 package org.http4s.otel4s.middleware
 
-import java.io.{OutputStream, FilterOutputStream, ByteArrayOutputStream, PrintStream}
+import java.io.ByteArrayOutputStream
+import java.io.FilterOutputStream
+import java.io.OutputStream
+import java.io.PrintStream
 import scala.util.Using
 
 private[middleware] object helpers {
@@ -37,7 +40,7 @@ private[middleware] object helpers {
 
     val S: State = State {
       case 27 => I0
-      case _  => F
+      case _ => F
     }
 
     val F: State = State(_ => F)
@@ -46,26 +49,24 @@ private[middleware] object helpers {
 
     val I0: State = State {
       case '[' => I1
-      case _   => F
+      case _ => F
     }
 
     val I1: State = State {
-      case '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
-              => I2
-      case _   => F
+      case '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => I2
+      case _ => F
     }
 
     val I2: State = State {
-      case '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9'
-              => I2
+      case '0' | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' => I2
       case ';' => I1
       case '@' | 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | 'J' | 'K' | 'L' | 'M' | 'N' |
-          'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z' | '[' | '\\'| ']' |
+          'O' | 'P' | 'Q' | 'R' | 'S' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z' | '[' | '\\' | ']' |
           '^' | '_' | '`' | 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g' | 'h' | 'i' | 'j' | 'k' | 'l' |
           'm' | 'n' | 'o' | 'p' | 'q' | 'r' | 's' | 't' | 'u' | 'v' | 'w' | 'x' | 'y' | 'z' | '{' |
-          '|' | '}' | '~'
-              => T // end of ANSI escape
-      case _   => F
+          '|' | '}' | '~' =>
+        T // end of ANSI escape
+      case _ => F
     }
 
     // Strategy is, accumulate values as long as we're in a non-terminal state, then either discard
@@ -73,7 +74,7 @@ private[middleware] object helpers {
     // we reach F.
 
     private var stack: List[Int] = Nil
-    private var state: State     = S // Start
+    private var state: State = S // Start
 
     override def write(n: Int): Unit =
       state.apply(n) match {

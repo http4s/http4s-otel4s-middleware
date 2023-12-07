@@ -16,22 +16,24 @@
 
 package org.http4s.otel4s.middleware
 
-import munit.CatsEffectSuite
-import cats.effect.{IO, IOLocal}
+import cats.effect.IO
+import cats.effect.IOLocal
 import io.opentelemetry.api.common.{AttributeKey => JAttributeKey}
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
 import io.opentelemetry.context.propagation.{ContextPropagators => JContextPropagators}
-import io.opentelemetry.sdk.{OpenTelemetrySdk => JOpenTelemetrySdk}
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter
 import io.opentelemetry.sdk.trace.SdkTracerProvider
-import io.opentelemetry.sdk.trace.`export`.SimpleSpanProcessor
 import io.opentelemetry.sdk.trace.data.SpanData
+import io.opentelemetry.sdk.trace.`export`.SimpleSpanProcessor
+import io.opentelemetry.sdk.{OpenTelemetrySdk => JOpenTelemetrySdk}
+import munit.CatsEffectSuite
 import org.http4s._
 import org.http4s.client._
 import org.typelevel.otel4s.java.OtelJava
 import org.typelevel.otel4s.java.context.Context
 import org.typelevel.otel4s.java.instances._
-import org.typelevel.otel4s.trace.{Tracer, TracerProvider}
+import org.typelevel.otel4s.trace.Tracer
+import org.typelevel.otel4s.trace.TracerProvider
 
 import scala.jdk.CollectionConverters._
 
@@ -46,7 +48,7 @@ class ClientMiddlewareTests extends CatsEffectSuite {
         implicit val tracer: Tracer[IO] = tracerIO
         val fakeClient =
           Client.fromHttpApp[IO] {
-            HttpApp[IO] { _.body.compile.drain.as(Response[IO](Status.Ok)) }
+            HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
           }
         val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
 
@@ -100,10 +102,8 @@ object ClientMiddlewareTests {
     }
   }
 
-  final class Sdk(
-     val provider: TracerProvider[IO],
-     exporter: InMemorySpanExporter) {
-   def finishedSpans: IO[List[SpanData]] =
-     IO.delay(exporter.getFinishedSpanItems.asScala.toList)
+  final class Sdk(val provider: TracerProvider[IO], exporter: InMemorySpanExporter) {
+    def finishedSpans: IO[List[SpanData]] =
+      IO.delay(exporter.getFinishedSpanItems.asScala.toList)
   }
 }

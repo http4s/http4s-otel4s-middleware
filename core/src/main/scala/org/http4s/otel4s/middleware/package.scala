@@ -16,9 +16,11 @@
 
 package org.http4s.otel4s
 
-import org.http4s.{Header, Headers}
+import org.http4s.Header
+import org.http4s.Headers
 import org.typelevel.ci.CIString
-import org.typelevel.otel4s.context.propagation.{TextMapGetter, TextMapUpdater}
+import org.typelevel.otel4s.context.propagation.TextMapGetter
+import org.typelevel.otel4s.context.propagation.TextMapUpdater
 
 package object middleware {
   implicit val headersTMU: TextMapUpdater[Headers] =
