@@ -9,9 +9,6 @@ ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
 
 ThisBuild / tlCiReleaseBranches := Seq("main")
 
-// true by default, set to false to publish to s01.oss.sonatype.org
-ThisBuild / tlSonatypeUseLegacyHost := true
-
 val scala213 = "2.13.12"
 val scala3 = "3.3.1"
 ThisBuild / crossScalaVersions := Seq(scala213, scala3)
