@@ -2,9 +2,7 @@ import com.typesafe.tools.mima.core._
 
 ThisBuild / tlBaseVersion := "0.1" // your current series x.y
 
-ThisBuild / organization := "org.http4s"
-ThisBuild / organizationName := "http4s.org"
-ThisBuild / licenses := Seq(License.MIT)
+ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
 
 ThisBuild / tlCiReleaseBranches := Seq("main")
