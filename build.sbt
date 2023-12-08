@@ -22,8 +22,6 @@ ThisBuild / testFrameworks += new TestFramework("munit.Framework")
 
 val catsV = "2.10.0"
 val catsEffectV = "3.5.2"
-val catsMtlV = "1.3.1"
-val fs2V = "3.9.2"
 val http4sV = "0.23.23"
 
 val openTelemetryV = "1.31.0"
@@ -45,12 +43,8 @@ lazy val core = crossProject(JVMPlatform)
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "cats-core" % catsV,
       "org.typelevel" %%% "cats-effect" % catsEffectV,
-      "co.fs2" %%% "fs2-core" % fs2V,
-      "co.fs2" %%% "fs2-io" % fs2V,
-      "org.http4s" %%% "http4s-server" % http4sV,
       "org.http4s" %%% "http4s-client" % http4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
-      "org.typelevel" %%% "cats-mtl" % catsMtlV,
       "io.opentelemetry" % "opentelemetry-sdk-testing" % openTelemetryV % Test,
       "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
       "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
@@ -71,7 +65,7 @@ lazy val examples = project
       "org.http4s" %% "http4s-dsl" % http4sV,
       "org.http4s" %% "http4s-ember-server" % http4sV,
       "org.http4s" %% "http4s-ember-client" % http4sV,
-      "org.slf4j" % "slf4j-simple" % slf4jV,
+      "org.slf4j" % "slf4j-simple" % slf4jV % Runtime,
     ),
     run / fork := true,
     javaOptions += "-Dotel.service.name=jaeger-example",
