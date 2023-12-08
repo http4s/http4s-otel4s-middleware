@@ -77,3 +77,4 @@ lazy val site = project
   .in(file("site"))
   .enablePlugins(TypelevelSitePlugin)
   .dependsOn(core.jvm)
+  .settings(tlSite := {}) // disabled until a site is set up
