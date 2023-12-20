@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.1" // your current series x.y
+ThisBuild / tlBaseVersion := "0.2" // your current series x.y
 
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
@@ -32,7 +32,7 @@ val slf4jV = "1.7.36"
 lazy val `http4s-otel4s-middleware` = tlCrossRootProject
   .aggregate(core, examples)
 
-lazy val core = crossProject(JVMPlatform)
+lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
   .settings(
@@ -42,11 +42,20 @@ lazy val core = crossProject(JVMPlatform)
       "org.typelevel" %%% "cats-effect" % catsEffectV,
       "org.http4s" %%% "http4s-client" % http4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
+    ),
+  )
+
+lazy val `core-jvm-tests` = project
+  .in(file("core-jvm-tests"))
+  .enablePlugins(NoPublishPlugin)
+  .dependsOn(core.jvm)
+  .settings(
+    libraryDependencies ++= Seq(
       "io.opentelemetry" % "opentelemetry-sdk-testing" % openTelemetryV % Test,
       "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
       "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
       "org.typelevel" %%% "otel4s-java" % otel4sV % Test,
-    ),
+    )
   )
 
 lazy val examples = project
