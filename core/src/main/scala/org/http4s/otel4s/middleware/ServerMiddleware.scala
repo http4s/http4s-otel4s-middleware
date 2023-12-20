@@ -19,15 +19,21 @@ package org.http4s.otel4s.middleware
 import cats.data.Kleisli
 import cats.effect.kernel.MonadCancelThrow
 import cats.effect.kernel.Outcome
-import cats.effect.syntax.all._
-import cats.syntax.all._
-import org.http4s._
+import cats.effect.syntax.monadCancel._
+import cats.syntax.flatMap._
+import org.http4s.Http
+import org.http4s.HttpApp
+import org.http4s.HttpRoutes
+import org.http4s.Request
+import org.http4s.RequestPrelude
+import org.http4s.Response
 import org.http4s.client.RequestKey
 import org.http4s.headers.Host
 import org.http4s.headers.`User-Agent`
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.KindTransformer
+import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.Tracer
 
 object ServerMiddleware {
@@ -47,8 +53,8 @@ object ServerMiddleware {
 
   object Defaults {
     val isKernelHeader: CIString => Boolean = name => !ExcludedHeaders.contains(name)
-    val reqHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded
-    val respHeaders: Set[CIString] = OTHttpTags.Headers.defaultHeadersIncluded
+    val reqHeaders: Set[CIString] = HttpAttributes.Headers.defaultAllowedHeaders
+    val respHeaders: Set[CIString] = HttpAttributes.Headers.defaultAllowedHeaders
     def routeClassifier[F[_]]: Request[F] => Option[String] = { (_: Request[F]) => None }
     def serverSpanName[F[_]]: Request[F] => String = { (req: Request[F]) =>
       s"Http Server - ${req.method}"
@@ -132,29 +138,34 @@ object ServerMiddleware {
           MonadCancelThrow[G].uncancelable { poll =>
             val tracerG = Tracer[F].mapK[G]
             tracerG.joinOrRoot(req.headers) {
-              tracerG.span(serverSpanName(req), init: _*).use { span =>
-                poll(f.run(req))
-                  .guaranteeCase {
-                    case Outcome.Succeeded(fa) =>
-                      span.addAttribute(Attribute("exit.case", "succeeded")) >>
-                        fa.flatMap { resp =>
-                          val out = response(resp, respHeaders) ++ additionalResponseTags(resp)
-                          span.addAttributes(out: _*)
-                        }
-                    case Outcome.Errored(e) =>
-                      span.recordException(e) >>
-                        span.addAttribute(Attribute("exit.case", "errored"))
-                    case Outcome.Canceled() =>
-                      span.addAttributes(
-                        Attribute("exit.case", "canceled"),
-                        Attribute("canceled", true),
-                        Attribute(
-                          "error",
-                          true,
-                        ), // A cancelled http is an error for the server. The connection got cut for some reason.
-                      )
-                  }
-              }
+              tracerG
+                .spanBuilder(serverSpanName(req))
+                .withSpanKind(SpanKind.Server)
+                .addAttributes(init: _*)
+                .build
+                .use { span =>
+                  poll(f.run(req))
+                    .guaranteeCase {
+                      case Outcome.Succeeded(fa) =>
+                        span.addAttribute(Attribute("exit.case", "succeeded")) >>
+                          fa.flatMap { resp =>
+                            val out = response(resp, respHeaders) ++ additionalResponseTags(resp)
+                            span.addAttributes(out: _*)
+                          }
+                      case Outcome.Errored(e) =>
+                        span.recordException(e) >>
+                          span.addAttribute(Attribute("exit.case", "errored"))
+                      case Outcome.Canceled() =>
+                        span.addAttributes(
+                          Attribute("exit.case", "canceled"),
+                          Attribute("canceled", true),
+                          Attribute(
+                            "error",
+                            true,
+                          ), // A canceled http is an error for the server. The connection got cut for some reason.
+                        )
+                    }
+                }
             }
           }
         }
@@ -176,52 +187,47 @@ object ServerMiddleware {
 
   def request[F[_]](
       request: Request[F],
-      headers: Set[CIString],
+      allowedHeaders: Set[CIString],
       routeClassifier: Request[F] => Option[String],
       includeUrl: Request[F] => Boolean,
   ): List[Attribute[_]] = {
     val builder = List.newBuilder[Attribute[_]]
-    builder += OTHttpTags.Common.kind("server")
-    builder += OTHttpTags.Common.method(request.method)
+    builder += HttpAttributes.httpRequestMethod(request.method)
     if (includeUrl(request)) {
-      builder += OTHttpTags.Common.url(request.uri)
-      builder += OTHttpTags.Common.target(request.uri)
+      builder += HttpAttributes.urlFull(request.uri)
+      builder += HttpAttributes.urlPath(request.uri.path)
+      builder += HttpAttributes.urlQuery(request.uri.query)
     }
     val host = request.headers.get[Host].getOrElse {
       val key = RequestKey.fromRequest(request)
       Host(key.authority.host.value, key.authority.port)
     }
-    builder += OTHttpTags.Common.host(host)
-    request.uri.scheme.foreach(s => builder += OTHttpTags.Common.scheme(s))
-    request.headers.get[`User-Agent`].foreach(ua => builder += OTHttpTags.Common.userAgent(ua))
+    builder += HttpAttributes.serverAddress(host)
+    request.uri.scheme.foreach(s => builder += HttpAttributes.urlScheme(s))
+    request.headers.get[`User-Agent`].foreach(ua => builder += HttpAttributes.userAgentOriginal(ua))
 
-    request.contentLength.foreach(l => builder += OTHttpTags.Common.requestContentLength(l))
-    routeClassifier(request).foreach(s => builder += OTHttpTags.Server.route(s))
+    routeClassifier(request).foreach(route => builder += HttpAttributes.Server.httpRoute(route))
 
-    builder += OTHttpTags.Common.flavor(request.httpVersion)
-
-    request.remote.foreach { sa =>
+    request.remote.foreach { socketAddress =>
       builder +=
-        OTHttpTags.Common.peerIp(sa.host)
+        HttpAttributes.networkPeerAddress(socketAddress.host)
 
       builder +=
-        OTHttpTags.Common.peerPort(sa.port)
+        HttpAttributes.Server.clientPort(socketAddress.port)
     }
-    // Special Server
-    request.from.foreach(ip => builder += OTHttpTags.Server.clientIp(ip))
+
+    HttpAttributes.Server.clientAddress(request).foreach(builder += _)
     builder ++=
-      OTHttpTags.Headers.request(request.headers, headers)
+      HttpAttributes.Headers.request(request.headers, allowedHeaders)
 
     builder.result()
   }
 
-  def response[F[_]](response: Response[F], headers: Set[CIString]): List[Attribute[_]] = {
+  def response[F[_]](response: Response[F], allowedHeaders: Set[CIString]): List[Attribute[_]] = {
     val builder = List.newBuilder[Attribute[_]]
 
-    builder += OTHttpTags.Common.status(response.status)
-    response.contentLength.foreach(l => builder += OTHttpTags.Common.responseContentLength(l))
-    builder ++=
-      OTHttpTags.Headers.response(response.headers, headers)
+    builder += HttpAttributes.httpResponseStatusCode(response.status)
+    builder ++= HttpAttributes.Headers.response(response.headers, allowedHeaders)
 
     builder.result()
   }
