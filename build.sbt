@@ -22,7 +22,7 @@ val catsEffectV = "3.5.2"
 val http4sV = "0.23.24"
 
 val openTelemetryV = "1.33.0"
-val otel4sV = "0.3.0"
+val otel4sV = "0.4.0"
 
 val munitCatsEffectV = "2.0.0-M4"
 
