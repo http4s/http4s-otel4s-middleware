@@ -22,7 +22,7 @@ val catsEffectV = "3.5.2"
 val http4sV = "0.23.24"
 
 val openTelemetryV = "1.33.0"
-val otel4sV = "0.3.0"
+val otel4sV = "0.4.0"
 
 val munitCatsEffectV = "2.0.0-M4"
 
@@ -42,6 +42,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.typelevel" %%% "cats-effect" % catsEffectV,
       "org.http4s" %%% "http4s-client" % http4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
+      "org.typelevel" %%% "otel4s-semconv" % otel4sV,
     ),
   )
 
