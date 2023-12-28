@@ -40,9 +40,8 @@ object ServerMiddleware {
 
   def default[F[_]: Tracer: MonadCancelThrow]: ServerMiddlewareBuilder[F] =
     new ServerMiddlewareBuilder[F](
-      Defaults.isKernelHeader,
-      Defaults.reqHeaders,
-      Defaults.respHeaders,
+      Defaults.allowedRequestHeaders,
+      Defaults.allowedResponseHeaders,
       Defaults.routeClassifier,
       Defaults.serverSpanName,
       Defaults.additionalRequestTags,
@@ -52,9 +51,8 @@ object ServerMiddleware {
     )
 
   object Defaults {
-    val isKernelHeader: CIString => Boolean = name => !ExcludedHeaders.contains(name)
-    val reqHeaders: Set[CIString] = HttpAttributes.Headers.defaultAllowedHeaders
-    val respHeaders: Set[CIString] = HttpAttributes.Headers.defaultAllowedHeaders
+    val allowedRequestHeaders: Set[CIString] = HttpAttributes.Headers.defaultAllowedHeaders
+    val allowedResponseHeaders: Set[CIString] = HttpAttributes.Headers.defaultAllowedHeaders
     def routeClassifier[F[_]]: Request[F] => Option[String] = { (_: Request[F]) => None }
     def serverSpanName[F[_]]: Request[F] => String = { (req: Request[F]) =>
       s"Http Server - ${req.method}"
@@ -68,32 +66,28 @@ object ServerMiddleware {
   }
 
   final class ServerMiddlewareBuilder[F[_]: Tracer: MonadCancelThrow] private[ServerMiddleware] (
-      isKernelHeader: CIString => Boolean,
-      reqHeaders: Set[CIString],
-      respHeaders: Set[CIString],
+      allowedRequestHeaders: Set[CIString],
+      allowedResponseHeaders: Set[CIString],
       routeClassifier: Request[F] => Option[String],
       serverSpanName: Request[F] => String,
       additionalRequestTags: Request[F] => Seq[Attribute[_]],
       additionalResponseTags: Response[F] => Seq[Attribute[_]],
       includeUrl: Request[F] => Boolean,
       doNotTrace: RequestPrelude => Boolean,
-  ) { self =>
-
+  ) {
     private def copy(
-        isKernelHeader: CIString => Boolean = self.isKernelHeader,
-        reqHeaders: Set[CIString] = self.reqHeaders,
-        respHeaders: Set[CIString] = self.respHeaders,
-        routeClassifier: Request[F] => Option[String] = self.routeClassifier,
-        serverSpanName: Request[F] => String = self.serverSpanName,
-        additionalRequestTags: Request[F] => Seq[Attribute[_]] = self.additionalRequestTags,
-        additionalResponseTags: Response[F] => Seq[Attribute[_]] = self.additionalResponseTags,
-        includeUrl: Request[F] => Boolean = self.includeUrl,
-        doNotTrace: RequestPrelude => Boolean = self.doNotTrace,
+        allowedRequestHeaders: Set[CIString] = this.allowedRequestHeaders,
+        allowedResponseHeaders: Set[CIString] = this.allowedResponseHeaders,
+        routeClassifier: Request[F] => Option[String] = this.routeClassifier,
+        serverSpanName: Request[F] => String = this.serverSpanName,
+        additionalRequestTags: Request[F] => Seq[Attribute[_]] = this.additionalRequestTags,
+        additionalResponseTags: Response[F] => Seq[Attribute[_]] = this.additionalResponseTags,
+        includeUrl: Request[F] => Boolean = this.includeUrl,
+        doNotTrace: RequestPrelude => Boolean = this.doNotTrace,
     ): ServerMiddlewareBuilder[F] =
       new ServerMiddlewareBuilder[F](
-        isKernelHeader,
-        reqHeaders,
-        respHeaders,
+        allowedRequestHeaders,
+        allowedResponseHeaders,
         routeClassifier,
         serverSpanName,
         additionalRequestTags,
@@ -102,12 +96,10 @@ object ServerMiddleware {
         doNotTrace,
       )
 
-    def withIsKernelHeader(isKernelHeader: CIString => Boolean): ServerMiddlewareBuilder[F] =
-      copy(isKernelHeader = isKernelHeader)
-    def withRequestHeaders(reqHeaders: Set[CIString]): ServerMiddlewareBuilder[F] =
-      copy(reqHeaders = reqHeaders)
-    def withResponseHeaders(respHeaders: Set[CIString]): ServerMiddlewareBuilder[F] =
-      copy(respHeaders = respHeaders)
+    def withAllowedRequestHeaders(allowedHeaders: Set[CIString]): ServerMiddlewareBuilder[F] =
+      copy(allowedRequestHeaders = allowedHeaders)
+    def withAllowedResponseHeaders(allowedHeaders: Set[CIString]): ServerMiddlewareBuilder[F] =
+      copy(allowedResponseHeaders = allowedHeaders)
     def withRouteClassifier(
         routeClassifier: Request[F] => Option[String]
     ): ServerMiddlewareBuilder[F] =
@@ -134,7 +126,12 @@ object ServerMiddleware {
         if (doNotTrace(req.requestPrelude)) f(req)
         else {
           val init =
-            request(req, reqHeaders, routeClassifier, includeUrl) ++ additionalRequestTags(req)
+            request(
+              req,
+              allowedRequestHeaders,
+              routeClassifier,
+              includeUrl,
+            ) ++ additionalRequestTags(req)
           MonadCancelThrow[G].uncancelable { poll =>
             val tracerG = Tracer[F].mapK[G]
             tracerG.joinOrRoot(req.headers) {
@@ -149,7 +146,8 @@ object ServerMiddleware {
                       case Outcome.Succeeded(fa) =>
                         span.addAttribute(Attribute("exit.case", "succeeded")) >>
                           fa.flatMap { resp =>
-                            val out = response(resp, respHeaders) ++ additionalResponseTags(resp)
+                            val out =
+                              response(resp, allowedResponseHeaders) ++ additionalResponseTags(resp)
                             span.addAttributes(out: _*)
                           }
                       case Outcome.Errored(e) =>
@@ -231,26 +229,4 @@ object ServerMiddleware {
 
     builder.result()
   }
-
-  val ExcludedHeaders: Set[CIString] = {
-    import org.http4s.headers._
-    import org.typelevel.ci._
-
-    val payload = Set(
-      `Content-Length`.name,
-      ci"Content-Type",
-      `Content-Range`.name,
-      ci"Trailer",
-      `Transfer-Encoding`.name,
-    )
-
-    val security = Set(
-      Authorization.name,
-      Cookie.name,
-      `Set-Cookie`.name,
-    )
-
-    payload ++ security
-  }
-
 }
