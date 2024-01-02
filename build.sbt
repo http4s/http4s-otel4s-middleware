@@ -4,6 +4,7 @@ ThisBuild / tlBaseVersion := "0.2" // your current series x.y
 
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
+ThisBuild / startYear := Some(2023)
 
 ThisBuild / tlCiReleaseBranches := Seq("main")
 

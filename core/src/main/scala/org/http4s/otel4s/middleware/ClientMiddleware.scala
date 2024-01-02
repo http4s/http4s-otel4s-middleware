@@ -42,8 +42,8 @@ object ClientMiddleware {
 
   def default[F[_]: Tracer: Concurrent]: ClientMiddlewareBuilder[F] =
     new ClientMiddlewareBuilder[F](
-      Defaults.reqHeaders,
-      Defaults.respHeaders,
+      Defaults.allowedRequestHeaders,
+      Defaults.allowedResponseHeaders,
       Defaults.clientSpanName,
       Defaults.additionalRequestTags,
       Defaults.additionalResponseTags,
@@ -51,8 +51,8 @@ object ClientMiddleware {
     )
 
   object Defaults {
-    val reqHeaders = HttpAttributes.Headers.defaultAllowedHeaders
-    val respHeaders = HttpAttributes.Headers.defaultAllowedHeaders
+    val allowedRequestHeaders: Set[CIString] = HttpAttributes.Headers.defaultAllowedHeaders
+    val allowedResponseHeaders: Set[CIString] = HttpAttributes.Headers.defaultAllowedHeaders
     def clientSpanName[F[_]]: Request[F] => String = { (req: Request[F]) =>
       s"Http Client - ${req.method}"
     }
@@ -64,35 +64,35 @@ object ClientMiddleware {
   }
 
   final class ClientMiddlewareBuilder[F[_]: Tracer: Concurrent] private[ClientMiddleware] (
-      private val reqHeaders: Set[CIString],
-      private val respHeaders: Set[CIString],
+      private val allowedRequestHeaders: Set[CIString],
+      private val allowedResponseHeaders: Set[CIString],
       private val clientSpanName: Request[F] => String,
       private val additionalRequestTags: Request[F] => Seq[Attribute[_]],
       private val additionalResponseTags: Response[F] => Seq[Attribute[_]],
       private val includeUrl: Request[F] => Boolean,
-  ) { self =>
+  ) {
     private def copy(
-        reqHeaders: Set[CIString] = self.reqHeaders,
-        respHeaders: Set[CIString] = self.respHeaders,
-        clientSpanName: Request[F] => String = self.clientSpanName,
-        additionalRequestTags: Request[F] => Seq[Attribute[_]] = self.additionalRequestTags,
-        additionalResponseTags: Response[F] => Seq[Attribute[_]] = self.additionalResponseTags,
-        includeUrl: Request[F] => Boolean = self.includeUrl,
+        allowedRequestHeaders: Set[CIString] = this.allowedRequestHeaders,
+        allowedResponseHeaders: Set[CIString] = this.allowedResponseHeaders,
+        clientSpanName: Request[F] => String = this.clientSpanName,
+        additionalRequestTags: Request[F] => Seq[Attribute[_]] = this.additionalRequestTags,
+        additionalResponseTags: Response[F] => Seq[Attribute[_]] = this.additionalResponseTags,
+        includeUrl: Request[F] => Boolean = this.includeUrl,
     ): ClientMiddlewareBuilder[F] =
       new ClientMiddlewareBuilder[F](
-        reqHeaders,
-        respHeaders,
+        allowedRequestHeaders,
+        allowedResponseHeaders,
         clientSpanName,
         additionalRequestTags,
         additionalResponseTags,
         includeUrl,
       )
 
-    def withRequestHeaders(reqHeaders: Set[CIString]): ClientMiddlewareBuilder[F] =
-      copy(reqHeaders = reqHeaders)
+    def withAllowedRequestHeaders(allowedHeaders: Set[CIString]): ClientMiddlewareBuilder[F] =
+      copy(allowedRequestHeaders = allowedHeaders)
 
-    def withResponseHeaders(respHeaders: Set[CIString]): ClientMiddlewareBuilder[F] =
-      copy(respHeaders = respHeaders)
+    def withAllowedResponseHeaders(allowedHeaders: Set[CIString]): ClientMiddlewareBuilder[F] =
+      copy(allowedResponseHeaders = allowedHeaders)
 
     def withClientSpanName(clientSpanName: Request[F] => String): ClientMiddlewareBuilder[F] =
       copy(clientSpanName = clientSpanName)
@@ -113,7 +113,7 @@ object ClientMiddleware {
     def build: Client[F] => Client[F] = { (client: Client[F]) =>
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
 
-        val base = request(req, reqHeaders, includeUrl) ++ additionalRequestTags(req)
+        val base = request(req, allowedRequestHeaders, includeUrl) ++ additionalRequestTags(req)
         MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
           for {
             res <- Tracer[F]
@@ -131,7 +131,7 @@ object ClientMiddleware {
                   fa.flatMap(resp =>
                     Resource.eval(
                       span.addAttributes(
-                        response(resp, respHeaders) ++ additionalResponseTags(resp): _*
+                        response(resp, allowedResponseHeaders) ++ additionalResponseTags(resp): _*
                       )
                     )
                   )

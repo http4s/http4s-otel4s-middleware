@@ -31,6 +31,8 @@ import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.semconv.trace.attributes.SemanticAttributes
 
+import java.util.Locale
+
 object HttpAttributes {
   def httpRequestMethod(method: Method): Attribute[String] =
     SemanticAttributes.HttpRequestMethod(method.name)
@@ -72,19 +74,29 @@ object HttpAttributes {
   }
 
   object Headers {
-    private def generic(
+    private final val Redacted = List("<REDACTED>")
+
+    private[this] def unsafeGeneric(
+        redactedHeaders: Headers,
+        allowedHeaders: Set[CIString],
+        messageType: String,
+    ): List[Attribute[List[String]]] =
+      redactedHeaders.headers
+        .groupMap(_.name)(_.value)
+        .view
+        .map { case (name, list) =>
+          val key = s"http.$messageType.header.${name.toString.toLowerCase(Locale.ROOT)}"
+          if (allowedHeaders.contains(name)) Attribute(key, list)
+          else Attribute(key, Redacted)
+        }
+        .toList
+
+    private[this] def generic(
         headers: Headers,
         allowedHeaders: Set[CIString],
         messageType: String,
     ): List[Attribute[List[String]]] =
-      headers.headers
-        .groupBy(_.name)
-        .toList
-        .map { case (name, list) =>
-          val key = s"http.$messageType.header.${name.toString.toLowerCase}"
-          if (allowedHeaders.contains(name)) Attribute(key, list.map(_.value))
-          else Attribute(key, List("<REDACTED>"))
-        }
+      unsafeGeneric(headers.redactSensitive(), allowedHeaders, messageType)
 
     def request(headers: Headers, allowedHeaders: Set[CIString]): List[Attribute[List[String]]] =
       generic(headers, allowedHeaders, "request")
@@ -95,7 +107,7 @@ object HttpAttributes {
       "Accept",
       "Accept-CH",
       "Accept-Charset",
-      "Accept-CH-Liftetime",
+      "Accept-CH-Lifetime",
       "Accept-Encoding",
       "Accept-Language",
       "Accept-Ranges",
