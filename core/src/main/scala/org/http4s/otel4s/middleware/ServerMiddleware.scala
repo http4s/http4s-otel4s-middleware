@@ -119,7 +119,15 @@ object ServerMiddleware {
     def withDoNotTrace(doNotTrace: RequestPrelude => Boolean): ServerMiddlewareBuilder[F] =
       copy(doNotTrace = doNotTrace)
 
-    private def buildTracedF[G[_]: MonadCancelThrow](
+    /** This method is used for building a middleware in a way that abstracts
+      * over [[org.http4s.HttpApp `HttpApp`]] and
+      * [[org.http4s.HttpRoutes `HttpRoutes`]]. In most cases, it is preferable
+      * to use the methods that directly build the specific desired type.
+      *
+      * @see [[buildHttpApp]]
+      * @see [[buildHttpRoutes]]
+      */
+    def buildGenericTracedHttp[G[_]: MonadCancelThrow](
         f: Http[G, F]
     )(implicit kt: KindTransformer[F, G]): Http[G, F] =
       Kleisli { (req: Request[F]) =>
@@ -170,10 +178,10 @@ object ServerMiddleware {
       }
 
     def buildHttpApp(f: HttpApp[F]): HttpApp[F] =
-      buildTracedF(f)
+      buildGenericTracedHttp(f)
 
     def buildHttpRoutes(f: HttpRoutes[F]): HttpRoutes[F] =
-      buildTracedF(f)
+      buildGenericTracedHttp(f)
   }
 
   private[middleware] def request[F[_]](
