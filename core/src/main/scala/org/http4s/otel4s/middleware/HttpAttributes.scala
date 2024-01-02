@@ -74,8 +74,6 @@ object HttpAttributes {
   }
 
   object Headers {
-    private final val Redacted = List("<REDACTED>")
-
     private[this] def unsafeGeneric(
         redactedHeaders: Headers,
         allowedHeaders: Set[CIString],
@@ -84,10 +82,10 @@ object HttpAttributes {
       redactedHeaders.headers
         .groupMap(_.name)(_.value)
         .view
-        .map { case (name, list) =>
-          val key = s"http.$messageType.header.${name.toString.toLowerCase(Locale.ROOT)}"
-          if (allowedHeaders.contains(name)) Attribute(key, list)
-          else Attribute(key, Redacted)
+        .collect {
+          case (name, values) if allowedHeaders.contains(name) =>
+            val key = s"http.$messageType.header.${name.toString.toLowerCase(Locale.ROOT)}"
+            Attribute(key, values)
         }
         .toList
 
