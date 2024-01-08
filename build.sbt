@@ -27,7 +27,7 @@ val otel4sV = "0.4.0"
 
 val munitCatsEffectV = "2.0.0-M4"
 
-val slf4jV = "1.7.36"
+val slf4jV = "2.0.11"
 
 // Projects
 lazy val `http4s-otel4s-middleware` = tlCrossRootProject
