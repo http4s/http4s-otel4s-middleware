@@ -9,7 +9,7 @@ ThisBuild / startYear := Some(2023)
 ThisBuild / tlCiReleaseBranches := Seq("main")
 
 val scala213 = "2.13.12"
-val scala3 = "3.3.1"
+val scala3 = "3.3.3"
 ThisBuild / crossScalaVersions := Seq(scala213, scala3)
 ThisBuild / scalaVersion := scala213
 
