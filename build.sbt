@@ -20,7 +20,7 @@ ThisBuild / testFrameworks += new TestFramework("munit.Framework")
 
 val catsV = "2.10.0"
 val catsEffectV = "3.5.3"
-val http4sV = "0.23.24"
+val http4sV = "0.23.26"
 
 val openTelemetryV = "1.35.0"
 val otel4sV = "0.4.0"
