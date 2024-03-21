@@ -123,41 +123,50 @@ object ClientMiddleware {
               .build
               .resource
             span = res.span
-            traceHeaders <- Resource.eval(Tracer[F].propagate(Headers.empty))
+            trace = res.trace
+            traceHeaders <- Resource.eval(Tracer[F].propagate(Headers.empty)).mapK(trace)
             newReq = req.withHeaders(traceHeaders ++ req.headers)
             resp <- poll(client.run(newReq)).guaranteeCase {
-              case Outcome.Succeeded(fa) =>
-                Resource.eval(span.addAttribute(Attribute("exit.case", "succeeded"))) >>
-                  fa.flatMap(resp =>
-                    Resource.eval(
-                      span.addAttributes(
-                        response(resp, allowedResponseHeaders) ++ additionalResponseTags(resp): _*
-                      )
-                    )
-                  )
-              case Outcome.Errored(e) =>
-                Resource.eval(
-                  span.recordException(e) >>
-                    span.addAttribute(Attribute("exit.case", "errored"))
-                )
-              case Outcome.Canceled() =>
+              case o @ Outcome.Succeeded(fa) =>
+                Resource.eval(span.addAttribute(CustomAttributes.exitCase(o))).mapK(trace) >>
+                  fa.flatMap { resp =>
+                    Resource
+                      .eval {
+                        span.addAttributes(
+                          response(resp, allowedResponseHeaders) ++ additionalResponseTags(resp): _*
+                        )
+                      }
+                      .mapK(trace)
+                  }
+              case o @ Outcome.Errored(e) =>
+                Resource
+                  .eval {
+                    span.recordException(e) >>
+                      span.addAttribute(CustomAttributes.exitCase(o))
+                  }
+                  .mapK(trace)
+              case o @ Outcome.Canceled() =>
                 // Canceled isn't always an error, but it generally is for http
                 // TODO decide if this should add error, we do for the server side.
-                Resource.eval(
-                  span.addAttributes(
-                    Attribute("exit.case", "canceled"),
-                    Attribute("canceled", true),
-                  )
-                )
+                Resource
+                  .eval {
+                    span.addAttributes(
+                      CustomAttributes.exitCase(o),
+                      CustomAttributes.Canceled(true),
+                    )
+                  }
+                  .mapK(trace)
 
             }
             // Automatically handle client processing errors. Since this is after the response,
             // the error case will only get hit if the use block of the resulting resource happens,
             // which is the request processing stage.
-            _ <- Resource.makeCase(Applicative[F].unit) {
-              case (_, Resource.ExitCase.Errored(e)) => span.recordException(e)
-              case (_, _) => Applicative[F].unit
-            }
+            _ <- Resource
+              .makeCase(Applicative[F].unit) {
+                case (_, Resource.ExitCase.Errored(e)) => span.recordException(e)
+                case (_, _) => Applicative[F].unit
+              }
+              .mapK(trace)
           } yield resp
         }
       }

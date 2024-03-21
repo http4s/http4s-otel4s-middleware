@@ -131,7 +131,7 @@ object ServerMiddleware {
         f: Http[G, F]
     )(implicit kt: KindTransformer[F, G]): Http[G, F] =
       Kleisli { (req: Request[F]) =>
-        if (doNotTrace(req.requestPrelude)) f(req)
+        if (doNotTrace(req.requestPrelude) || !Tracer[F].meta.isEnabled) f(req)
         else {
           val init =
             request(
@@ -151,23 +151,22 @@ object ServerMiddleware {
                 .use { span =>
                   poll(f.run(req))
                     .guaranteeCase {
-                      case Outcome.Succeeded(fa) =>
-                        span.addAttribute(Attribute("exit.case", "succeeded")) >>
+                      case o @ Outcome.Succeeded(fa) =>
+                        span.addAttribute(CustomAttributes.exitCase(o)) >>
                           fa.flatMap { resp =>
                             val out =
                               response(resp, allowedResponseHeaders) ++ additionalResponseTags(resp)
                             span.addAttributes(out: _*)
                           }
-                      case Outcome.Errored(e) =>
+                      case o @ Outcome.Errored(e) =>
                         span.recordException(e) >>
-                          span.addAttribute(Attribute("exit.case", "errored"))
-                      case Outcome.Canceled() =>
+                          span.addAttribute(CustomAttributes.exitCase(o))
+                      case o @ Outcome.Canceled() =>
                         span.addAttributes(
-                          Attribute("exit.case", "canceled"),
-                          Attribute("canceled", true),
-                          Attribute(
-                            "error",
-                            true,
+                          CustomAttributes.exitCase(o),
+                          CustomAttributes.Canceled(true),
+                          CustomAttributes.Error(
+                            true
                           ), // A canceled http is an error for the server. The connection got cut for some reason.
                         )
                     }
