@@ -110,7 +110,7 @@ object ClientMiddleware {
     def withIncludeUrl(includeUrl: Request[F] => Boolean): ClientMiddlewareBuilder[F] =
       copy(includeUrl = includeUrl)
 
-    def build: Client[F] => Client[F] = { (client: Client[F]) =>
+    def build: Client[F] => Client[F] = (client: Client[F]) =>
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
 
         val base = request(req, allowedRequestHeaders, includeUrl) ++ additionalRequestTags(req)
@@ -126,9 +126,9 @@ object ClientMiddleware {
             trace = res.trace
             traceHeaders <- Resource.eval(Tracer[F].propagate(Headers.empty)).mapK(trace)
             newReq = req.withHeaders(traceHeaders ++ req.headers)
-            resp <- poll(client.run(newReq)).guaranteeCase {
-              case o @ Outcome.Succeeded(fa) =>
-                Resource.eval(span.addAttribute(CustomAttributes.exitCase(o))).mapK(trace) >>
+            resp <- poll(client.run(newReq)).guaranteeCase { outcome =>
+              (outcome match {
+                case Outcome.Succeeded(fa) =>
                   fa.flatMap { resp =>
                     Resource
                       .eval {
@@ -138,25 +138,13 @@ object ClientMiddleware {
                       }
                       .mapK(trace)
                   }
-              case o @ Outcome.Errored(e) =>
-                Resource
-                  .eval {
-                    span.recordException(e) >>
-                      span.addAttribute(CustomAttributes.exitCase(o))
-                  }
-                  .mapK(trace)
-              case o @ Outcome.Canceled() =>
-                // Canceled isn't always an error, but it generally is for http
-                // TODO decide if this should add error, we do for the server side.
-                Resource
-                  .eval {
-                    span.addAttributes(
-                      CustomAttributes.exitCase(o),
-                      CustomAttributes.Canceled(true),
-                    )
-                  }
-                  .mapK(trace)
-
+                case Outcome.Errored(e) =>
+                  Resource.eval(span.recordException(e)).mapK(trace)
+                case Outcome.Canceled() =>
+                  // Canceled isn't always an error, but it generally is for http
+                  // TODO: decide if this should add "error", we do for the server side.
+                  Resource.eval(span.addAttribute(CustomAttributes.Canceled(true))).mapK(trace)
+              }) >> Resource.eval(span.addAttribute(CustomAttributes.exitCase(outcome))).mapK(trace)
             }
             // Automatically handle client processing errors. Since this is after the response,
             // the error case will only get hit if the use block of the resulting resource happens,
@@ -170,7 +158,6 @@ object ClientMiddleware {
           } yield resp
         }
       }
-    }
   }
 
   val ExtraAttributesKey: Key[List[Attribute[_]]] =

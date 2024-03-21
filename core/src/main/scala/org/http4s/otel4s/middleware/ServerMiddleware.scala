@@ -150,25 +150,24 @@ object ServerMiddleware {
                 .build
                 .use { span =>
                   poll(f.run(req))
-                    .guaranteeCase {
-                      case o @ Outcome.Succeeded(fa) =>
-                        span.addAttribute(CustomAttributes.exitCase(o)) >>
+                    .guaranteeCase { outcome =>
+                      (outcome match {
+                        case Outcome.Succeeded(fa) =>
                           fa.flatMap { resp =>
                             val out =
                               response(resp, allowedResponseHeaders) ++ additionalResponseTags(resp)
                             span.addAttributes(out: _*)
                           }
-                      case o @ Outcome.Errored(e) =>
-                        span.recordException(e) >>
-                          span.addAttribute(CustomAttributes.exitCase(o))
-                      case o @ Outcome.Canceled() =>
-                        span.addAttributes(
-                          CustomAttributes.exitCase(o),
-                          CustomAttributes.Canceled(true),
-                          CustomAttributes.Error(
-                            true
-                          ), // A canceled http is an error for the server. The connection got cut for some reason.
-                        )
+                        case Outcome.Errored(e) =>
+                          span.recordException(e)
+                        case Outcome.Canceled() =>
+                          span.addAttributes(
+                            CustomAttributes.Canceled(true),
+                            CustomAttributes.Error(
+                              true
+                            ), // A canceled http is an error for the server. The connection got cut for some reason.
+                          )
+                      }) >> span.addAttribute(CustomAttributes.exitCase(outcome))
                     }
                 }
             }
