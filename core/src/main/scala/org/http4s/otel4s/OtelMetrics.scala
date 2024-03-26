@@ -1,3 +1,19 @@
+/*
+ * Copyright 2018 http4s.org
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package org.http4s.otel4s
 
 import cats.effect.Sync
@@ -6,7 +22,7 @@ import org.http4s.metrics.TerminationType.{Abnormal, Canceled, Error, Timeout}
 import org.http4s.metrics.{MetricsOps, TerminationType}
 import org.http4s.{Method, Status}
 import org.typelevel.otel4s.Attribute
-import org.typelevel.otel4s.metrics.{Counter, Histogram, Meter, UpDownCounter}
+import org.typelevel.otel4s.metrics._
 
 /** [[MetricsOps]] algebra capable of recording OpenTelemetry metrics
  *
@@ -37,9 +53,12 @@ object OtelMetrics {
    * @param prefix
    * a prefix that will be added to all metrics
    */
-  def metricsOps[F[_] : Sync : Meter](prefix: String = "org.http4s.server"): F[MetricsOps[F]] =
+  def metricsOps[F[_] : Sync : Meter](
+                                       prefix: String = "org.http4s.server",
+                                       responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
+                                     ): F[MetricsOps[F]] =
     for {
-      metrics <- createMetricsCollection(prefix)
+      metrics <- createMetricsCollection(prefix, responseDurationSecondsHistogramBuckets)
     } yield createMetricsOps(metrics)
 
   private def createMetricsOps[F[_] : Sync](metrics: MetricsCollection[F]): MetricsOps[F] =
@@ -171,10 +190,13 @@ object OtelMetrics {
         }
     }
 
-  private def createMetricsCollection[F[_] : Sync : Meter](prefix: String): F[MetricsCollection[F]] = {
+  private def createMetricsCollection[F[_] : Sync : Meter](
+                                                            prefix: String,
+                                                            responseDurationSecondsHistogramBuckets: BucketBoundaries
+                                                          ): F[MetricsCollection[F]] = {
     val responseDuration: F[Histogram[F, Double]] = {
       Meter[F]
-        .histogram(prefix + ".response.duration")
+        .histogram[Double](prefix + ".response.duration")
         .withUnit("seconds")
         .withDescription("Response Duration in seconds.")
         .create
@@ -182,30 +204,31 @@ object OtelMetrics {
 
     val activeRequests: F[UpDownCounter[F, Long]] = {
       Meter[F]
-        .upDownCounter(prefix + ".active_request.count")
+        .upDownCounter[Long](prefix + ".active_request.count")
         .withDescription("Total Active Requests.")
         .create
     }
 
     val requests: F[Counter[F, Long]] = {
       Meter[F]
-        .counter(prefix + ".request.count")
+        .counter[Long](prefix + ".request.count")
         .withDescription("Total Requests.")
         .create
     }
 
     val abnormalTerminations: F[Histogram[F, Double]] = {
       Meter[F]
-        .histogram(prefix + ".abnormal_terminations")
+        .histogram[Double](prefix + ".abnormal_terminations")
         .withDescription("Total Abnormal Terminations.")
+        .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
         .create
     }
 
     (responseDuration, activeRequests, requests, abnormalTerminations).mapN(MetricsCollection.apply)
   }
 
-  val ResponseDurationDefaultHistogramBuckets: List[Double] =
-    List(.005, .01, .025, .05, .075, .1, .25, .5, .75, 1, 2.5, 5, 7.5, 10)
+  private val DefaultHistogramBuckets: BucketBoundaries =
+    BucketBoundaries(Vector(.005, .01, .025, .05, .075, .1, .25, .5, .75, 1, 2.5, 5, 7.5, 10))
 }
 
 final case class MetricsCollection[F[_]](
