@@ -17,7 +17,6 @@
 package org.http4s.otel4s.middleware
 
 import cats.effect.IO
-import cats.effect.IOLocal
 import io.opentelemetry.api.common.{AttributeKey => JAttributeKey}
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
 import io.opentelemetry.context.propagation.{ContextPropagators => JContextPropagators}
@@ -29,9 +28,7 @@ import io.opentelemetry.sdk.{OpenTelemetrySdk => JOpenTelemetrySdk}
 import munit.CatsEffectSuite
 import org.http4s._
 import org.http4s.client._
-import org.typelevel.otel4s.java.OtelJava
-import org.typelevel.otel4s.java.context.Context
-import org.typelevel.otel4s.java.instances._
+import org.typelevel.otel4s.oteljava.OtelJava
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
 
@@ -97,8 +94,8 @@ object ClientMiddlewareTests {
       )
       .build()
 
-    IOLocal(Context.root).map { implicit ioLocal: IOLocal[Context] =>
-      new Sdk(OtelJava.local[IO](jOtel).tracerProvider, exporter)
+    OtelJava.forAsync[IO](jOtel).map { otel4s =>
+      new Sdk(otel4s.tracerProvider, exporter)
     }
   }
 

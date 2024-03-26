@@ -23,7 +23,7 @@ val catsEffectV = "3.5.4"
 val http4sV = "0.23.26"
 
 val openTelemetryV = "1.35.0"
-val otel4sV = "0.4.0"
+val otel4sV = "0.5.0-RC3"
 
 val munitCatsEffectV = "2.0.0-M4"
 
@@ -56,7 +56,7 @@ lazy val `core-jvm-tests` = project
       "io.opentelemetry" % "opentelemetry-sdk-testing" % openTelemetryV % Test,
       "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
       "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
-      "org.typelevel" %%% "otel4s-java" % otel4sV % Test,
+      "org.typelevel" %%% "otel4s-oteljava" % otel4sV % Test,
     )
   )
 
@@ -67,7 +67,7 @@ lazy val examples = project
   .settings(
     scalacOptions -= "-Xfatal-warnings",
     libraryDependencies ++= Seq(
-      "org.typelevel" %% "otel4s-java" % otel4sV,
+      "org.typelevel" %% "otel4s-oteljava" % otel4sV,
       "io.opentelemetry" % "opentelemetry-exporter-otlp" % openTelemetryV % Runtime,
       "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure" % openTelemetryV % Runtime,
       "org.http4s" %% "http4s-dsl" % http4sV,
