@@ -29,35 +29,48 @@ import org.http4s.headers.`User-Agent`
 import org.http4s.headers.`X-Forwarded-For`
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
-import org.typelevel.otel4s.semconv.trace.attributes.SemanticAttributes
+import org.typelevel.otel4s.semconv.attributes.ClientAttributes.ClientAddress
+import org.typelevel.otel4s.semconv.attributes.ClientAttributes.ClientPort
+import org.typelevel.otel4s.semconv.attributes.HttpAttributes.HttpRequestMethod
+import org.typelevel.otel4s.semconv.attributes.HttpAttributes.HttpRequestResendCount
+import org.typelevel.otel4s.semconv.attributes.HttpAttributes.HttpResponseStatusCode
+import org.typelevel.otel4s.semconv.attributes.HttpAttributes.HttpRoute
+import org.typelevel.otel4s.semconv.attributes.NetworkAttributes.NetworkPeerAddress
+import org.typelevel.otel4s.semconv.attributes.ServerAttributes.ServerAddress
+import org.typelevel.otel4s.semconv.attributes.ServerAttributes.ServerPort
+import org.typelevel.otel4s.semconv.attributes.UrlAttributes.UrlFull
+import org.typelevel.otel4s.semconv.attributes.UrlAttributes.UrlPath
+import org.typelevel.otel4s.semconv.attributes.UrlAttributes.UrlQuery
+import org.typelevel.otel4s.semconv.attributes.UrlAttributes.UrlScheme
+import org.typelevel.otel4s.semconv.attributes.UserAgentAttributes.UserAgentOriginal
 
 import java.util.Locale
 
 object HttpAttributes {
   def httpRequestMethod(method: Method): Attribute[String] =
-    SemanticAttributes.HttpRequestMethod(method.name)
+    HttpRequestMethod(method.name)
   def httpRequestResendCount(count: Long): Attribute[Long] =
-    SemanticAttributes.HttpRequestResendCount(count)
+    HttpRequestResendCount(count)
   def httpResponseStatusCode(status: Status): Attribute[Long] =
-    SemanticAttributes.HttpResponseStatusCode(status.code.toLong)
+    HttpResponseStatusCode(status.code.toLong)
   def networkPeerAddress(ip: IpAddress): Attribute[String] =
-    SemanticAttributes.NetworkPeerAddress(ip.toString)
+    NetworkPeerAddress(ip.toString)
   def serverAddress(host: Host): Attribute[String] =
-    SemanticAttributes.ServerAddress(Host.headerInstance.value(host))
+    ServerAddress(Host.headerInstance.value(host))
   def urlFull(url: Uri): Attribute[String] =
-    SemanticAttributes.UrlFull(url.renderString)
+    UrlFull(url.renderString)
   def urlPath(path: Uri.Path): Attribute[String] =
-    SemanticAttributes.UrlPath(path.renderString)
+    UrlPath(path.renderString)
   def urlQuery(query: Query): Attribute[String] =
-    SemanticAttributes.UrlQuery(query.renderString)
+    UrlQuery(query.renderString)
   def urlScheme(scheme: Uri.Scheme): Attribute[String] =
-    SemanticAttributes.UrlScheme(scheme.value)
+    UrlScheme(scheme.value)
   def userAgentOriginal(userAgent: `User-Agent`): Attribute[String] =
-    SemanticAttributes.UserAgentOriginal(`User-Agent`.headerInstance.value(userAgent))
+    UserAgentOriginal(`User-Agent`.headerInstance.value(userAgent))
 
   object Client {
     def serverPort(port: Port): Attribute[Long] =
-      SemanticAttributes.ServerPort(port.value.toLong)
+      ServerPort(port.value.toLong)
   }
 
   object Server {
@@ -65,12 +78,12 @@ object HttpAttributes {
       request.headers
         .get[`X-Forwarded-For`]
         .fold(request.remoteAddr)(_.values.head)
-        .map(ip => SemanticAttributes.ClientAddress(ip.toString))
+        .map(ip => ClientAddress(ip.toString))
     def clientPort(port: Port): Attribute[Long] =
-      SemanticAttributes.ClientPort(port.value.toLong)
+      ClientPort(port.value.toLong)
 
     private[middleware] def httpRoute(classifiedRoute: String): Attribute[String] =
-      SemanticAttributes.HttpRoute(classifiedRoute)
+      HttpRoute(classifiedRoute)
   }
 
   object Headers {
@@ -78,14 +91,14 @@ object HttpAttributes {
         redactedHeaders: Headers,
         allowedHeaders: Set[CIString],
         messageType: String,
-    ): List[Attribute[List[String]]] =
+    ): List[Attribute[Seq[String]]] =
       redactedHeaders.headers
         .groupMap(_.name)(_.value)
         .view
         .collect {
           case (name, values) if allowedHeaders.contains(name) =>
             val key = s"http.$messageType.header.${name.toString.toLowerCase(Locale.ROOT)}"
-            Attribute(key, values)
+            Attribute[Seq[String]](key, values)
         }
         .toList
 
@@ -93,12 +106,12 @@ object HttpAttributes {
         headers: Headers,
         allowedHeaders: Set[CIString],
         messageType: String,
-    ): List[Attribute[List[String]]] =
+    ): List[Attribute[Seq[String]]] =
       unsafeGeneric(headers.redactSensitive(), allowedHeaders, messageType)
 
-    def request(headers: Headers, allowedHeaders: Set[CIString]): List[Attribute[List[String]]] =
+    def request(headers: Headers, allowedHeaders: Set[CIString]): List[Attribute[Seq[String]]] =
       generic(headers, allowedHeaders, "request")
-    def response(headers: Headers, allowedHeaders: Set[CIString]): List[Attribute[List[String]]] =
+    def response(headers: Headers, allowedHeaders: Set[CIString]): List[Attribute[Seq[String]]] =
       generic(headers, allowedHeaders, "response")
 
     lazy val defaultAllowedHeaders: Set[CIString] = Set(
