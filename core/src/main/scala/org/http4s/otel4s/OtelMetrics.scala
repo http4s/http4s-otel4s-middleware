@@ -16,7 +16,7 @@
 
 package org.http4s.otel4s
 
-import cats.effect.Sync
+import cats.Monad
 import cats.syntax.all._
 import org.http4s.Method
 import org.http4s.Status
@@ -48,7 +48,7 @@ object OtelMetrics {
     * @param prefix
     * a prefix that will be added to all metrics
     */
-  def metricsOps[F[_]: Sync: Meter](
+  def metricsOps[F[_]: Monad: Meter](
       attributes: Attributes = Attributes.empty,
       responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
   ): F[MetricsOps[F]] =
@@ -122,8 +122,8 @@ object OtelMetrics {
         nanos / 1000000000.0
     }
 
-  private def createMetricsCollection[F[_]: Sync: Meter](
-      responseDurationSecondsHistogramBuckets: BucketBoundaries,
+  private def createMetricsCollection[F[_]: Monad: Meter](
+      responseDurationSecondsHistogramBuckets: BucketBoundaries
   ): F[MetricsCollection[F]] = {
     val requestDuration: F[Histogram[F, Double]] =
       Meter[F]
