@@ -33,6 +33,7 @@ import org.http4s.headers.Host
 import org.http4s.headers.`User-Agent`
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
+import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.vault.Key
@@ -51,8 +52,8 @@ object ClientMiddleware {
     )
 
   object Defaults {
-    val allowedRequestHeaders: Set[CIString] = HttpAttributes.Headers.defaultAllowedHeaders
-    val allowedResponseHeaders: Set[CIString] = HttpAttributes.Headers.defaultAllowedHeaders
+    val allowedRequestHeaders: Set[CIString] = TypedAttributes.Headers.defaultAllowedHeaders
+    val allowedResponseHeaders: Set[CIString] = TypedAttributes.Headers.defaultAllowedHeaders
     def clientSpanName[F[_]]: Request[F] => String = { (req: Request[F]) =>
       s"Http Client - ${req.method}"
     }
@@ -119,7 +120,7 @@ object ClientMiddleware {
             res <- Tracer[F]
               .spanBuilder(clientSpanName(req))
               .withSpanKind(SpanKind.Client)
-              .addAttributes(base: _*)
+              .addAttributes(base)
               .build
               .resource
             span = res.span
@@ -133,7 +134,7 @@ object ClientMiddleware {
                     Resource
                       .eval {
                         span.addAttributes(
-                          response(resp, allowedResponseHeaders) ++ additionalResponseTags(resp): _*
+                          response(resp, allowedResponseHeaders) ++ additionalResponseTags(resp)
                         )
                       }
                       .mapK(trace)
@@ -160,57 +161,59 @@ object ClientMiddleware {
       }
   }
 
-  val ExtraAttributesKey: Key[List[Attribute[_]]] =
-    Key.newKey[SyncIO, List[Attribute[_]]].unsafeRunSync()
+  val ExtraAttributesKey: Key[Attributes] =
+    Key.newKey[SyncIO, Attributes].unsafeRunSync()
 
   def request[F[_]](
       request: Request[F],
       allowedHeaders: Set[CIString],
       includeUrl: Request[F] => Boolean,
-  ): List[Attribute[_]] = {
-    val builder = List.newBuilder[Attribute[_]]
-    builder += HttpAttributes.httpRequestMethod(request.method)
+  ): Attributes = {
+    val builder = Attributes.newBuilder
+    builder += TypedAttributes.httpRequestMethod(request.method)
     if (includeUrl(request)) {
-      builder += HttpAttributes.urlFull(request.uri)
-      builder += HttpAttributes.urlPath(request.uri.path)
-      builder += HttpAttributes.urlQuery(request.uri.query)
+      builder += TypedAttributes.urlFull(request.uri)
+      builder += TypedAttributes.urlPath(request.uri.path)
+      builder += TypedAttributes.urlQuery(request.uri.query)
     }
     val host = request.headers.get[Host].getOrElse {
       val key = RequestKey.fromRequest(request)
       Host(key.authority.host.value, key.authority.port)
     }
-    builder += HttpAttributes.serverAddress(host)
-    request.uri.scheme.foreach(scheme => builder += HttpAttributes.urlScheme(scheme))
-    request.headers.get[`User-Agent`].foreach(ua => builder += HttpAttributes.userAgentOriginal(ua))
+    builder += TypedAttributes.serverAddress(host)
+    request.uri.scheme.foreach(scheme => builder += TypedAttributes.urlScheme(scheme))
+    request.headers
+      .get[`User-Agent`]
+      .foreach(ua => builder += TypedAttributes.userAgentOriginal(ua))
 
     request.remote.foreach { socketAddress =>
       builder +=
-        HttpAttributes.networkPeerAddress(socketAddress.host)
+        TypedAttributes.networkPeerAddress(socketAddress.host)
 
       builder +=
-        HttpAttributes.Client.serverPort(socketAddress.port)
+        TypedAttributes.Client.serverPort(socketAddress.port)
 
     }
     retryCount(request.attributes).foreach { count =>
-      builder += HttpAttributes.httpRequestResendCount(count.toLong)
+      builder += TypedAttributes.httpRequestResendCount(count.toLong)
     }
     builder ++=
-      HttpAttributes.Headers.request(request.headers, allowedHeaders)
+      TypedAttributes.Headers.request(request.headers, allowedHeaders)
 
-    builder ++= request.attributes.lookup(ExtraAttributesKey).toList.flatten
+    request.attributes.lookup(ExtraAttributesKey).foreach(builder ++= _)
 
     builder.result()
   }
 
-  def response[F[_]](response: Response[F], allowedHeaders: Set[CIString]): List[Attribute[_]] = {
-    val builder = List.newBuilder[Attribute[_]]
+  def response[F[_]](response: Response[F], allowedHeaders: Set[CIString]): Attributes = {
+    val builder = Attributes.newBuilder
 
-    builder += HttpAttributes.httpResponseStatusCode(response.status)
+    builder += TypedAttributes.httpResponseStatusCode(response.status)
     retryCount(response.attributes).foreach { count =>
-      builder += HttpAttributes.httpRequestResendCount(count.toLong)
+      builder += TypedAttributes.httpRequestResendCount(count.toLong)
     }
 
-    builder ++= HttpAttributes.Headers.response(response.headers, allowedHeaders)
+    builder ++= TypedAttributes.Headers.response(response.headers, allowedHeaders)
     builder ++= response.attributes.lookup(ExtraAttributesKey).toList.flatten
 
     builder.result()

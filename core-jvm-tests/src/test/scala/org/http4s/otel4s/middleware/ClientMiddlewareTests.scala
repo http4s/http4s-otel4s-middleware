@@ -17,93 +17,57 @@
 package org.http4s.otel4s.middleware
 
 import cats.effect.IO
-import cats.effect.IOLocal
-import io.opentelemetry.api.common.{AttributeKey => JAttributeKey}
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
-import io.opentelemetry.context.propagation.{ContextPropagators => JContextPropagators}
-import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter
-import io.opentelemetry.sdk.trace.SdkTracerProvider
-import io.opentelemetry.sdk.trace.data.SpanData
-import io.opentelemetry.sdk.trace.`export`.SimpleSpanProcessor
-import io.opentelemetry.sdk.{OpenTelemetrySdk => JOpenTelemetrySdk}
+import io.opentelemetry.api.trace.{SpanKind => JSpanKind}
+import io.opentelemetry.sdk.trace.data.{SpanData => JSpanData}
 import munit.CatsEffectSuite
 import org.http4s._
 import org.http4s.client._
-import org.typelevel.otel4s.java.OtelJava
-import org.typelevel.otel4s.java.context.Context
-import org.typelevel.otel4s.java.instances._
+import org.typelevel.otel4s.AttributeKey
+import org.typelevel.otel4s.oteljava.AttributeConverters._
+import org.typelevel.otel4s.oteljava.testkit.trace.TracesTestkit
 import org.typelevel.otel4s.trace.Tracer
-import org.typelevel.otel4s.trace.TracerProvider
-
-import scala.jdk.CollectionConverters._
 
 class ClientMiddlewareTests extends CatsEffectSuite {
-  import ClientMiddlewareTests._
-
   test("ClientMiddleware") {
-    for {
-      sdk <- makeSdk
-      tracerIO <- sdk.provider.get("tracer")
-      _ <- {
-        implicit val tracer: Tracer[IO] = tracerIO
-        val fakeClient =
-          Client.fromHttpApp[IO] {
-            HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
-          }
-        val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
-
-        tracedClient
-          .run(Request[IO](Method.GET))
-          .use(_.body.compile.drain)
-      }
-      spans <- sdk.finishedSpans
-    } yield {
-      assertEquals(spans.length, 1)
-      val span = spans.head
-      assertEquals(span.getName, "Http Client - GET")
-      val attributes = span.getAttributes
-
-      def getStringAttribute(name: String): Option[String] =
-        Option(attributes.get(JAttributeKey.stringKey(name)))
-      def getLongAttribute(name: String): Option[Long] =
-        Option(attributes.get(JAttributeKey.longKey(name))).map(_.longValue())
-
-      assertEquals(getStringAttribute("span.kind"), Some("client"))
-      assertEquals(getStringAttribute("http.method"), Some("GET"))
-      assertEquals(getStringAttribute("http.url"), Some("/"))
-      assertEquals(getStringAttribute("http.target"), Some("/"))
-      assertEquals(getStringAttribute("http.host"), Some("localhost"))
-      assertEquals(getStringAttribute("exit.case"), Some("succeeded"))
-      assertEquals(getLongAttribute("http.status_code"), Some(200L))
-      assertEquals(getStringAttribute("http.flavor"), Some("1.1"))
-    }
-  }
-}
-
-object ClientMiddlewareTests {
-  private def makeSdk: IO[Sdk] = {
-    val exporter = InMemorySpanExporter.create()
-
-    val tracerProvider = SdkTracerProvider
-      .builder()
-      .addSpanProcessor(SimpleSpanProcessor.create(exporter))
-      .build()
-
-    val jOtel = JOpenTelemetrySdk
-      .builder()
-      .setTracerProvider(tracerProvider)
-      .setPropagators(
-        JContextPropagators.create(W3CTraceContextPropagator.getInstance())
+    TracesTestkit
+      .inMemory[IO](
+        textMapPropagators = List(W3CTraceContextPropagator.getInstance())
       )
-      .build()
+      .use { testkit =>
+        for {
+          tracerIO <- testkit.tracerProvider.get("tracer")
+          _ <- {
+            implicit val tracer: Tracer[IO] = tracerIO
+            val fakeClient =
+              Client.fromHttpApp[IO] {
+                HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
+              }
+            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
 
-    IOLocal(Context.root).map { implicit ioLocal: IOLocal[Context] =>
-      new Sdk(OtelJava.local[IO](jOtel).tracerProvider, exporter)
-    }
-  }
+            tracedClient
+              .run(Request[IO](Method.GET))
+              .use(_.body.compile.drain)
+          }
+          spans <- testkit.finishedSpans[JSpanData]
+        } yield {
+          assertEquals(spans.length, 1)
+          val span = spans.head
+          assertEquals(span.getName, "Http Client - GET")
+          assertEquals(span.getKind, JSpanKind.CLIENT)
 
-  final class Sdk(val provider: TracerProvider[IO], exporter: InMemorySpanExporter) {
-    def finishedSpans: IO[List[SpanData]] =
-      IO.delay(exporter.getFinishedSpanItems.asScala.toList)
+          val attributes = span.getAttributes.toScala
+          def getAttr[A: AttributeKey.KeySelect](name: String): Option[A] =
+            attributes.get[A](name).map(_.value)
+
+          assertEquals(getAttr[String]("http.request.method"), Some("GET"))
+          assertEquals(getAttr[String]("url.full"), Some("/"))
+          assertEquals(getAttr[String]("url.path"), Some("/"))
+          assertEquals(getAttr[String]("url.query"), Some(""))
+          assertEquals(getAttr[String]("server.address"), Some("localhost"))
+          assertEquals(getAttr[Long]("http.response.status_code"), Some(200L))
+          assertEquals(getAttr[String]("exit.case"), Some("succeeded"))
+        }
+      }
   }
 }

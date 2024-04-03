@@ -17,10 +17,8 @@
 package example
 
 import cats.effect._
-import cats.syntax.all._
 import com.comcast.ip4s._
 import fs2.io.net.Network
-import io.opentelemetry.api.GlobalOpenTelemetry
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
@@ -28,10 +26,7 @@ import org.http4s.otel4s.middleware.ClientMiddleware
 import org.http4s.otel4s.middleware.ServerMiddleware
 import org.http4s.server.Server
 import org.typelevel.otel4s.Otel4s
-import org.typelevel.otel4s.java.OtelJava
-import org.typelevel.otel4s.java.context.Context
-import org.typelevel.otel4s.java.context.LocalContext
-import org.typelevel.otel4s.java.instances._
+import org.typelevel.otel4s.oteljava.OtelJava
 import org.typelevel.otel4s.trace.Tracer
 
 /** Start up Jaeger thus:
@@ -52,17 +47,6 @@ import org.typelevel.otel4s.trace.Tracer
   */
 object Http4sExample extends IOApp with Common {
 
-  def globalOtel4s[F[_]: Async: LiftIO]: F[(OtelJava[F], LocalContext[F])] =
-    Sync[F]
-      .delay(GlobalOpenTelemetry.get)
-      .flatMap { jOtel =>
-        IOLocal(Context.root)
-          .map { implicit ioLocal =>
-            OtelJava.local[F](jOtel) -> implicitly[LocalContext[F]]
-          }
-          .to[F]
-      }
-
   def tracer[F[_]](otel: Otel4s[F]): F[Tracer[F]] =
     otel.tracerProvider.tracer("Http4sExample").get
 
@@ -81,9 +65,9 @@ object Http4sExample extends IOApp with Common {
 
   // Done!
   def run(args: List[String]): IO[ExitCode] =
-    Resource
-      .eval(globalOtel4s[IO])
-      .flatMap { case (otel4s, _) =>
+    OtelJava
+      .autoConfigured[IO]()
+      .flatMap { otel4s =>
         Resource.eval(tracer(otel4s)).flatMap { implicit T: Tracer[IO] =>
           server[IO]
         }
