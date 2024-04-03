@@ -55,8 +55,11 @@ lazy val `core-jvm-tests` = project
   .settings(
     libraryDependencies ++= Seq(
       "io.opentelemetry" % "opentelemetry-sdk-testing" % openTelemetryV % Test,
+      "org.http4s" %%% "http4s-server" % http4sV % Test,
       "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
       "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
+      "org.typelevel" %%% "otel4s-oteljava-metrics" % otel4sV % Test,
+      "org.typelevel" %%% "otel4s-oteljava-metrics-testkit" % otel4sV % Test,
       "org.typelevel" %%% "otel4s-oteljava-trace" % otel4sV % Test,
       "org.typelevel" %%% "otel4s-oteljava-trace-testkit" % otel4sV % Test,
     )
