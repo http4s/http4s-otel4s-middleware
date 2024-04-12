@@ -21,8 +21,13 @@ import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
 import io.opentelemetry.api.trace.{SpanKind => JSpanKind}
 import io.opentelemetry.sdk.trace.data.{SpanData => JSpanData}
 import munit.CatsEffectSuite
-import org.http4s._
-import org.http4s.client._
+import org.http4s.HttpApp
+import org.http4s.Method
+import org.http4s.Request
+import org.http4s.Response
+import org.http4s.Status
+import org.http4s.client.Client
+import org.http4s.syntax.literals._
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.oteljava.AttributeConverters._
 import org.typelevel.otel4s.oteljava.testkit.trace.TracesTestkit
@@ -46,7 +51,7 @@ class ClientMiddlewareTests extends CatsEffectSuite {
             val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
 
             tracedClient
-              .run(Request[IO](Method.GET))
+              .run(Request[IO](Method.GET, uri"http://localhost/?#"))
               .use(_.body.compile.drain)
           }
           spans <- testkit.finishedSpans[JSpanData]
@@ -61,9 +66,11 @@ class ClientMiddlewareTests extends CatsEffectSuite {
             attributes.get[A](name).map(_.value)
 
           assertEquals(getAttr[String]("http.request.method"), Some("GET"))
-          assertEquals(getAttr[String]("url.full"), Some("/"))
+          assertEquals(getAttr[String]("url.full"), Some("http://localhost/?#"))
+          assertEquals(getAttr[String]("url.scheme"), Some("http"))
           assertEquals(getAttr[String]("url.path"), Some("/"))
           assertEquals(getAttr[String]("url.query"), Some(""))
+          assertEquals(getAttr[String]("url.fragment"), Some(""))
           assertEquals(getAttr[String]("server.address"), Some("localhost"))
           assertEquals(getAttr[Long]("http.response.status_code"), Some(200L))
           assertEquals(getAttr[String]("exit.case"), Some("succeeded"))
