@@ -45,8 +45,8 @@ object OtelMetrics {
 
   /** Creates a [[http4s.metrics.MetricsOps]] that supports OpenTelemetry metrics
     *
-    * @param prefix
-    * a prefix that will be added to all metrics
+    * @param attributes additional [[org.typelevel.otel4s.Attributes]] that are added to all metrics
+    * @param responseDurationSecondsHistogramBuckets histogram buckets for the response duration metrics
     */
   def metricsOps[F[_]: Monad: Meter](
       attributes: Attributes = Attributes.empty,
