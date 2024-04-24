@@ -25,7 +25,7 @@ val munitV = "0.7.29"
 val munitCatsEffectV = "2.0.0-M5"
 val openTelemetryV = "1.35.0"
 val otel4sV = "0.5.0"
-val slf4jV = "1.7.36"
+val slf4jV = "2.0.13"
 
 // Projects
 lazy val `http4s-otel4s-middleware` = tlCrossRootProject
