@@ -21,12 +21,10 @@ ThisBuild / testFrameworks += new TestFramework("munit.Framework")
 val catsV = "2.10.0"
 val catsEffectV = "3.5.4"
 val http4sV = "0.23.26"
-
+val munitV = "0.7.29"
+val munitCatsEffectV = "2.0.0-M5"
 val openTelemetryV = "1.35.0"
 val otel4sV = "0.5.0"
-
-val munitCatsEffectV = "2.0.0-M5"
-
 val slf4jV = "1.7.36"
 
 // Projects
@@ -44,6 +42,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.http4s" %%% "http4s-client" % http4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
       "org.typelevel" %%% "otel4s-semconv" % otel4sV,
+      "org.scalameta" %% "munit" % munitV % Test,
     ),
   )
 
@@ -53,7 +52,6 @@ lazy val `core-jvm-tests` = project
   .dependsOn(core.jvm)
   .settings(
     libraryDependencies ++= Seq(
-      "io.opentelemetry" % "opentelemetry-sdk-testing" % openTelemetryV % Test,
       "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
       "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
       "org.typelevel" %%% "otel4s-oteljava-trace" % otel4sV % Test,

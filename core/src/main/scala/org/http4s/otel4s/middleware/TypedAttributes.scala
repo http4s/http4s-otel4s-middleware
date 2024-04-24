@@ -20,7 +20,6 @@ import com.comcast.ip4s.IpAddress
 import com.comcast.ip4s.Port
 import org.http4s.Headers
 import org.http4s.Method
-import org.http4s.Query
 import org.http4s.Request
 import org.http4s.Status
 import org.http4s.Uri
@@ -52,14 +51,18 @@ object TypedAttributes {
     NetworkAttributes.NetworkPeerAddress(ip.toString)
   def serverAddress(host: Host): Attribute[String] =
     ServerAttributes.ServerAddress(Host.headerInstance.value(host))
-  def urlFull(url: Uri): Attribute[String] =
-    UrlAttributes.UrlFull(url.renderString)
-  def urlPath(path: Uri.Path): Attribute[String] =
-    UrlAttributes.UrlPath(path.renderString)
-  def urlQuery(query: Query): Attribute[String] =
-    UrlAttributes.UrlQuery(query.renderString)
-  def urlScheme(scheme: Uri.Scheme): Attribute[String] =
-    UrlAttributes.UrlScheme(scheme.value)
+
+  /** @return all `Attribute`s relevant to the URL. */
+  def url(unredacted: Uri, redactor: UriRedactor): Attributes =
+    redactor.redact(unredacted).fold(Attributes.empty) { url =>
+      val b = Attributes.newBuilder
+      b += UrlAttributes.UrlFull(url.renderString)
+      url.scheme.foreach(scheme => b += UrlAttributes.UrlScheme(scheme.value))
+      if (url.path != Uri.Path.empty) b += UrlAttributes.UrlPath(url.path.renderString)
+      if (url.query.nonEmpty) b += UrlAttributes.UrlQuery(url.query.renderString)
+      url.fragment.foreach(b += UrlAttributes.UrlFragment(_))
+      b.result()
+    }
   def userAgentOriginal(userAgent: `User-Agent`): Attribute[String] =
     UserAgentAttributes.UserAgentOriginal(`User-Agent`.headerInstance.value(userAgent))
 

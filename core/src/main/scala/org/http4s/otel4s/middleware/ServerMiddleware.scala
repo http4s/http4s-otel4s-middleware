@@ -47,7 +47,7 @@ object ServerMiddleware {
       Defaults.serverSpanName,
       Defaults.additionalRequestTags,
       Defaults.additionalResponseTags,
-      Defaults.includeUrl,
+      Defaults.urlRedactor,
       Defaults.doNotTrace,
     )
 
@@ -62,7 +62,7 @@ object ServerMiddleware {
     def additionalResponseTags[F[_]]: Response[F] => Seq[Attribute[_]] = { (_: Response[F]) =>
       Seq()
     }
-    def includeUrl[F[_]]: Request[F] => Boolean = { (_: Request[F]) => true }
+    val urlRedactor: UriRedactor = UriRedactor.OnlyRedactUserInfo
     def doNotTrace: RequestPrelude => Boolean = { (_: RequestPrelude) => false }
   }
 
@@ -73,7 +73,7 @@ object ServerMiddleware {
       serverSpanName: Request[F] => String,
       additionalRequestTags: Request[F] => Seq[Attribute[_]],
       additionalResponseTags: Response[F] => Seq[Attribute[_]],
-      includeUrl: Request[F] => Boolean,
+      urlRedactor: UriRedactor,
       doNotTrace: RequestPrelude => Boolean,
   ) {
     private def copy(
@@ -83,7 +83,7 @@ object ServerMiddleware {
         serverSpanName: Request[F] => String = this.serverSpanName,
         additionalRequestTags: Request[F] => Seq[Attribute[_]] = this.additionalRequestTags,
         additionalResponseTags: Response[F] => Seq[Attribute[_]] = this.additionalResponseTags,
-        includeUrl: Request[F] => Boolean = this.includeUrl,
+        urlRedactor: UriRedactor = this.urlRedactor,
         doNotTrace: RequestPrelude => Boolean = this.doNotTrace,
     ): ServerMiddlewareBuilder[F] =
       new ServerMiddlewareBuilder[F](
@@ -93,7 +93,7 @@ object ServerMiddleware {
         serverSpanName,
         additionalRequestTags,
         additionalResponseTags,
-        includeUrl,
+        urlRedactor,
         doNotTrace,
       )
 
@@ -115,8 +115,8 @@ object ServerMiddleware {
         additionalResponseTags: Response[F] => Seq[Attribute[_]]
     ): ServerMiddlewareBuilder[F] =
       copy(additionalResponseTags = additionalResponseTags)
-    def withIncludeUrl(includeUrl: Request[F] => Boolean): ServerMiddlewareBuilder[F] =
-      copy(includeUrl = includeUrl)
+    def withUrlRedactor(urlRedactor: UriRedactor): ServerMiddlewareBuilder[F] =
+      copy(urlRedactor = urlRedactor)
     def withDoNotTrace(doNotTrace: RequestPrelude => Boolean): ServerMiddlewareBuilder[F] =
       copy(doNotTrace = doNotTrace)
 
@@ -139,7 +139,7 @@ object ServerMiddleware {
               req,
               allowedRequestHeaders,
               routeClassifier,
-              includeUrl,
+              urlRedactor,
             ) ++ additionalRequestTags(req)
           MonadCancelThrow[G].uncancelable { poll =>
             val tracerG = Tracer[F].mapK[G]
@@ -188,27 +188,22 @@ object ServerMiddleware {
       headers: Set[CIString],
       routeClassifier: Request[F] => Option[String],
   ): Attributes =
-    request(req, headers, routeClassifier, Function.const[Boolean, Request[F]](true))
+    request(req, headers, routeClassifier, Defaults.urlRedactor)
 
   def request[F[_]](
       request: Request[F],
       allowedHeaders: Set[CIString],
       routeClassifier: Request[F] => Option[String],
-      includeUrl: Request[F] => Boolean,
+      urlRedactor: UriRedactor,
   ): Attributes = {
     val builder = Attributes.newBuilder
     builder += TypedAttributes.httpRequestMethod(request.method)
-    if (includeUrl(request)) {
-      builder += TypedAttributes.urlFull(request.uri)
-      builder += TypedAttributes.urlPath(request.uri.path)
-      builder += TypedAttributes.urlQuery(request.uri.query)
-    }
+    builder ++= TypedAttributes.url(request.uri, urlRedactor)
     val host = request.headers.get[Host].getOrElse {
       val key = RequestKey.fromRequest(request)
       Host(key.authority.host.value, key.authority.port)
     }
     builder += TypedAttributes.serverAddress(host)
-    request.uri.scheme.foreach(s => builder += TypedAttributes.urlScheme(s))
     request.headers
       .get[`User-Agent`]
       .foreach(ua => builder += TypedAttributes.userAgentOriginal(ua))

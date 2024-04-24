@@ -48,7 +48,7 @@ object ClientMiddleware {
       Defaults.clientSpanName,
       Defaults.additionalRequestTags,
       Defaults.additionalResponseTags,
-      Defaults.includeUrl,
+      Defaults.urlRedactor,
     )
 
   object Defaults {
@@ -61,7 +61,7 @@ object ClientMiddleware {
     def additionalResponseTags[F[_]]: Response[F] => Seq[Attribute[_]] = { (_: Response[F]) =>
       Seq()
     }
-    def includeUrl[F[_]]: Request[F] => Boolean = { (_: Request[F]) => true }
+    val urlRedactor: UriRedactor = UriRedactor.OnlyRedactUserInfo
   }
 
   final class ClientMiddlewareBuilder[F[_]: Tracer: Concurrent] private[ClientMiddleware] (
@@ -70,7 +70,7 @@ object ClientMiddleware {
       private val clientSpanName: Request[F] => String,
       private val additionalRequestTags: Request[F] => Seq[Attribute[_]],
       private val additionalResponseTags: Response[F] => Seq[Attribute[_]],
-      private val includeUrl: Request[F] => Boolean,
+      private val urlRedactor: UriRedactor,
   ) {
     private def copy(
         allowedRequestHeaders: Set[CIString] = this.allowedRequestHeaders,
@@ -78,7 +78,7 @@ object ClientMiddleware {
         clientSpanName: Request[F] => String = this.clientSpanName,
         additionalRequestTags: Request[F] => Seq[Attribute[_]] = this.additionalRequestTags,
         additionalResponseTags: Response[F] => Seq[Attribute[_]] = this.additionalResponseTags,
-        includeUrl: Request[F] => Boolean = this.includeUrl,
+        urlRedactor: UriRedactor = this.urlRedactor,
     ): ClientMiddlewareBuilder[F] =
       new ClientMiddlewareBuilder[F](
         allowedRequestHeaders,
@@ -86,7 +86,7 @@ object ClientMiddleware {
         clientSpanName,
         additionalRequestTags,
         additionalResponseTags,
-        includeUrl,
+        urlRedactor,
       )
 
     def withAllowedRequestHeaders(allowedHeaders: Set[CIString]): ClientMiddlewareBuilder[F] =
@@ -108,13 +108,13 @@ object ClientMiddleware {
     ): ClientMiddlewareBuilder[F] =
       copy(additionalResponseTags = additionalResponseTags)
 
-    def withIncludeUrl(includeUrl: Request[F] => Boolean): ClientMiddlewareBuilder[F] =
-      copy(includeUrl = includeUrl)
+    def withUrlRedactor(urlRedactor: UriRedactor): ClientMiddlewareBuilder[F] =
+      copy(urlRedactor = urlRedactor)
 
     def build: Client[F] => Client[F] = (client: Client[F]) =>
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
 
-        val base = request(req, allowedRequestHeaders, includeUrl) ++ additionalRequestTags(req)
+        val base = request(req, allowedRequestHeaders, urlRedactor) ++ additionalRequestTags(req)
         MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
           for {
             res <- Tracer[F]
@@ -167,21 +167,16 @@ object ClientMiddleware {
   def request[F[_]](
       request: Request[F],
       allowedHeaders: Set[CIString],
-      includeUrl: Request[F] => Boolean,
+      urlRedactor: UriRedactor,
   ): Attributes = {
     val builder = Attributes.newBuilder
     builder += TypedAttributes.httpRequestMethod(request.method)
-    if (includeUrl(request)) {
-      builder += TypedAttributes.urlFull(request.uri)
-      builder += TypedAttributes.urlPath(request.uri.path)
-      builder += TypedAttributes.urlQuery(request.uri.query)
-    }
+    builder ++= TypedAttributes.url(request.uri, urlRedactor)
     val host = request.headers.get[Host].getOrElse {
       val key = RequestKey.fromRequest(request)
       Host(key.authority.host.value, key.authority.port)
     }
     builder += TypedAttributes.serverAddress(host)
-    request.uri.scheme.foreach(scheme => builder += TypedAttributes.urlScheme(scheme))
     request.headers
       .get[`User-Agent`]
       .foreach(ua => builder += TypedAttributes.userAgentOriginal(ua))
