@@ -14,22 +14,18 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s
+package org.http4s.otel4s.middleware
+package instances
 
-import org.http4s.Header
 import org.http4s.Headers
-import org.typelevel.ci.CIString
 import org.typelevel.otel4s.context.propagation.TextMapGetter
 import org.typelevel.otel4s.context.propagation.TextMapUpdater
 
-package object middleware {
-  implicit private[middleware] val headersTMG: TextMapGetter[Headers] =
-    new TextMapGetter[Headers] {
-      def get(carrier: Headers, key: String): Option[String] =
-        carrier.get(CIString(key)).map(_.head.value)
-      def keys(carrier: Headers): Iterable[String] =
-        carrier.headers.view.map(_.name).distinct.map(_.toString).toSeq
-    }
-  implicit private[middleware] val headersTMU: TextMapUpdater[Headers] =
-    (headers, key, value) => headers.put(Header.Raw(CIString(key), value))
+/** Implicit instances of
+  * [[org.typelevel.otel4s.context.propagation.TextMapGetter]] and
+  * [[org.typelevel.otel4s.context.propagation.TextMapUpdater]].
+  */
+trait TextMapInstances {
+  implicit def headersTextMapGetter: TextMapGetter[Headers] = headersTMG
+  implicit def headersTextMapUpdater: TextMapUpdater[Headers] = headersTMU
 }
