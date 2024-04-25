@@ -52,7 +52,7 @@ object ServerMiddleware {
       Defaults.additionalRequestAttributes,
       Defaults.additionalResponseAttributes,
       Defaults.urlRedactor,
-      Defaults.doNotTrace,
+      Defaults.shouldTrace,
     )
 
   /** The default configuration values for a server middleware builder. */
@@ -68,7 +68,8 @@ object ServerMiddleware {
     def additionalResponseAttributes[F[_]]: Response[F] => immutable.Iterable[Attribute[_]] =
       (_: Response[F]) => Nil
     val urlRedactor: UriRedactor = UriRedactor.OnlyRedactUserInfo
-    def doNotTrace: RequestPrelude => Boolean = (_: RequestPrelude) => false
+    val shouldTrace: RequestPrelude => ShouldTrace =
+      (_: RequestPrelude) => ShouldTrace.Trace
   }
 
   /** A builder for server middlewares. */
@@ -80,7 +81,7 @@ object ServerMiddleware {
       additionalRequestAttributes: Request[F] => immutable.Iterable[Attribute[_]],
       additionalResponseAttributes: Response[F] => immutable.Iterable[Attribute[_]],
       urlRedactor: UriRedactor,
-      doNotTrace: RequestPrelude => Boolean,
+      shouldTrace: RequestPrelude => ShouldTrace,
   ) {
     private def copy(
         allowedRequestHeaders: Set[CIString] = this.allowedRequestHeaders,
@@ -92,7 +93,7 @@ object ServerMiddleware {
         additionalResponseAttributes: Response[F] => immutable.Iterable[Attribute[_]] =
           this.additionalResponseAttributes,
         urlRedactor: UriRedactor = this.urlRedactor,
-        doNotTrace: RequestPrelude => Boolean = this.doNotTrace,
+        shouldTrace: RequestPrelude => ShouldTrace = this.shouldTrace,
     ): ServerMiddlewareBuilder[F] =
       new ServerMiddlewareBuilder[F](
         allowedRequestHeaders,
@@ -102,7 +103,7 @@ object ServerMiddleware {
         additionalRequestAttributes,
         additionalResponseAttributes,
         urlRedactor,
-        doNotTrace,
+        shouldTrace,
       )
 
     /** Sets which request headers are allowed to made into `Attribute`s. */
@@ -146,9 +147,9 @@ object ServerMiddleware {
     def withUrlRedactor(urlRedactor: UriRedactor): ServerMiddlewareBuilder[F] =
       copy(urlRedactor = urlRedactor)
 
-    /** Sets how to determine when not to trace a request and its response. */
-    def withDoNotTrace(doNotTrace: RequestPrelude => Boolean): ServerMiddlewareBuilder[F] =
-      copy(doNotTrace = doNotTrace)
+    /** Sets how to determine when to trace a request and its response. */
+    def withShouldTrace(shouldTrace: RequestPrelude => ShouldTrace): ServerMiddlewareBuilder[F] =
+      copy(shouldTrace = shouldTrace)
 
     /** Returns a middleware in a way that abstracts over
       * [[org.http4s.HttpApp `HttpApp`]] and
@@ -162,8 +163,12 @@ object ServerMiddleware {
         f: Http[G, F]
     )(implicit kt: KindTransformer[F, G]): Http[G, F] =
       Kleisli { (req: Request[F]) =>
-        if (doNotTrace(req.requestPrelude) || !Tracer[F].meta.isEnabled) f(req)
-        else {
+        if (
+          shouldTrace(req.requestPrelude) == ShouldTrace.DoNotTrace ||
+          !Tracer[F].meta.isEnabled
+        ) {
+          f(req)
+        } else {
           val init =
             request(
               req,
