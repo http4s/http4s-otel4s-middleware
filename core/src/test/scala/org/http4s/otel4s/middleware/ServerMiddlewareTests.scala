@@ -25,7 +25,6 @@ import org.http4s.Method
 import org.http4s.Request
 import org.http4s.Response
 import org.http4s.Status
-import org.http4s.client.Client
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.AttributeKey
@@ -33,8 +32,8 @@ import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.Tracer
 
-class ClientMiddlewareTests extends CatsEffectSuite {
-  test("ClientMiddleware") {
+class ServerMiddlewareTests extends CatsEffectSuite {
+  test("ServerMiddleware") {
     TracesTestkit
       .inMemory[IO]()
       .use { testkit =>
@@ -45,28 +44,24 @@ class ClientMiddlewareTests extends CatsEffectSuite {
             val headers =
               Headers(Header.Raw(ci"foo", "bar"), Header.Raw(ci"baz", "qux"))
             val response = Response[IO](Status.Ok).withHeaders(headers)
-            val fakeClient =
-              Client.fromHttpApp[IO] {
-                HttpApp[IO](_.body.compile.drain.as(response))
-              }
-            val tracedClient =
-              ClientMiddleware
+            val tracedServer =
+              ServerMiddleware
                 .default[IO]
                 .withAllowedRequestHeaders(Set(ci"foo"))
                 .withAllowedResponseHeaders(Set(ci"baz"))
-                .build(fakeClient)
+                .buildHttpApp(HttpApp[IO](_.body.compile.drain.as(response)))
 
             val request =
               Request[IO](Method.GET, uri"http://localhost/?#")
                 .withHeaders(headers)
-            tracedClient.run(request).use(_.body.compile.drain)
+            tracedServer.run(request)
           }
           spans <- testkit.finishedSpans
         } yield {
           assertEquals(spans.length, 1)
           val span = spans.head
-          assertEquals(span.name, "Http Client - GET")
-          assertEquals(span.kind, SpanKind.Client)
+          assertEquals(span.name, "Http Server - GET")
+          assertEquals(span.kind, SpanKind.Server)
 
           val attributes = span.attributes
           assertEquals(attributes.size, 11)

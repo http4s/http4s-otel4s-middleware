@@ -20,7 +20,6 @@ import com.comcast.ip4s.IpAddress
 import com.comcast.ip4s.Port
 import org.http4s.Headers
 import org.http4s.Method
-import org.http4s.Query
 import org.http4s.Request
 import org.http4s.Status
 import org.http4s.Uri
@@ -42,24 +41,48 @@ import java.util.Locale
 
 /** Methods for creating appropriate `Attribute`s from typed HTTP objects. */
 object TypedAttributes {
+
+  /** @return the `http.request.method` `Attribute` */
   def httpRequestMethod(method: Method): Attribute[String] =
     HttpAttributes.HttpRequestMethod(method.name)
+
+  /** @return the `http.request.resend_count` `Attribute` */
   def httpRequestResendCount(count: Long): Attribute[Long] =
     HttpAttributes.HttpRequestResendCount(count)
+
+  /** @return the `http.response.status_code` `Attribute` */
   def httpResponseStatusCode(status: Status): Attribute[Long] =
     HttpAttributes.HttpResponseStatusCode(status.code.toLong)
+
+  /** @return the `network.peer.address` `Attribute` */
   def networkPeerAddress(ip: IpAddress): Attribute[String] =
     NetworkAttributes.NetworkPeerAddress(ip.toString)
+
+  /** @return the `server.address` `Attribute` */
   def serverAddress(host: Host): Attribute[String] =
     ServerAttributes.ServerAddress(Host.headerInstance.value(host))
-  def urlFull(url: Uri): Attribute[String] =
-    UrlAttributes.UrlFull(url.renderString)
-  def urlPath(path: Uri.Path): Attribute[String] =
-    UrlAttributes.UrlPath(path.renderString)
-  def urlQuery(query: Query): Attribute[String] =
-    UrlAttributes.UrlQuery(query.renderString)
-  def urlScheme(scheme: Uri.Scheme): Attribute[String] =
-    UrlAttributes.UrlScheme(scheme.value)
+
+  /** Returns of the following `Attribute`s when their corresponding values are
+    * present in the URL and not redacted by the provided [[`UriRedactor`]]:
+    *
+    *  - `url.full`
+    *  - `url.scheme`
+    *  - `url.path`
+    *  - `url.query`
+    *  - `url.fragment` (extremely unlikely to be present)
+    */
+  def url(unredacted: Uri, redactor: UriRedactor): Attributes =
+    redactor.redact(unredacted).fold(Attributes.empty) { url =>
+      val b = Attributes.newBuilder
+      b += UrlAttributes.UrlFull(url.renderString)
+      url.scheme.foreach(scheme => b += UrlAttributes.UrlScheme(scheme.value))
+      if (url.path != Uri.Path.empty) b += UrlAttributes.UrlPath(url.path.renderString)
+      if (url.query.nonEmpty) b += UrlAttributes.UrlQuery(url.query.renderString)
+      url.fragment.foreach(b += UrlAttributes.UrlFragment(_))
+      b.result()
+    }
+
+  /** @return the `user_agent.original` `Attribute` */
   def userAgentOriginal(userAgent: `User-Agent`): Attribute[String] =
     UserAgentAttributes.UserAgentOriginal(`User-Agent`.headerInstance.value(userAgent))
 
@@ -67,6 +90,8 @@ object TypedAttributes {
     * within an HTTP client.
     */
   object Client {
+
+    /** @return the `server.port` `Attribute` */
     def serverPort(port: Port): Attribute[Long] =
       ServerAttributes.ServerPort(port.value.toLong)
   }
@@ -75,26 +100,40 @@ object TypedAttributes {
     * within an HTTP server.
     */
   object Server {
+
+    /** @return the `client.address` `Attribute` */
     def clientAddress[F[_]](request: Request[F]): Option[Attribute[String]] =
       request.headers
         .get[`X-Forwarded-For`]
         .fold(request.remoteAddr)(_.values.head)
         .map(ip => ClientAttributes.ClientAddress(ip.toString))
+
+    /** @return the `client.port` `Attribute` */
     def clientPort(port: Port): Attribute[Long] =
       ClientAttributes.ClientPort(port.value.toLong)
 
+    /** Returns the `http.route` `Attribute`.
+      *
+      * Unfortunately, as this `Attribute` represents the route from the
+      * application root, its value cannot be derived generically, so it is
+      * private. Hopefully at some point we can develop a typed/type-safe API
+      * for deriving the route from the URL or similar, and expose this method
+      * at that time.
+      */
     private[middleware] def httpRoute(classifiedRoute: String): Attribute[String] =
       HttpAttributes.HttpRoute(classifiedRoute)
   }
 
   /** Methods for creating appropriate `Attribute`s from typed HTTP headers. */
   object Headers {
-    private[this] def unsafeGeneric(
-        redactedHeaders: Headers,
+    private[this] def generic(
+        headers: Headers,
         allowedHeaders: Set[CIString],
         prefixKey: AttributeKey[Seq[String]],
     ): Attributes =
-      redactedHeaders.headers
+      headers
+        .redactSensitive()
+        .headers
         .groupMap(_.name)(_.value)
         .view
         .collect {
@@ -106,15 +145,15 @@ object TypedAttributes {
         }
         .to(Attributes)
 
-    private[this] def generic(
-        headers: Headers,
-        allowedHeaders: Set[CIString],
-        prefixKey: AttributeKey[Seq[String]],
-    ): Attributes =
-      unsafeGeneric(headers.redactSensitive(), allowedHeaders, prefixKey)
-
+    /** @return `http.request.header.<lowercase name>` `Attribute`s for
+      *          all headers in `allowedHeaders`
+      */
     def request(headers: Headers, allowedHeaders: Set[CIString]): Attributes =
       generic(headers, allowedHeaders, HttpAttributes.HttpRequestHeader)
+
+    /** @return `http.response.header.<lowercase name>` `Attribute`s for
+      *          all headers in `allowedHeaders`
+      */
     def response(headers: Headers, allowedHeaders: Set[CIString]): Attributes =
       generic(headers, allowedHeaders, HttpAttributes.HttpResponseHeader)
 

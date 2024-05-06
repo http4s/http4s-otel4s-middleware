@@ -39,82 +39,101 @@ import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.vault.Key
 import org.typelevel.vault.Vault
 
+import scala.collection.immutable
+
+/** Middleware for wrapping an http4s `Client` to add tracing. */
 object ClientMiddleware {
 
+  /** @return a client middleware builder with default configuration */
   def default[F[_]: Tracer: Concurrent]: ClientMiddlewareBuilder[F] =
     new ClientMiddlewareBuilder[F](
       Defaults.allowedRequestHeaders,
       Defaults.allowedResponseHeaders,
       Defaults.clientSpanName,
-      Defaults.additionalRequestTags,
-      Defaults.additionalResponseTags,
-      Defaults.includeUrl,
+      Defaults.additionalRequestAttributes,
+      Defaults.additionalResponseAttributes,
+      Defaults.urlRedactor,
     )
 
+  /** The default configuration values for a client middleware builder. */
   object Defaults {
     val allowedRequestHeaders: Set[CIString] = TypedAttributes.Headers.defaultAllowedHeaders
     val allowedResponseHeaders: Set[CIString] = TypedAttributes.Headers.defaultAllowedHeaders
-    def clientSpanName[F[_]]: Request[F] => String = { (req: Request[F]) =>
-      s"Http Client - ${req.method}"
-    }
-    def additionalRequestTags[F[_]]: Request[F] => Seq[Attribute[_]] = { (_: Request[F]) => Seq() }
-    def additionalResponseTags[F[_]]: Response[F] => Seq[Attribute[_]] = { (_: Response[F]) =>
-      Seq()
-    }
-    def includeUrl[F[_]]: Request[F] => Boolean = { (_: Request[F]) => true }
+    def clientSpanName[F[_]]: Request[F] => String =
+      (req: Request[F]) => s"Http Client - ${req.method}"
+    def additionalRequestAttributes[F[_]]: Request[F] => immutable.Iterable[Attribute[_]] =
+      (_: Request[F]) => Nil
+    def additionalResponseAttributes[F[_]]: Response[F] => immutable.Iterable[Attribute[_]] =
+      (_: Response[F]) => Nil
+    val urlRedactor: UriRedactor = UriRedactor.OnlyRedactUserInfo
   }
 
+  /** A builder for client middlewares. */
   final class ClientMiddlewareBuilder[F[_]: Tracer: Concurrent] private[ClientMiddleware] (
       private val allowedRequestHeaders: Set[CIString],
       private val allowedResponseHeaders: Set[CIString],
       private val clientSpanName: Request[F] => String,
-      private val additionalRequestTags: Request[F] => Seq[Attribute[_]],
-      private val additionalResponseTags: Response[F] => Seq[Attribute[_]],
-      private val includeUrl: Request[F] => Boolean,
+      private val additionalRequestAttributes: Request[F] => immutable.Iterable[Attribute[_]],
+      private val additionalResponseAttributes: Response[F] => immutable.Iterable[Attribute[_]],
+      private val urlRedactor: UriRedactor,
   ) {
     private def copy(
         allowedRequestHeaders: Set[CIString] = this.allowedRequestHeaders,
         allowedResponseHeaders: Set[CIString] = this.allowedResponseHeaders,
         clientSpanName: Request[F] => String = this.clientSpanName,
-        additionalRequestTags: Request[F] => Seq[Attribute[_]] = this.additionalRequestTags,
-        additionalResponseTags: Response[F] => Seq[Attribute[_]] = this.additionalResponseTags,
-        includeUrl: Request[F] => Boolean = this.includeUrl,
+        additionalRequestAttributes: Request[F] => immutable.Iterable[Attribute[_]] =
+          this.additionalRequestAttributes,
+        additionalResponseAttributes: Response[F] => immutable.Iterable[Attribute[_]] =
+          this.additionalResponseAttributes,
+        urlRedactor: UriRedactor = this.urlRedactor,
     ): ClientMiddlewareBuilder[F] =
       new ClientMiddlewareBuilder[F](
         allowedRequestHeaders,
         allowedResponseHeaders,
         clientSpanName,
-        additionalRequestTags,
-        additionalResponseTags,
-        includeUrl,
+        additionalRequestAttributes,
+        additionalResponseAttributes,
+        urlRedactor,
       )
 
+    /** Sets which request headers are allowed to made into `Attribute`s. */
     def withAllowedRequestHeaders(allowedHeaders: Set[CIString]): ClientMiddlewareBuilder[F] =
       copy(allowedRequestHeaders = allowedHeaders)
 
+    /** Sets which response headers are allowed to made into `Attribute`s. */
     def withAllowedResponseHeaders(allowedHeaders: Set[CIString]): ClientMiddlewareBuilder[F] =
       copy(allowedResponseHeaders = allowedHeaders)
 
+    /** Sets how to derive the name of a client span from a request. */
     def withClientSpanName(clientSpanName: Request[F] => String): ClientMiddlewareBuilder[F] =
       copy(clientSpanName = clientSpanName)
 
-    def withAdditionalRequestTags(
-        additionalRequestTags: Request[F] => Seq[Attribute[_]]
+    /** Sets how to derive additional `Attribute`s from a request to add to the
+      *  client span.
+      */
+    def withAdditionalRequestAttributes(
+        additionalRequestAttributes: Request[F] => immutable.Iterable[Attribute[_]]
     ): ClientMiddlewareBuilder[F] =
-      copy(additionalRequestTags = additionalRequestTags)
+      copy(additionalRequestAttributes = additionalRequestAttributes)
 
-    def withAdditionalResponseTags(
-        additionalResponseTags: Response[F] => Seq[Attribute[_]]
+    /** Sets how to derive additional `Attribute`s from a response to add to the
+      *  client span.
+      */
+    def withAdditionalResponseAttributes(
+        additionalResponseAttributes: Response[F] => immutable.Iterable[Attribute[_]]
     ): ClientMiddlewareBuilder[F] =
-      copy(additionalResponseTags = additionalResponseTags)
+      copy(additionalResponseAttributes = additionalResponseAttributes)
 
-    def withIncludeUrl(includeUrl: Request[F] => Boolean): ClientMiddlewareBuilder[F] =
-      copy(includeUrl = includeUrl)
+    /** Sets how to redact URLs before turning them into `Attribute`s. */
+    def withUrlRedactor(urlRedactor: UriRedactor): ClientMiddlewareBuilder[F] =
+      copy(urlRedactor = urlRedactor)
 
+    /** @return the configured middleware */
     def build: Client[F] => Client[F] = (client: Client[F]) =>
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
 
-        val base = request(req, allowedRequestHeaders, includeUrl) ++ additionalRequestTags(req)
+        val base =
+          request(req, allowedRequestHeaders, urlRedactor) ++ additionalRequestAttributes(req)
         MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
           for {
             res <- Tracer[F]
@@ -134,7 +153,9 @@ object ClientMiddleware {
                     Resource
                       .eval {
                         span.addAttributes(
-                          response(resp, allowedResponseHeaders) ++ additionalResponseTags(resp)
+                          response(resp, allowedResponseHeaders) ++ additionalResponseAttributes(
+                            resp
+                          )
                         )
                       }
                       .mapK(trace)
@@ -161,27 +182,24 @@ object ClientMiddleware {
       }
   }
 
+  /** A key used to attach additional `Attribute`s to a request or response. */
   val ExtraAttributesKey: Key[Attributes] =
     Key.newKey[SyncIO, Attributes].unsafeRunSync()
 
-  def request[F[_]](
+  /** @return the default `Attribute`s for a request */
+  private def request[F[_]](
       request: Request[F],
       allowedHeaders: Set[CIString],
-      includeUrl: Request[F] => Boolean,
+      urlRedactor: UriRedactor,
   ): Attributes = {
     val builder = Attributes.newBuilder
     builder += TypedAttributes.httpRequestMethod(request.method)
-    if (includeUrl(request)) {
-      builder += TypedAttributes.urlFull(request.uri)
-      builder += TypedAttributes.urlPath(request.uri.path)
-      builder += TypedAttributes.urlQuery(request.uri.query)
-    }
+    builder ++= TypedAttributes.url(request.uri, urlRedactor)
     val host = request.headers.get[Host].getOrElse {
       val key = RequestKey.fromRequest(request)
       Host(key.authority.host.value, key.authority.port)
     }
     builder += TypedAttributes.serverAddress(host)
-    request.uri.scheme.foreach(scheme => builder += TypedAttributes.urlScheme(scheme))
     request.headers
       .get[`User-Agent`]
       .foreach(ua => builder += TypedAttributes.userAgentOriginal(ua))
@@ -205,7 +223,8 @@ object ClientMiddleware {
     builder.result()
   }
 
-  def response[F[_]](response: Response[F], allowedHeaders: Set[CIString]): Attributes = {
+  /** @return the default `Attribute`s for a response */
+  private def response[F[_]](response: Response[F], allowedHeaders: Set[CIString]): Attributes = {
     val builder = Attributes.newBuilder
 
     builder += TypedAttributes.httpResponseStatusCode(response.status)

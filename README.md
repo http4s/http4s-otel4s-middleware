@@ -1,9 +1,10 @@
-# http4s-otel4s
+# http4s-otel4s-middleware
 
 ## Quick Start
 
-To use http4s-otel4s in an existing SBT project with Scala 2.13 or a later version, add the following dependencies to your
-`build.sbt` depending on your needs:
+To use http4s-otel4s-middleware in an existing SBT project with Scala 2.13 or a
+later version, add the following dependencies to your `build.sbt` depending on
+your needs:
 
 ```scala
 libraryDependencies ++= Seq(

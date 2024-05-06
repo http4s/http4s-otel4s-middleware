@@ -8,7 +8,7 @@ ThisBuild / startYear := Some(2023)
 
 ThisBuild / tlCiReleaseBranches := Seq("main")
 
-val scala213 = "2.13.13"
+val scala213 = "2.13.14"
 val scala3 = "3.3.3"
 ThisBuild / crossScalaVersions := Seq(scala213, scala3)
 ThisBuild / scalaVersion := scala213
@@ -19,12 +19,10 @@ ThisBuild / tlJdkRelease := Some(8)
 val catsV = "2.10.0"
 val catsEffectV = "3.5.4"
 val http4sV = "0.23.26"
-
-val openTelemetryV = "1.35.0"
+val munitV = "1.0.0-RC1"
+val munitCatsEffectV = "2.0.0-M5"
+val openTelemetryV = "1.36.0"
 val otel4sV = "0.7.0"
-
-val munitCatsEffectV = "2.0.0-M4"
-
 val slf4jV = "1.7.36"
 
 // Projects
@@ -45,6 +43,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.typelevel" %%% "otel4s-sdk-testkit" % otel4sV % Test,
       "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
       "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
+      "org.scalameta" %%% "munit" % munitV % Test,
       "org.http4s" %%% "http4s-server" % http4sV % Test,
     ),
   )

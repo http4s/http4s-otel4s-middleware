@@ -3,15 +3,16 @@ layout: home
 
 ---
 
-# natchez-http4s-otel - Opinionated Natchez Http4s Middlewares [![Build Status](https://travis-ci.com/ChristopherDavenport/natchez-http4s-otel.svg?branch=master)](https://travis-ci.com/ChristopherDavenport/natchez-http4s-otel) [![Maven Central](https://maven-badges.herokuapp.com/maven-central/io.chrisdavenport/natchez-http4s-otel_2.12/badge.svg)](https://maven-badges.herokuapp.com/maven-central/io.chrisdavenport/natchez-http4s-otel_2.12)
+# http4s-otel4s-middleware - Otel4s Http4s Middlewares [![Maven Central](https://maven-badges.herokuapp.com/maven-central/org.http4s/http4s-otel4s-middleware_2.13/badge.svg)](https://maven-badges.herokuapp.com/maven-central/org.http4s/http4s-otel4s-middleware_2.13)
 
 ## Quick Start
 
-To use natchez-http4s-otel in an existing SBT project with Scala 2.11 or a later version, add the following dependencies to your
-`build.sbt` depending on your needs:
+To use http4s-otel4s-middleware in an existing SBT project with Scala 2.13 or a
+later version, add the following dependencies to your `build.sbt` depending on
+your needs:
 
 ```scala
 libraryDependencies ++= Seq(
-  "io.chrisdavenport" %% "natchez-http4s-otel" % "<version>"
+  "org.http4s" %% "http4s-otel4s-middleware" % "<version>"
 )
 ```
