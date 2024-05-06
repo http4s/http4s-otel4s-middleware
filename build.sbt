@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.4" // your current series x.y
+ThisBuild / tlBaseVersion := "0.5" // your current series x.y
 
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
@@ -21,8 +21,8 @@ val catsEffectV = "3.5.4"
 val http4sV = "0.23.27"
 val munitV = "1.0.0-RC1"
 val munitCatsEffectV = "2.0.0-M5"
-val openTelemetryV = "1.36.0"
-val otel4sV = "0.5.0"
+val openTelemetryV = "1.37.0"
+val otel4sV = "0.6.0"
 val slf4jV = "1.7.36"
 
 // Projects
