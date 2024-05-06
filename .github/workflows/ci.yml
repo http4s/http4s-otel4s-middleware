@@ -244,7 +244,7 @@ jobs:
       - name: Submit Dependencies
         uses: scalacenter/sbt-dependency-submission@v2
         with:
-          modules-ignore: examples_2.13 examples_3 site_2.13 site_3 sbt-http4s-org-scalafix-internal_2.13 sbt-http4s-org-scalafix-internal_3 http4s-otel4s-middlewarejvm_2.13 http4s-otel4s-middlewarejvm_3 http4s-otel4s-middlewarejs_2.13 http4s-otel4s-middlewarejs_3 http4s-otel4s-middlewarenative_2.13 http4s-otel4s-middlewarenative_3 core-jvm-tests_2.13 core-jvm-tests_3
+          modules-ignore: examples_2.13 examples_3 site_2.13 site_3 sbt-http4s-org-scalafix-internal_2.13 sbt-http4s-org-scalafix-internal_3 http4s-otel4s-middlewarejvm_2.13 http4s-otel4s-middlewarejvm_3 http4s-otel4s-middlewarejs_2.13 http4s-otel4s-middlewarejs_3 http4s-otel4s-middlewarenative_2.13 http4s-otel4s-middlewarenative_3
           configs-ignore: test scala-tool scala-doc-tool test-internal
 
   validate-steward:

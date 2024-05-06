@@ -17,8 +17,6 @@
 package org.http4s.otel4s.middleware
 
 import cats.effect.IO
-import io.opentelemetry.api.trace.{SpanKind => JSpanKind}
-import io.opentelemetry.sdk.trace.data.{SpanData => JSpanData}
 import munit.CatsEffectSuite
 import org.http4s.Header
 import org.http4s.Headers
@@ -30,8 +28,8 @@ import org.http4s.Status
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.AttributeKey
-import org.typelevel.otel4s.oteljava.AttributeConverters._
-import org.typelevel.otel4s.oteljava.testkit.trace.TracesTestkit
+import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
+import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.Tracer
 
 class ServerMiddlewareTests extends CatsEffectSuite {
@@ -58,14 +56,14 @@ class ServerMiddlewareTests extends CatsEffectSuite {
                 .withHeaders(headers)
             tracedServer.run(request)
           }
-          spans <- testkit.finishedSpans[JSpanData]
+          spans <- testkit.finishedSpans
         } yield {
           assertEquals(spans.length, 1)
           val span = spans.head
-          assertEquals(span.getName, "Http Server - GET")
-          assertEquals(span.getKind, JSpanKind.SERVER)
+          assertEquals(span.name, "Http Server - GET")
+          assertEquals(span.kind, SpanKind.Server)
 
-          val attributes = span.getAttributes.toScala
+          val attributes = span.attributes
           assertEquals(attributes.size, 11)
           def getAttr[A: AttributeKey.KeySelect](name: String): Option[A] =
             attributes.get[A](name).map(_.value)
