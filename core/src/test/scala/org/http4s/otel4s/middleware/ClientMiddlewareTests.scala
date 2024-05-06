@@ -17,22 +17,20 @@
 package org.http4s.otel4s.middleware
 
 import cats.effect.IO
-import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator
-import io.opentelemetry.api.trace.{SpanKind => JSpanKind}
-import io.opentelemetry.sdk.trace.data.{SpanData => JSpanData}
 import munit.CatsEffectSuite
 import org.http4s._
 import org.http4s.client._
 import org.typelevel.otel4s.AttributeKey
-import org.typelevel.otel4s.oteljava.AttributeConverters._
-import org.typelevel.otel4s.oteljava.testkit.trace.TracesTestkit
+import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
+import org.typelevel.otel4s.sdk.trace.context.propagation.W3CTraceContextPropagator
+import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.Tracer
 
 class ClientMiddlewareTests extends CatsEffectSuite {
   test("ClientMiddleware") {
     TracesTestkit
       .inMemory[IO](
-        textMapPropagators = List(W3CTraceContextPropagator.getInstance())
+        _.addTextMapPropagators(W3CTraceContextPropagator.default)
       )
       .use { testkit =>
         for {
@@ -49,14 +47,14 @@ class ClientMiddlewareTests extends CatsEffectSuite {
               .run(Request[IO](Method.GET))
               .use(_.body.compile.drain)
           }
-          spans <- testkit.finishedSpans[JSpanData]
+          spans <- testkit.finishedSpans
         } yield {
           assertEquals(spans.length, 1)
           val span = spans.head
-          assertEquals(span.getName, "Http Client - GET")
-          assertEquals(span.getKind, JSpanKind.CLIENT)
+          assertEquals(span.name, "Http Client - GET")
+          assertEquals(span.kind, SpanKind.Client)
 
-          val attributes = span.getAttributes.toScala
+          val attributes = span.attributes
           def getAttr[A: AttributeKey.KeySelect](name: String): Option[A] =
             attributes.get[A](name).map(_.value)
 

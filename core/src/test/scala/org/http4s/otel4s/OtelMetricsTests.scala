@@ -18,16 +18,14 @@ package org.http4s.otel4s
 
 import cats.data.OptionT
 import cats.effect.IO
-import io.opentelemetry.api.common.{Attributes => JAttributes}
-import io.opentelemetry.sdk.metrics.data.{MetricData => JMetricData}
 import munit.CatsEffectSuite
 import org.http4s._
 import org.http4s.server.middleware.Metrics
+import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics.Meter
-import org.typelevel.otel4s.oteljava.AttributeConverters._
-import org.typelevel.otel4s.oteljava.testkit.metrics.MetricsTestkit
-
-import scala.jdk.CollectionConverters._
+import org.typelevel.otel4s.sdk.metrics.data.MetricPoints
+import org.typelevel.otel4s.sdk.metrics.data.PointData
+import org.typelevel.otel4s.sdk.testkit.metrics.MetricsTestkit
 
 class OtelMetricsTests extends CatsEffectSuite {
   test("OtelMetrics") {
@@ -50,22 +48,32 @@ class OtelMetricsTests extends CatsEffectSuite {
               .semiflatMap(_.body.compile.drain)
               .value
           }
-          metrics <- testkit.collectMetrics[JMetricData]
+          metrics <- testkit.collectMetrics
         } yield {
-          def attributes(attrs: JAttributes): Map[String, String] =
-            attrs.toScala.toSeq.map(e => e.key.name -> e.value.toString).toMap
+          def attributes(attrs: Attributes): Map[String, String] =
+            attrs.map(a => a.key.name -> a.value.toString).toMap
 
-          val activeRequests = metrics.find(_.getName == "http.server.active_requests").get
           val activeRequestsDataPoints: Map[Map[String, String], Long] =
-            activeRequests.getLongSumData.getPoints.asScala.toList
-              .map(e => attributes(e.getAttributes) -> e.getValue)
-              .toMap
+            metrics
+              .find(_.name == "http.server.active_requests")
+              .map(_.data)
+              .collect { case sum: MetricPoints.Sum =>
+                sum.points.toVector.collect { case long: PointData.LongNumber =>
+                  attributes(long.attributes) -> long.value
+                }.toMap
+              }
+              .getOrElse(Map.empty)
 
-          val requestDuration = metrics.find(_.getName == "http.server.request.duration").get
           val requestDurationDataPoints: Map[Map[String, String], Long] =
-            requestDuration.getHistogramData.getPoints.asScala.toList
-              .map(e => attributes(e.getAttributes) -> e.getCount)
-              .toMap
+            metrics
+              .find(_.name == "http.server.request.duration")
+              .map(_.data)
+              .collect { case histogram: MetricPoints.Histogram =>
+                histogram.points.toVector
+                  .map(e => attributes(e.attributes) -> e.stats.map(_.count).getOrElse(0L))
+                  .toMap
+              }
+              .getOrElse(Map.empty)
 
           assertEquals(
             activeRequestsDataPoints,
