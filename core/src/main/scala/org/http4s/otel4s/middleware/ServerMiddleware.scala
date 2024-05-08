@@ -131,7 +131,7 @@ object ServerMiddleware {
       *  server span.
       */
     def withAdditionalRequestAttributes(
-        additionalRequestAttributes: Request[F] => Seq[Attribute[_]]
+        additionalRequestAttributes: Request[F] => immutable.Iterable[Attribute[_]]
     ): ServerMiddlewareBuilder[F] =
       copy(additionalRequestAttributes = additionalRequestAttributes)
 
@@ -139,7 +139,7 @@ object ServerMiddleware {
       *  server span.
       */
     def withAdditionalResponseAttributes(
-        additionalResponseAttributes: Response[F] => Seq[Attribute[_]]
+        additionalResponseAttributes: Response[F] => immutable.Iterable[Attribute[_]]
     ): ServerMiddlewareBuilder[F] =
       copy(additionalResponseAttributes = additionalResponseAttributes)
 
@@ -164,7 +164,7 @@ object ServerMiddleware {
     )(implicit kt: KindTransformer[F, G]): Http[G, F] =
       Kleisli { (req: Request[F]) =>
         if (
-          shouldTrace(req.requestPrelude) == ShouldTrace.DoNotTrace ||
+          !shouldTrace(req.requestPrelude).shouldTrace ||
           !Tracer[F].meta.isEnabled
         ) {
           f(req)

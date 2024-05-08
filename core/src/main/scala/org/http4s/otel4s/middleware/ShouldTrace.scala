@@ -17,13 +17,21 @@
 package org.http4s.otel4s.middleware
 
 /** Whether or not to trace something. */
-sealed trait ShouldTrace
+sealed trait ShouldTrace {
+
+  /** Whether or not to trace something. */
+  def shouldTrace: Boolean
+}
 
 object ShouldTrace {
 
   /** Trace the thing. */
-  case object Trace extends ShouldTrace
+  case object Trace extends ShouldTrace {
+    def shouldTrace: Boolean = true
+  }
 
   /** Do not trace the thing. */
-  case object DoNotTrace extends ShouldTrace
+  case object DoNotTrace extends ShouldTrace {
+    def shouldTrace: Boolean = false
+  }
 }
