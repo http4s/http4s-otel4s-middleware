@@ -25,7 +25,9 @@ import cats.effect.kernel.Outcome
 import cats.syntax.flatMap._
 import org.http4s.Headers
 import org.http4s.Request
+import org.http4s.RequestPrelude
 import org.http4s.Response
+import org.http4s.ResponsePrelude
 import org.http4s.client.Client
 import org.http4s.client.RequestKey
 import org.http4s.client.middleware.Retry
@@ -57,33 +59,35 @@ object ClientMiddleware {
 
   /** The default configuration values for a client middleware builder. */
   object Defaults {
-    val allowedRequestHeaders: Set[CIString] = TypedAttributes.Headers.defaultAllowedHeaders
-    val allowedResponseHeaders: Set[CIString] = TypedAttributes.Headers.defaultAllowedHeaders
-    def clientSpanName[F[_]]: Request[F] => String =
-      (req: Request[F]) => s"Http Client - ${req.method}"
-    def additionalRequestAttributes[F[_]]: Request[F] => immutable.Iterable[Attribute[_]] =
-      (_: Request[F]) => Nil
-    def additionalResponseAttributes[F[_]]: Response[F] => immutable.Iterable[Attribute[_]] =
-      (_: Response[F]) => Nil
-    val urlRedactor: UriRedactor = UriRedactor.OnlyRedactUserInfo
+    def allowedRequestHeaders: Set[CIString] =
+      TypedAttributes.Headers.defaultAllowedHeaders
+    def allowedResponseHeaders: Set[CIString] =
+      TypedAttributes.Headers.defaultAllowedHeaders
+    val clientSpanName: RequestPrelude => String =
+      req => s"Http Client - ${req.method}"
+    val additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]] =
+      _ => Nil
+    val additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]] =
+      _ => Nil
+    def urlRedactor: UriRedactor = UriRedactor.OnlyRedactUserInfo
   }
 
   /** A builder for client middlewares. */
   final class ClientMiddlewareBuilder[F[_]: Tracer: Concurrent] private[ClientMiddleware] (
       private val allowedRequestHeaders: Set[CIString],
       private val allowedResponseHeaders: Set[CIString],
-      private val clientSpanName: Request[F] => String,
-      private val additionalRequestAttributes: Request[F] => immutable.Iterable[Attribute[_]],
-      private val additionalResponseAttributes: Response[F] => immutable.Iterable[Attribute[_]],
+      private val clientSpanName: RequestPrelude => String,
+      private val additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]],
+      private val additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]],
       private val urlRedactor: UriRedactor,
   ) {
     private def copy(
         allowedRequestHeaders: Set[CIString] = this.allowedRequestHeaders,
         allowedResponseHeaders: Set[CIString] = this.allowedResponseHeaders,
-        clientSpanName: Request[F] => String = this.clientSpanName,
-        additionalRequestAttributes: Request[F] => immutable.Iterable[Attribute[_]] =
+        clientSpanName: RequestPrelude => String = this.clientSpanName,
+        additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]] =
           this.additionalRequestAttributes,
-        additionalResponseAttributes: Response[F] => immutable.Iterable[Attribute[_]] =
+        additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]] =
           this.additionalResponseAttributes,
         urlRedactor: UriRedactor = this.urlRedactor,
     ): ClientMiddlewareBuilder[F] =
@@ -105,14 +109,14 @@ object ClientMiddleware {
       copy(allowedResponseHeaders = allowedHeaders)
 
     /** Sets how to derive the name of a client span from a request. */
-    def withClientSpanName(clientSpanName: Request[F] => String): ClientMiddlewareBuilder[F] =
+    def withClientSpanName(clientSpanName: RequestPrelude => String): ClientMiddlewareBuilder[F] =
       copy(clientSpanName = clientSpanName)
 
     /** Sets how to derive additional `Attribute`s from a request to add to the
       *  client span.
       */
     def withAdditionalRequestAttributes(
-        additionalRequestAttributes: Request[F] => immutable.Iterable[Attribute[_]]
+        additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]]
     ): ClientMiddlewareBuilder[F] =
       copy(additionalRequestAttributes = additionalRequestAttributes)
 
@@ -120,7 +124,7 @@ object ClientMiddleware {
       *  client span.
       */
     def withAdditionalResponseAttributes(
-        additionalResponseAttributes: Response[F] => immutable.Iterable[Attribute[_]]
+        additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]]
     ): ClientMiddlewareBuilder[F] =
       copy(additionalResponseAttributes = additionalResponseAttributes)
 
@@ -131,13 +135,14 @@ object ClientMiddleware {
     /** @return the configured middleware */
     def build: Client[F] => Client[F] = (client: Client[F]) =>
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
-
+        val reqPrelude = req.requestPrelude
         val base =
-          request(req, allowedRequestHeaders, urlRedactor) ++ additionalRequestAttributes(req)
+          request(req, allowedRequestHeaders, urlRedactor) ++
+            additionalRequestAttributes(reqPrelude)
         MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
           for {
             res <- Tracer[F]
-              .spanBuilder(clientSpanName(req))
+              .spanBuilder(clientSpanName(reqPrelude))
               .withSpanKind(SpanKind.Client)
               .addAttributes(base)
               .build
@@ -153,9 +158,8 @@ object ClientMiddleware {
                     Resource
                       .eval {
                         span.addAttributes(
-                          response(resp, allowedResponseHeaders) ++ additionalResponseAttributes(
-                            resp
-                          )
+                          response(resp, allowedResponseHeaders) ++
+                            additionalResponseAttributes(resp.responsePrelude)
                         )
                       }
                       .mapK(trace)
