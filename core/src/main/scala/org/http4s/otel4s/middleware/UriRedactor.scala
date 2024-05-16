@@ -36,6 +36,18 @@ trait UriRedactor {
     * @return a redacted URI, or `None` if the entire URI is sensitive
     */
   def redact(uri: Uri): Option[Uri]
+
+  /** Redacts a URI using this redactor, and then redacts the result using
+    * `that` redactor.
+    */
+  final def andThen(that: UriRedactor): UriRedactor =
+    uri => this.redact(uri).flatMap(that.redact)
+
+  /** Redacts a URI using `that` redactor, and then redacts the result using
+    * this redactor.
+    */
+  final def compose(that: UriRedactor): UriRedactor =
+    that.andThen(this)
 }
 
 object UriRedactor {
