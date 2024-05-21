@@ -179,6 +179,7 @@ object OtelMetrics {
     val activeRequests: F[UpDownCounter[F, Long]] =
       Meter[F]
         .upDownCounter[Long](s"$prefix.active_requests")
+        .withUnit("{request}")
         .withDescription("Number of active HTTP server requests.")
         .create
 
