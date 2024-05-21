@@ -30,31 +30,73 @@ import org.typelevel.otel4s.metrics._
 import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
 
 /** [[http4s.metrics.MetricsOps]] algebra capable of recording OpenTelemetry metrics
-  *
-  * Registers the following metrics:
-  *
-  * http.server.request.duration - Histogram
-  *
-  * http.server.active_requests - UpDownCounter
-  *
-  * http.server.abnormal_terminations - Histogram
-  *
-  * https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
   */
 object OtelMetrics {
 
-  /** Creates a [[http4s.metrics.MetricsOps]] that supports OpenTelemetry metrics
+  /** Creates a [[http4s.metrics.MetricsOps]] for clients that supports OpenTelemetry metrics.
+    *
+    * Registers the following metrics:
+    *
+    * http.client.request.duration - Histogram
+    *
+    * http.client.active_requests - UpDownCounter
+    *
+    * http.client.abnormal_terminations - Histogram
+    *
+    * https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
     *
     * @param attributes additional [[org.typelevel.otel4s.Attributes]] that are added to all metrics
     * @param responseDurationSecondsHistogramBuckets histogram buckets for the response duration metrics
     */
-  def metricsOps[F[_]: Monad: Meter](
+  def clientMetricsOps[F[_]: Monad: Meter](
       attributes: Attributes = Attributes.empty,
       responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
   ): F[MetricsOps[F]] =
+    metricsOps(
+      "http.client",
+      attributes,
+      responseDurationSecondsHistogramBuckets,
+    )
+
+  /** Creates a [[http4s.metrics.MetricsOps]] for servers that supports OpenTelemetry metrics.
+    *
+    * Registers the following metrics:
+    *
+    * http.server.request.duration - Histogram
+    *
+    * http.server.active_requests - UpDownCounter
+    *
+    * http.server.abnormal_terminations - Histogram
+    *
+    * https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
+    *
+    * @param attributes additional [[org.typelevel.otel4s.Attributes]] that are added to all metrics
+    * @param responseDurationSecondsHistogramBuckets histogram buckets for the response duration metrics
+    */
+  def serverMetricsOps[F[_]: Monad: Meter](
+      attributes: Attributes = Attributes.empty,
+      responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
+  ): F[MetricsOps[F]] =
+    metricsOps(
+      "http.server",
+      attributes,
+      responseDurationSecondsHistogramBuckets,
+    )
+
+  private def metricsOps[F[_]: Monad: Meter](
+      prefix: String,
+      attributes: Attributes,
+      responseDurationSecondsHistogramBuckets: BucketBoundaries,
+  ): F[MetricsOps[F]] =
     for {
-      metrics <- createMetricsCollection(responseDurationSecondsHistogramBuckets)
-    } yield createMetricsOps(metrics, attributes)
+      metrics <- createMetricsCollection(
+        prefix,
+        responseDurationSecondsHistogramBuckets,
+      )
+    } yield createMetricsOps(
+      metrics,
+      attributes,
+    )
 
   private def createMetricsOps[F[_]](
       metrics: MetricsCollection[F],
@@ -123,11 +165,12 @@ object OtelMetrics {
     }
 
   private def createMetricsCollection[F[_]: Monad: Meter](
-      responseDurationSecondsHistogramBuckets: BucketBoundaries
+      prefix: String,
+      responseDurationSecondsHistogramBuckets: BucketBoundaries,
   ): F[MetricsCollection[F]] = {
     val requestDuration: F[Histogram[F, Double]] =
       Meter[F]
-        .histogram[Double]("http.server.request.duration")
+        .histogram[Double](s"$prefix.request.duration")
         .withUnit("s")
         .withDescription("Duration of HTTP server requests.")
         .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
@@ -135,13 +178,13 @@ object OtelMetrics {
 
     val activeRequests: F[UpDownCounter[F, Long]] =
       Meter[F]
-        .upDownCounter[Long]("http.server.active_requests")
+        .upDownCounter[Long](s"$prefix.active_requests")
         .withDescription("Number of active HTTP server requests.")
         .create
 
     val abnormalTerminations: F[Histogram[F, Double]] =
       Meter[F]
-        .histogram[Double]("http.server.abnormal_terminations")
+        .histogram[Double](s"$prefix.abnormal_terminations")
         .withDescription("Total Abnormal Terminations.")
         .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
         .create
