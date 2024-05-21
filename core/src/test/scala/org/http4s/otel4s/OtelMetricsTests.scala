@@ -36,7 +36,7 @@ class OtelMetricsTests extends CatsEffectSuite {
           meterIO <- testkit.meterProvider.get("meter")
           metricsOps <- {
             implicit val meter: Meter[IO] = meterIO
-            OtelMetrics.metricsOps[IO]()
+            OtelMetrics.serverMetricsOps[IO]()
           }
           _ <- {
             val fakeServer =
