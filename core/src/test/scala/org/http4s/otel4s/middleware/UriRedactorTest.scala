@@ -54,4 +54,39 @@ class UriRedactorTest extends FunSuite {
     val r2 = redactor.redact(uri"https:")
     assertEquals(r2, Some(uri"https:"))
   }
+
+  test("UriRedactor#andThen and UriRedactor#compose") {
+    val excluded = "foo"
+    abstract class QueryRedactor extends UriRedactor.ByParts {
+      protected def redactPath(path: Uri.Path): Uri.Path = path
+      protected def redactFragment(fragment: Uri.Fragment): Option[Uri.Fragment] = None
+    }
+    val redactor1 = new QueryRedactor {
+      protected def redactQuery(query: Query): Query =
+        query.filterNot(_._1 == excluded)
+    }
+    val redactor2 = new QueryRedactor {
+      protected def redactQuery(query: Query): Query =
+        if (query.containsQueryParam(excluded)) Query.empty
+        else query
+    }
+    val r1andThen2 = redactor1.andThen(redactor2)
+    val r2compose1 = redactor2.compose(redactor1)
+    val r2andThen1 = redactor2.andThen(redactor1)
+    val r1compose2 = redactor1.compose(redactor2)
+
+    val uri1 = uri"https://example.com?foo=bar&baz=qux"
+    val uri2 = uri"https://example.com?baz=qux"
+    val uri3 = uri"https://example.com"
+
+    assertEquals(r1andThen2.redact(uri1), Some(uri2))
+    assertEquals(r2compose1.redact(uri1), Some(uri2))
+    assertEquals(r2andThen1.redact(uri1), Some(uri3))
+    assertEquals(r1compose2.redact(uri1), Some(uri3))
+
+    assertEquals(r1andThen2.redact(uri2), Some(uri2))
+    assertEquals(r2compose1.redact(uri2), Some(uri2))
+    assertEquals(r2andThen1.redact(uri2), Some(uri2))
+    assertEquals(r1compose2.redact(uri2), Some(uri2))
+  }
 }
