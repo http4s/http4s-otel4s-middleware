@@ -186,7 +186,7 @@ object OtelMetrics {
       Meter[F]
         .histogram[Double](s"$prefix.abnormal_terminations")
         .withUnit("s")
-        .withDescription("Total Abnormal Terminations.")
+        .withDescription("Duration of HTTP server abnormal terminations.")
         .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
         .create
 
