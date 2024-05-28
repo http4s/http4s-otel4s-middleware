@@ -16,7 +16,7 @@ ThisBuild / scalaVersion := scala213
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"))
 ThisBuild / tlJdkRelease := Some(8)
 
-val catsV = "2.10.0"
+val catsV = "2.11.0"
 val catsEffectV = "3.5.4"
 val http4sV = "0.23.27"
 val munitV = "1.0.0"
