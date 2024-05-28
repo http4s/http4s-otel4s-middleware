@@ -38,12 +38,14 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.typelevel" %%% "cats-core" % catsV,
       "org.typelevel" %%% "cats-effect" % catsEffectV,
       "org.http4s" %%% "http4s-client" % http4sV,
+      "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
       "org.typelevel" %%% "otel4s-semconv" % otel4sV,
-      "org.typelevel" %%% "otel4s-sdk-trace-testkit" % otel4sV % Test,
+      "org.typelevel" %%% "otel4s-sdk-testkit" % otel4sV % Test,
       "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
       "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
       "org.scalameta" %%% "munit" % munitV % Test,
+      "org.http4s" %%% "http4s-server" % http4sV % Test,
     ),
   )
 

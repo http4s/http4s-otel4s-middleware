@@ -17,15 +17,19 @@
 package example
 
 import cats.effect._
+import cats.effect.syntax.all._
 import com.comcast.ip4s._
 import fs2.io.net.Network
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
 import org.http4s.otel4s.middleware.ClientMiddleware
+import org.http4s.otel4s.middleware.OtelMetrics
 import org.http4s.otel4s.middleware.ServerMiddleware
 import org.http4s.server.Server
+import org.http4s.server.middleware.Metrics
 import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.metrics.Meter
 import org.typelevel.otel4s.oteljava.OtelJava
 import org.typelevel.otel4s.trace.Tracer
 
@@ -50,15 +54,19 @@ object Http4sExample extends IOApp with Common {
   def tracer[F[_]](otel: Otel4s[F]): F[Tracer[F]] =
     otel.tracerProvider.tracer("Http4sExample").get
 
+  def meter[F[_]](otel: Otel4s[F]): F[Meter[F]] =
+    otel.meterProvider.meter("Http4sExample").get
+
   // Our main app resource
-  def server[F[_]: Async: Network: Tracer]: Resource[F, Server] =
+  def server[F[_]: Async: Network: Tracer: Meter]: Resource[F, Server] =
     for {
       client <- EmberClientBuilder
         .default[F]
         .build
         .map(ClientMiddleware.default.build)
+      metricsOps <- OtelMetrics.serverMetricsOps[F]().toResource
       app = ServerMiddleware.default[F].buildHttpApp {
-        routes(client).orNotFound
+        Metrics(metricsOps)(routes(client)).orNotFound
       }
       sv <- EmberServerBuilder.default[F].withPort(port"8080").withHttpApp(app).build
     } yield sv
@@ -69,7 +77,9 @@ object Http4sExample extends IOApp with Common {
       .autoConfigured[IO]()
       .flatMap { otel4s =>
         Resource.eval(tracer(otel4s)).flatMap { implicit T: Tracer[IO] =>
-          server[IO]
+          Resource.eval(meter(otel4s)).flatMap { implicit M: Meter[IO] =>
+            server[IO]
+          }
         }
       }
       .use(_ => IO.never)
