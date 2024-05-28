@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s
+package org.http4s.otel4s.middleware
 
 import cats.Monad
 import cats.syntax.all._
@@ -22,7 +22,6 @@ import org.http4s.Method
 import org.http4s.Status
 import org.http4s.metrics.MetricsOps
 import org.http4s.metrics.TerminationType
-import org.http4s.otel4s.middleware.TypedAttributes
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
@@ -186,6 +185,7 @@ object OtelMetrics {
     val abnormalTerminations: F[Histogram[F, Double]] =
       Meter[F]
         .histogram[Double](s"$prefix.abnormal_terminations")
+        .withUnit("s")
         .withDescription("Total Abnormal Terminations.")
         .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
         .create

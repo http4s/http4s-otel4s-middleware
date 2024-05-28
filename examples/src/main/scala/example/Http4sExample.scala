@@ -23,8 +23,8 @@ import fs2.io.net.Network
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
-import org.http4s.otel4s.OtelMetrics
 import org.http4s.otel4s.middleware.ClientMiddleware
+import org.http4s.otel4s.middleware.OtelMetrics
 import org.http4s.otel4s.middleware.ServerMiddleware
 import org.http4s.server.Server
 import org.http4s.server.middleware.Metrics

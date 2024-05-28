@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s
+package org.http4s.otel4s.middleware
 
 import cats.data.OptionT
 import cats.effect.IO
