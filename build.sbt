@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.7" // your current series x.y
+ThisBuild / tlBaseVersion := "0.8" // your current series x.y
 
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
@@ -16,13 +16,12 @@ ThisBuild / scalaVersion := scala213
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"))
 ThisBuild / tlJdkRelease := Some(8)
 
-val catsV = "2.10.0"
 val catsEffectV = "3.5.4"
 val http4sV = "0.23.27"
 val munitV = "1.0.0"
 val munitCatsEffectV = "2.0.0-RC1"
 val openTelemetryV = "1.37.0"
-val otel4sV = "0.7.0"
+val otel4sV = "0.8.0"
 val slf4jV = "1.7.36"
 
 // Projects
@@ -35,7 +34,6 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .settings(
     name := "http4s-otel4s-middleware",
     libraryDependencies ++= Seq(
-      "org.typelevel" %%% "cats-core" % catsV,
       "org.typelevel" %%% "cats-effect" % catsEffectV,
       "org.http4s" %%% "http4s-client" % http4sV,
       "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
