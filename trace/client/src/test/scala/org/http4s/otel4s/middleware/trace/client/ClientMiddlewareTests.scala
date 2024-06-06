@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware
+package org.http4s.otel4s.middleware.trace.client
 
 import cats.effect.IO
 import munit.CatsEffectSuite

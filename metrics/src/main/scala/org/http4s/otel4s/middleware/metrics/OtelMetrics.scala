@@ -15,6 +15,7 @@
  */
 
 package org.http4s.otel4s.middleware
+package metrics
 
 import cats.Monad
 import cats.syntax.all._

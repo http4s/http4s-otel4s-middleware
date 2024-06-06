@@ -15,6 +15,7 @@
  */
 
 package org.http4s.otel4s.middleware
+package trace.server
 
 import cats.data.Kleisli
 import cats.effect.kernel.MonadCancelThrow
@@ -28,9 +29,10 @@ import org.http4s.Request
 import org.http4s.RequestPrelude
 import org.http4s.Response
 import org.http4s.ResponsePrelude
-import org.http4s.client.RequestKey
+import org.http4s.Uri
 import org.http4s.headers.Host
 import org.http4s.headers.`User-Agent`
+import org.http4s.otel4s.middleware.trace.internal.TraceAttributes
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
@@ -203,12 +205,12 @@ object ServerMiddleware {
                           span.recordException(e)
                         case Outcome.Canceled() =>
                           span.addAttributes(
-                            CustomAttributes.Canceled(true),
-                            CustomAttributes.Error(
+                            TraceAttributes.Canceled(true),
+                            TraceAttributes.Error(
                               true
                             ), // A canceled http is an error for the server. The connection got cut for some reason.
                           )
-                      }) >> span.addAttribute(CustomAttributes.exitCase(outcome))
+                      }) >> span.addAttribute(TraceAttributes.exitCase(outcome))
                     }
                 }
             }
@@ -236,8 +238,8 @@ object ServerMiddleware {
     builder += TypedAttributes.httpRequestMethod(request.method)
     builder ++= TypedAttributes.url(request.uri, urlRedactor)
     val host = request.headers.get[Host].getOrElse {
-      val key = RequestKey.fromRequest(request)
-      Host(key.authority.host.value, key.authority.port)
+      val authority = request.uri.authority.getOrElse(Uri.Authority())
+      Host(authority.host.value, authority.port)
     }
     builder += TypedAttributes.serverAddress(host)
     request.headers
@@ -245,7 +247,7 @@ object ServerMiddleware {
       .foreach(ua => builder += TypedAttributes.userAgentOriginal(ua))
 
     routeClassifier(request.requestPrelude).foreach(route =>
-      builder += TypedAttributes.Server.httpRoute(route)
+      builder += TypedServerAttributes.httpRoute(route)
     )
 
     request.remote.foreach { socketAddress =>
@@ -253,10 +255,10 @@ object ServerMiddleware {
         TypedAttributes.networkPeerAddress(socketAddress.host)
 
       builder +=
-        TypedAttributes.Server.clientPort(socketAddress.port)
+        TypedServerAttributes.clientPort(socketAddress.port)
     }
 
-    TypedAttributes.Server.clientAddress(request).foreach(builder += _)
+    TypedServerAttributes.clientAddress(request).foreach(builder += _)
     builder ++=
       TypedAttributes.Headers.request(request.headers, allowedHeaders)
 

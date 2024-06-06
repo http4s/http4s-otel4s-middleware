@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.8" // your current series x.y
+ThisBuild / tlBaseVersion := "0.9" // your current series x.y
 
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
@@ -24,42 +24,131 @@ val openTelemetryV = "1.38.0"
 val otel4sV = "0.8.0"
 val slf4jV = "1.7.36"
 
+val baseName = "http4s-otel4s-middleware"
+
+val sharedSettings = Seq(
+  libraryDependencies ++= Seq(
+    "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
+    "org.scalameta" %%% "munit" % munitV % Test,
+    "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
+    "org.typelevel" %%% "otel4s-sdk-testkit" % otel4sV % Test,
+  )
+)
+
 // Projects
 lazy val `http4s-otel4s-middleware` = tlCrossRootProject
-  .aggregate(core, examples)
+  .aggregate(
+    core,
+    metrics,
+    `trace-core`,
+    `trace-internal`,
+    `trace-client`,
+    `trace-server`,
+    examples,
+  )
 
 lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
+  .settings(sharedSettings)
   .settings(
-    name := "http4s-otel4s-middleware",
+    name := s"$baseName-core",
+    libraryDependencies ++= Seq(
+      "org.http4s" %%% "http4s-core" % http4sV,
+      "org.typelevel" %%% "otel4s-core-common" % otel4sV,
+      "org.typelevel" %%% "otel4s-semconv" % otel4sV,
+    ),
+  )
+
+lazy val metrics = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("metrics"))
+  .dependsOn(core)
+  .settings(sharedSettings)
+  .settings(
+    name := s"$baseName-metrics",
+    libraryDependencies ++= Seq(
+      "org.http4s" %%% "http4s-core" % http4sV,
+      "org.typelevel" %%% "otel4s-core-common" % otel4sV,
+      "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
+      "org.typelevel" %%% "otel4s-semconv" % otel4sV,
+      "org.http4s" %%% "http4s-server" % http4sV % Test,
+    ),
+  )
+
+lazy val `trace-core` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("trace/core"))
+  .dependsOn(core)
+  .settings(sharedSettings)
+  .settings(
+    name := s"$baseName-trace-core"
+  )
+
+lazy val `trace-internal` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("trace/internal"))
+  .settings(sharedSettings)
+  .settings(
+    name := s"$baseName-trace-internal",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %%% "otel4s-core-common" % otel4sV
+    ),
+  )
+
+lazy val `trace-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("trace/client"))
+  .dependsOn(`trace-core`, `trace-internal`)
+  .settings(sharedSettings)
+  .settings(
+    name := s"$baseName-trace-client",
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "cats-effect" % catsEffectV,
       "org.http4s" %%% "http4s-client" % http4sV,
-      "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
+      "org.http4s" %%% "http4s-core" % http4sV,
+      "org.typelevel" %%% "otel4s-core-common" % otel4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
       "org.typelevel" %%% "otel4s-semconv" % otel4sV,
-      "org.typelevel" %%% "otel4s-sdk-testkit" % otel4sV % Test,
-      "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
-      "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
-      "org.scalameta" %%% "munit" % munitV % Test,
-      "org.http4s" %%% "http4s-server" % http4sV % Test,
+    ),
+  )
+
+lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("trace/server"))
+  .dependsOn(`trace-core`, `trace-internal`)
+  .settings(sharedSettings)
+  .settings(
+    name := s"$baseName-trace-server",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %%% "cats-effect" % catsEffectV,
+      "org.http4s" %%% "http4s-core" % http4sV,
+      "org.typelevel" %%% "otel4s-core-common" % otel4sV,
+      "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
+      "org.typelevel" %%% "otel4s-semconv" % otel4sV,
     ),
   )
 
 lazy val examples = project
   .in(file("examples"))
   .enablePlugins(NoPublishPlugin)
-  .dependsOn(core.jvm)
+  .dependsOn(
+    metrics.jvm,
+    `trace-client`.jvm,
+    `trace-server`.jvm,
+  )
   .settings(
     scalacOptions -= "-Xfatal-warnings",
     libraryDependencies ++= Seq(
-      "org.typelevel" %% "otel4s-oteljava" % otel4sV,
-      "io.opentelemetry" % "opentelemetry-exporter-otlp" % openTelemetryV % Runtime,
-      "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure" % openTelemetryV % Runtime,
+      "org.typelevel" %%% "cats-effect" % catsEffectV,
+      "org.http4s" %%% "http4s-core" % http4sV,
       "org.http4s" %% "http4s-dsl" % http4sV,
       "org.http4s" %% "http4s-ember-server" % http4sV,
       "org.http4s" %% "http4s-ember-client" % http4sV,
+      "org.typelevel" %%% "otel4s-core-common" % otel4sV,
+      "org.typelevel" %% "otel4s-oteljava" % otel4sV,
+      "io.opentelemetry" % "opentelemetry-exporter-otlp" % openTelemetryV % Runtime,
+      "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure" % openTelemetryV % Runtime,
       "org.slf4j" % "slf4j-simple" % slf4jV % Runtime,
     ),
     run / fork := true,

@@ -15,6 +15,7 @@
  */
 
 package org.http4s.otel4s.middleware
+package trace.client
 
 import cats.Applicative
 import cats.effect.Concurrent
@@ -33,6 +34,7 @@ import org.http4s.client.RequestKey
 import org.http4s.client.middleware.Retry
 import org.http4s.headers.Host
 import org.http4s.headers.`User-Agent`
+import org.http4s.otel4s.middleware.trace.internal.TraceAttributes
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
@@ -169,8 +171,8 @@ object ClientMiddleware {
                 case Outcome.Canceled() =>
                   // Canceled isn't always an error, but it generally is for http
                   // TODO: decide if this should add "error", we do for the server side.
-                  Resource.eval(span.addAttribute(CustomAttributes.Canceled(true))).mapK(trace)
-              }) >> Resource.eval(span.addAttribute(CustomAttributes.exitCase(outcome))).mapK(trace)
+                  Resource.eval(span.addAttribute(TraceAttributes.Canceled(true))).mapK(trace)
+              }) >> Resource.eval(span.addAttribute(TraceAttributes.exitCase(outcome))).mapK(trace)
             }
             // Automatically handle client processing errors. Since this is after the response,
             // the error case will only get hit if the use block of the resulting resource happens,
@@ -209,18 +211,13 @@ object ClientMiddleware {
       .foreach(ua => builder += TypedAttributes.userAgentOriginal(ua))
 
     request.remote.foreach { socketAddress =>
-      builder +=
-        TypedAttributes.networkPeerAddress(socketAddress.host)
-
-      builder +=
-        TypedAttributes.Client.serverPort(socketAddress.port)
-
+      builder += TypedAttributes.networkPeerAddress(socketAddress.host)
+      builder += TypedClientAttributes.serverPort(socketAddress.port)
     }
     retryCount(request.attributes).foreach { count =>
       builder += TypedAttributes.httpRequestResendCount(count.toLong)
     }
-    builder ++=
-      TypedAttributes.Headers.request(request.headers, allowedHeaders)
+    builder ++= TypedAttributes.Headers.request(request.headers, allowedHeaders)
 
     request.attributes.lookup(ExtraAttributesKey).foreach(builder ++= _)
 
