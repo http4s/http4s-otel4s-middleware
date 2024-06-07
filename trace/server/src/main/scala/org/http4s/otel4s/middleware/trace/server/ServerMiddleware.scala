@@ -15,6 +15,7 @@
  */
 
 package org.http4s.otel4s.middleware
+package trace.server
 
 import cats.data.Kleisli
 import cats.effect.kernel.MonadCancelThrow
@@ -28,9 +29,12 @@ import org.http4s.Request
 import org.http4s.RequestPrelude
 import org.http4s.Response
 import org.http4s.ResponsePrelude
-import org.http4s.client.RequestKey
+import org.http4s.Uri
 import org.http4s.headers.Host
 import org.http4s.headers.`User-Agent`
+import org.http4s.otel4s.middleware.trace.internal.MiddlewareBuilder
+import org.http4s.otel4s.middleware.trace.internal.MiddlewareDefaults
+import org.http4s.otel4s.middleware.trace.internal.TraceAttributes
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
@@ -44,76 +48,71 @@ import scala.collection.immutable
 object ServerMiddleware {
 
   /** @return a server middleware builder with default configuration */
-  def default[F[_]: Tracer: MonadCancelThrow]: ServerMiddlewareBuilder[F] =
-    new ServerMiddlewareBuilder[F](
-      Defaults.allowedRequestHeaders,
-      Defaults.allowedResponseHeaders,
+  def builder[F[_]: Tracer: MonadCancelThrow]: Builder[F] =
+    new Builder[F](
+      MiddlewareDefaults.allowedRequestHeaders,
+      MiddlewareDefaults.allowedResponseHeaders,
       Defaults.routeClassifier,
-      Defaults.serverSpanName,
-      Defaults.additionalRequestAttributes,
-      Defaults.additionalResponseAttributes,
-      Defaults.urlRedactor,
+      Defaults.spanName,
+      MiddlewareDefaults.additionalRequestAttributes,
+      MiddlewareDefaults.additionalResponseAttributes,
+      MiddlewareDefaults.urlRedactor,
       Defaults.shouldTrace,
     )
 
   /** The default configuration values for a server middleware builder. */
-  object Defaults {
-    def allowedRequestHeaders: Set[CIString] =
-      TypedAttributes.Headers.defaultAllowedHeaders
-    def allowedResponseHeaders: Set[CIString] =
-      TypedAttributes.Headers.defaultAllowedHeaders
+  private object Defaults {
     val routeClassifier: RequestPrelude => Option[String] = _ => None
-    val serverSpanName: RequestPrelude => String =
-      req => s"Http Server - ${req.method}"
-    val additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]] =
-      _ => Nil
-    val additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]] =
-      _ => Nil
-    def urlRedactor: UriRedactor = UriRedactor.OnlyRedactUserInfo
+    val spanName: RequestPrelude => String = req => s"Http Server - ${req.method}"
     val shouldTrace: RequestPrelude => ShouldTrace = _ => ShouldTrace.Trace
   }
 
   /** A builder for server middlewares. */
-  final class ServerMiddlewareBuilder[F[_]: Tracer: MonadCancelThrow] private[ServerMiddleware] (
-      allowedRequestHeaders: Set[CIString],
-      allowedResponseHeaders: Set[CIString],
+  final class Builder[F[_]: Tracer: MonadCancelThrow] private[ServerMiddleware] (
+      protected val allowedRequestHeaders: Set[CIString],
+      protected val allowedResponseHeaders: Set[CIString],
       routeClassifier: RequestPrelude => Option[String],
-      serverSpanName: RequestPrelude => String,
-      additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]],
-      additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]],
-      urlRedactor: UriRedactor,
+      protected val spanName: RequestPrelude => String,
+      protected val additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]],
+      protected val additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[
+        _
+      ]],
+      protected val urlRedactor: UriRedactor,
       shouldTrace: RequestPrelude => ShouldTrace,
-  ) {
-    private def copy(
-        allowedRequestHeaders: Set[CIString] = this.allowedRequestHeaders,
-        allowedResponseHeaders: Set[CIString] = this.allowedResponseHeaders,
-        routeClassifier: RequestPrelude => Option[String] = this.routeClassifier,
-        serverSpanName: RequestPrelude => String = this.serverSpanName,
-        additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]] =
-          this.additionalRequestAttributes,
-        additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]] =
-          this.additionalResponseAttributes,
+  ) extends MiddlewareBuilder[Builder, F] {
+    override protected def copyShared(
+        allowedRequestHeaders: Set[CIString],
+        allowedResponseHeaders: Set[CIString],
+        spanName: RequestPrelude => String,
+        additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]],
+        additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]],
         urlRedactor: UriRedactor = this.urlRedactor,
-        shouldTrace: RequestPrelude => ShouldTrace = this.shouldTrace,
-    ): ServerMiddlewareBuilder[F] =
-      new ServerMiddlewareBuilder[F](
+    ): Builder[F] =
+      new Builder[F](
         allowedRequestHeaders,
         allowedResponseHeaders,
-        routeClassifier,
-        serverSpanName,
+        this.routeClassifier,
+        spanName,
         additionalRequestAttributes,
         additionalResponseAttributes,
         urlRedactor,
-        shouldTrace,
+        this.shouldTrace,
       )
 
-    /** Sets which request headers are allowed to made into `Attribute`s. */
-    def withAllowedRequestHeaders(allowedHeaders: Set[CIString]): ServerMiddlewareBuilder[F] =
-      copy(allowedRequestHeaders = allowedHeaders)
-
-    /** Sets which response headers are allowed to made into `Attribute`s. */
-    def withAllowedResponseHeaders(allowedHeaders: Set[CIString]): ServerMiddlewareBuilder[F] =
-      copy(allowedResponseHeaders = allowedHeaders)
+    private def copy(
+        routeClassifier: RequestPrelude => Option[String] = this.routeClassifier,
+        shouldTrace: RequestPrelude => ShouldTrace = this.shouldTrace,
+    ): Builder[F] =
+      new Builder[F](
+        this.allowedRequestHeaders,
+        this.allowedResponseHeaders,
+        routeClassifier,
+        this.spanName,
+        this.additionalRequestAttributes,
+        this.additionalResponseAttributes,
+        this.urlRedactor,
+        shouldTrace,
+      )
 
     /** Sets how to determine the route within the application from a request.
       * A value of `None` returned by the given function indicates that the
@@ -121,35 +120,11 @@ object ServerMiddleware {
       */
     def withRouteClassifier(
         routeClassifier: RequestPrelude => Option[String]
-    ): ServerMiddlewareBuilder[F] =
+    ): Builder[F] =
       copy(routeClassifier = routeClassifier)
 
-    /** Sets how to derive the name of a server span from a request. */
-    def withServerSpanName(serverSpanName: RequestPrelude => String): ServerMiddlewareBuilder[F] =
-      copy(serverSpanName = serverSpanName)
-
-    /** Sets how to derive additional `Attribute`s from a request to add to the
-      *  server span.
-      */
-    def withAdditionalRequestAttributes(
-        additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]]
-    ): ServerMiddlewareBuilder[F] =
-      copy(additionalRequestAttributes = additionalRequestAttributes)
-
-    /** Sets how to derive additional `Attribute`s from a response to add to the
-      *  server span.
-      */
-    def withAdditionalResponseAttributes(
-        additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]]
-    ): ServerMiddlewareBuilder[F] =
-      copy(additionalResponseAttributes = additionalResponseAttributes)
-
-    /** Sets how to redact URLs before turning them into `Attribute`s. */
-    def withUrlRedactor(urlRedactor: UriRedactor): ServerMiddlewareBuilder[F] =
-      copy(urlRedactor = urlRedactor)
-
     /** Sets how to determine when to trace a request and its response. */
-    def withShouldTrace(shouldTrace: RequestPrelude => ShouldTrace): ServerMiddlewareBuilder[F] =
+    def withShouldTrace(shouldTrace: RequestPrelude => ShouldTrace): Builder[F] =
       copy(shouldTrace = shouldTrace)
 
     /** Returns a middleware in a way that abstracts over
@@ -182,7 +157,7 @@ object ServerMiddleware {
             val tracerG = Tracer[F].mapK[G]
             tracerG.joinOrRoot(req.headers) {
               tracerG
-                .spanBuilder(serverSpanName(reqPrelude))
+                .spanBuilder(spanName(reqPrelude))
                 .withSpanKind(SpanKind.Server)
                 .addAttributes(init)
                 .build
@@ -203,12 +178,12 @@ object ServerMiddleware {
                           span.recordException(e)
                         case Outcome.Canceled() =>
                           span.addAttributes(
-                            CustomAttributes.Canceled(true),
-                            CustomAttributes.Error(
+                            TraceAttributes.Canceled(true),
+                            TraceAttributes.Error(
                               true
                             ), // A canceled http is an error for the server. The connection got cut for some reason.
                           )
-                      }) >> span.addAttribute(CustomAttributes.exitCase(outcome))
+                      }) >> span.addAttribute(TraceAttributes.exitCase(outcome))
                     }
                 }
             }
@@ -236,8 +211,8 @@ object ServerMiddleware {
     builder += TypedAttributes.httpRequestMethod(request.method)
     builder ++= TypedAttributes.url(request.uri, urlRedactor)
     val host = request.headers.get[Host].getOrElse {
-      val key = RequestKey.fromRequest(request)
-      Host(key.authority.host.value, key.authority.port)
+      val authority = request.uri.authority.getOrElse(Uri.Authority())
+      Host(authority.host.value, authority.port)
     }
     builder += TypedAttributes.serverAddress(host)
     request.headers
@@ -245,7 +220,7 @@ object ServerMiddleware {
       .foreach(ua => builder += TypedAttributes.userAgentOriginal(ua))
 
     routeClassifier(request.requestPrelude).foreach(route =>
-      builder += TypedAttributes.Server.httpRoute(route)
+      builder += TypedServerAttributes.httpRoute(route)
     )
 
     request.remote.foreach { socketAddress =>
@@ -253,10 +228,10 @@ object ServerMiddleware {
         TypedAttributes.networkPeerAddress(socketAddress.host)
 
       builder +=
-        TypedAttributes.Server.clientPort(socketAddress.port)
+        TypedServerAttributes.clientPort(socketAddress.port)
     }
 
-    TypedAttributes.Server.clientAddress(request).foreach(builder += _)
+    TypedServerAttributes.clientAddress(request).foreach(builder += _)
     builder ++=
       TypedAttributes.Headers.request(request.headers, allowedHeaders)
 

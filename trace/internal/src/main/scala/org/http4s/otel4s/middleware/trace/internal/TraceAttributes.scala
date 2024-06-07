@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware
+package org.http4s.otel4s.middleware.trace.internal
 
 import cats.effect.kernel.Outcome
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 
-private object CustomAttributes {
+private[trace] object TraceAttributes {
   private val ExitCase: AttributeKey[String] = AttributeKey.string("exit.case")
 
   val Canceled: AttributeKey[Boolean] = AttributeKey.boolean("canceled")
