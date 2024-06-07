@@ -34,6 +34,8 @@ import org.http4s.client.RequestKey
 import org.http4s.client.middleware.Retry
 import org.http4s.headers.Host
 import org.http4s.headers.`User-Agent`
+import org.http4s.otel4s.middleware.trace.internal.MiddlewareBuilder
+import org.http4s.otel4s.middleware.trace.internal.MiddlewareDefaults
 import org.http4s.otel4s.middleware.trace.internal.TraceAttributes
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
@@ -49,90 +51,50 @@ import scala.collection.immutable
 object ClientMiddleware {
 
   /** @return a client middleware builder with default configuration */
-  def default[F[_]: Tracer: Concurrent]: ClientMiddlewareBuilder[F] =
-    new ClientMiddlewareBuilder[F](
-      Defaults.allowedRequestHeaders,
-      Defaults.allowedResponseHeaders,
-      Defaults.clientSpanName,
-      Defaults.additionalRequestAttributes,
-      Defaults.additionalResponseAttributes,
-      Defaults.urlRedactor,
+  def builder[F[_]: Tracer: Concurrent]: Builder[F] =
+    new Builder[F](
+      MiddlewareDefaults.allowedRequestHeaders,
+      MiddlewareDefaults.allowedResponseHeaders,
+      Defaults.spanName,
+      MiddlewareDefaults.additionalRequestAttributes,
+      MiddlewareDefaults.additionalResponseAttributes,
+      MiddlewareDefaults.urlRedactor,
     )
 
   /** The default configuration values for a client middleware builder. */
-  object Defaults {
-    def allowedRequestHeaders: Set[CIString] =
-      TypedAttributes.Headers.defaultAllowedHeaders
-    def allowedResponseHeaders: Set[CIString] =
-      TypedAttributes.Headers.defaultAllowedHeaders
-    val clientSpanName: RequestPrelude => String =
-      req => s"Http Client - ${req.method}"
-    val additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]] =
-      _ => Nil
-    val additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]] =
-      _ => Nil
-    def urlRedactor: UriRedactor = UriRedactor.OnlyRedactUserInfo
+  private object Defaults {
+    val spanName: RequestPrelude => String = req => s"Http Client - ${req.method}"
   }
 
   /** A builder for client middlewares. */
-  final class ClientMiddlewareBuilder[F[_]: Tracer: Concurrent] private[ClientMiddleware] (
-      private val allowedRequestHeaders: Set[CIString],
-      private val allowedResponseHeaders: Set[CIString],
-      private val clientSpanName: RequestPrelude => String,
-      private val additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]],
-      private val additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]],
-      private val urlRedactor: UriRedactor,
-  ) {
-    private def copy(
+  final class Builder[F[_]: Tracer: Concurrent] private[ClientMiddleware] (
+      protected val allowedRequestHeaders: Set[CIString],
+      protected val allowedResponseHeaders: Set[CIString],
+      protected val spanName: RequestPrelude => String,
+      protected val additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]],
+      protected val additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[
+        _
+      ]],
+      protected val urlRedactor: UriRedactor,
+  ) extends MiddlewareBuilder[Builder, F] {
+    override protected def copyShared(
         allowedRequestHeaders: Set[CIString] = this.allowedRequestHeaders,
         allowedResponseHeaders: Set[CIString] = this.allowedResponseHeaders,
-        clientSpanName: RequestPrelude => String = this.clientSpanName,
+        spanName: RequestPrelude => String = this.spanName,
         additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]] =
           this.additionalRequestAttributes,
         additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]] =
           this.additionalResponseAttributes,
         urlRedactor: UriRedactor = this.urlRedactor,
-    ): ClientMiddlewareBuilder[F] =
-      new ClientMiddlewareBuilder[F](
+    ): Builder[F] =
+      new Builder[F](
         allowedRequestHeaders,
         allowedResponseHeaders,
-        clientSpanName,
+        spanName,
         additionalRequestAttributes,
         additionalResponseAttributes,
         urlRedactor,
       )
-
-    /** Sets which request headers are allowed to made into `Attribute`s. */
-    def withAllowedRequestHeaders(allowedHeaders: Set[CIString]): ClientMiddlewareBuilder[F] =
-      copy(allowedRequestHeaders = allowedHeaders)
-
-    /** Sets which response headers are allowed to made into `Attribute`s. */
-    def withAllowedResponseHeaders(allowedHeaders: Set[CIString]): ClientMiddlewareBuilder[F] =
-      copy(allowedResponseHeaders = allowedHeaders)
-
-    /** Sets how to derive the name of a client span from a request. */
-    def withClientSpanName(clientSpanName: RequestPrelude => String): ClientMiddlewareBuilder[F] =
-      copy(clientSpanName = clientSpanName)
-
-    /** Sets how to derive additional `Attribute`s from a request to add to the
-      *  client span.
-      */
-    def withAdditionalRequestAttributes(
-        additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]]
-    ): ClientMiddlewareBuilder[F] =
-      copy(additionalRequestAttributes = additionalRequestAttributes)
-
-    /** Sets how to derive additional `Attribute`s from a response to add to the
-      *  client span.
-      */
-    def withAdditionalResponseAttributes(
-        additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]]
-    ): ClientMiddlewareBuilder[F] =
-      copy(additionalResponseAttributes = additionalResponseAttributes)
-
-    /** Sets how to redact URLs before turning them into `Attribute`s. */
-    def withUrlRedactor(urlRedactor: UriRedactor): ClientMiddlewareBuilder[F] =
-      copy(urlRedactor = urlRedactor)
 
     /** @return the configured middleware */
     def build: Client[F] => Client[F] = (client: Client[F]) =>
@@ -144,7 +106,7 @@ object ClientMiddleware {
         MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
           for {
             res <- Tracer[F]
-              .spanBuilder(clientSpanName(reqPrelude))
+              .spanBuilder(spanName(reqPrelude))
               .withSpanKind(SpanKind.Client)
               .addAttributes(base)
               .build

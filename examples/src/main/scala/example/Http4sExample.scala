@@ -63,9 +63,9 @@ object Http4sExample extends IOApp with Common {
       client <- EmberClientBuilder
         .default[F]
         .build
-        .map(ClientMiddleware.default.build)
+        .map(ClientMiddleware.builder.build)
       metricsOps <- OtelMetrics.serverMetricsOps[F]().toResource
-      app = ServerMiddleware.default[F].buildHttpApp {
+      app = ServerMiddleware.builder[F].buildHttpApp {
         Metrics(metricsOps)(routes(client)).orNotFound
       }
       sv <- EmberServerBuilder.default[F].withPort(port"8080").withHttpApp(app).build

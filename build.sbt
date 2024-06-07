@@ -88,6 +88,7 @@ lazy val `trace-core` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
 lazy val `trace-internal` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("trace/internal"))
+  .dependsOn(core)
   .settings(sharedSettings)
   .settings(
     name := s"$baseName-trace-internal",
@@ -99,7 +100,7 @@ lazy val `trace-internal` = crossProject(JVMPlatform, JSPlatform, NativePlatform
 lazy val `trace-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("trace/client"))
-  .dependsOn(`trace-core`, `trace-internal`)
+  .dependsOn(`trace-core`, `trace-internal` % "compile->compile;test->test")
   .settings(sharedSettings)
   .settings(
     name := s"$baseName-trace-client",
@@ -116,7 +117,7 @@ lazy val `trace-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
 lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("trace/server"))
-  .dependsOn(`trace-core`, `trace-internal`)
+  .dependsOn(`trace-core`, `trace-internal` % "compile->compile;test->test")
   .settings(sharedSettings)
   .settings(
     name := s"$baseName-trace-server",
