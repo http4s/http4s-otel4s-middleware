@@ -151,7 +151,7 @@ object ClientMiddleware {
             trace = res.trace
             traceHeaders <- Resource.eval(Tracer[F].propagate(Headers.empty)).mapK(trace)
             newReq = req.withHeaders(traceHeaders ++ req.headers)
-            resp <- poll(client.run(newReq)).guaranteeCase { outcome =>
+            resp <- poll(client.run(newReq)).mapK(trace).guaranteeCase { outcome =>
               (outcome match {
                 case Outcome.Succeeded(fa) =>
                   fa.flatMap { resp =>
