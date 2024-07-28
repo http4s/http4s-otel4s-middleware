@@ -52,7 +52,7 @@ object OtelMetrics {
       responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
   ): F[MetricsOps[F]] =
     metricsOps(
-      "http.client",
+      "client",
       attributes,
       responseDurationSecondsHistogramBuckets,
     )
@@ -77,19 +77,19 @@ object OtelMetrics {
       responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
   ): F[MetricsOps[F]] =
     metricsOps(
-      "http.server",
+      "server",
       attributes,
       responseDurationSecondsHistogramBuckets,
     )
 
   private def metricsOps[F[_]: Monad: Meter](
-      prefix: String,
+      kind: String,
       attributes: Attributes,
       responseDurationSecondsHistogramBuckets: BucketBoundaries,
   ): F[MetricsOps[F]] =
     for {
       metrics <- createMetricsCollection(
-        prefix,
+        kind,
         responseDurationSecondsHistogramBuckets,
       )
     } yield createMetricsOps(
@@ -164,29 +164,29 @@ object OtelMetrics {
     }
 
   private def createMetricsCollection[F[_]: Monad: Meter](
-      prefix: String,
+      kind: String,
       responseDurationSecondsHistogramBuckets: BucketBoundaries,
   ): F[MetricsCollection[F]] = {
     val requestDuration: F[Histogram[F, Double]] =
       Meter[F]
-        .histogram[Double](s"$prefix.request.duration")
+        .histogram[Double](s"http.$kind.request.duration")
         .withUnit("s")
-        .withDescription("Duration of HTTP server requests.")
+        .withDescription(s"Duration of HTTP $kind requests.")
         .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
         .create
 
     val activeRequests: F[UpDownCounter[F, Long]] =
       Meter[F]
-        .upDownCounter[Long](s"$prefix.active_requests")
+        .upDownCounter[Long](s"http.$kind.active_requests")
         .withUnit("{request}")
-        .withDescription("Number of active HTTP server requests.")
+        .withDescription(s"Number of active HTTP $kind requests.")
         .create
 
     val abnormalTerminations: F[Histogram[F, Double]] =
       Meter[F]
-        .histogram[Double](s"$prefix.abnormal_terminations")
+        .histogram[Double](s"http.$kind.abnormal_terminations")
         .withUnit("s")
-        .withDescription("Duration of HTTP server abnormal terminations.")
+        .withDescription(s"Duration of HTTP $kind abnormal terminations.")
         .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
         .create
 
