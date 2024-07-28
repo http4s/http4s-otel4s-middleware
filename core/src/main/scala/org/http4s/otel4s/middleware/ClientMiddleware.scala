@@ -164,8 +164,9 @@ object ClientMiddleware {
                       }
                       .mapK(trace)
                   }
-                case Outcome.Errored(e) =>
-                  Resource.eval(span.recordException(e)).mapK(trace)
+                case Outcome.Errored(_) =>
+                  // As client.run is traced, any exception thrown by it is already recorded
+                  Resource.unit[F]
                 case Outcome.Canceled() =>
                   // Canceled isn't always an error, but it generally is for http
                   // TODO: decide if this should add "error", we do for the server side.
