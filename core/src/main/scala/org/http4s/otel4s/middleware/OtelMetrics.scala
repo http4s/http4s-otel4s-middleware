@@ -179,7 +179,7 @@ object OtelMetrics {
       Meter[F]
         .upDownCounter[Long](s"http.$kind.active_requests")
         .withUnit("{request}")
-        .withDescription(s"Number of active HTTP $kind requests.")
+        .withDescription(s"Number of active HTTP requests.")
         .create
 
     val abnormalTerminations: F[Histogram[F, Double]] =
