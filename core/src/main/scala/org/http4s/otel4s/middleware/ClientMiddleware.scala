@@ -16,13 +16,10 @@
 
 package org.http4s.otel4s.middleware
 
-import cats.Applicative
 import cats.effect.Concurrent
 import cats.effect.MonadCancelThrow
 import cats.effect.Resource
 import cats.effect.SyncIO
-import cats.effect.kernel.Outcome
-import cats.syntax.flatMap._
 import org.http4s.Headers
 import org.http4s.Request
 import org.http4s.RequestPrelude
@@ -153,37 +150,19 @@ object ClientMiddleware {
             trace = res.trace
             traceHeaders <- Resource.eval(Tracer[F].propagate(Headers.empty)).mapK(trace)
             newReq = req.withHeaders(traceHeaders ++ req.headers)
-            resp <- poll(client.run(newReq)).mapK(trace).guaranteeCase { outcome =>
-              (outcome match {
-                case Outcome.Succeeded(fa) =>
-                  fa.flatMap { resp =>
-                    Resource
-                      .eval {
-                        span.addAttributes(
-                          response(resp, allowedResponseHeaders) ++
-                            additionalResponseAttributes(resp.responsePrelude)
-                        )
-                      }
-                      .mapK(trace)
-                  }
-                case Outcome.Errored(_) =>
-                  // As client.run is traced, any exception thrown by it is already recorded
-                  Resource.unit[F]
-                case Outcome.Canceled() =>
-                  // Canceled isn't always an error, but it generally is for http
-                  // TODO: decide if this should add "error", we do for the server side.
-                  Resource.eval(span.addAttribute(CustomAttributes.Canceled(true))).mapK(trace)
-              }) >> Resource.eval(span.addAttribute(CustomAttributes.exitCase(outcome))).mapK(trace)
+
+            _ <- Resource.onFinalizeCase { ec =>
+              span.addAttribute(CustomAttributes.exitCase(ec.toOutcome))
             }
-            // Automatically handle client processing errors. Since this is after the response,
-            // the error case will only get hit if the use block of the resulting resource happens,
-            // which is the request processing stage.
-            _ <- Resource
-              .makeCase(Applicative[F].unit) {
-                case (_, Resource.ExitCase.Errored(e)) => span.recordException(e)
-                case (_, _) => Applicative[F].unit
-              }
-              .mapK(trace)
+
+            resp <- poll(client.run(newReq).mapK(trace))
+
+            _ <- Resource.eval(
+              span.addAttributes(
+                response(resp, allowedResponseHeaders) ++
+                  additionalResponseAttributes(resp.responsePrelude)
+              )
+            )
           } yield resp
         }
       }
