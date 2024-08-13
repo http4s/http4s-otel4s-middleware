@@ -89,4 +89,36 @@ class ClientMiddlewareTests extends CatsEffectSuite {
         }
       }
   }
+
+  test("ClientMiddleware allows manipulating spans from inner clients") {
+    TracesTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        for {
+          tracerIO <- testkit.tracerProvider.get("tracer")
+          _ <- {
+            implicit val tracer: Tracer[IO] = tracerIO
+            val response = Response[IO](Status.Ok)
+            val fakeClient =
+              Client.fromHttpApp[IO] {
+                HttpApp[IO](_.body.compile.drain.as(response))
+              }
+            val traceManipulatingClient = Client[IO] { req =>
+              fakeClient
+                .run(req)
+                .evalTap(_ => Tracer[IO].currentSpanOrThrow.flatMap(_.updateName("NEW SPAN NAME")))
+            }
+            val tracedClient = ClientMiddleware.default[IO].build(traceManipulatingClient)
+
+            val request = Request[IO](Method.GET, uri"http://localhost/?#")
+            tracedClient.run(request).use(_.body.compile.drain)
+          }
+          spans <- testkit.finishedSpans
+        } yield {
+          assertEquals(spans.length, 1)
+          val span = spans.head
+          assertEquals(span.name, "NEW SPAN NAME")
+        }
+      }
+  }
 }
