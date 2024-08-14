@@ -142,7 +142,9 @@ object ClientMiddleware {
         MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
           for {
             res <- Tracer[F]
-              .spanBuilder(clientSpanName(reqPrelude))
+              .spanBuilder(
+                req.attributes.lookup(OverrideSpanNameKey).getOrElse(clientSpanName(reqPrelude))
+              )
               .withSpanKind(SpanKind.Client)
               .addAttributes(base)
               .build
@@ -190,6 +192,12 @@ object ClientMiddleware {
   /** A key used to attach additional `Attribute`s to a request or response. */
   val ExtraAttributesKey: Key[Attributes] =
     Key.newKey[SyncIO, Attributes].unsafeRunSync()
+
+  /** A key used to override the span name for a specific request. If set, this attribute takes precedence over
+    *  anything configured through [[ClientMiddlewareBuilder.withClientSpanName]].
+    */
+  val OverrideSpanNameKey: Key[String] =
+    Key.newKey[SyncIO, String].unsafeRunSync()
 
   /** @return the default `Attribute`s for a request */
   private def request[F[_]](
