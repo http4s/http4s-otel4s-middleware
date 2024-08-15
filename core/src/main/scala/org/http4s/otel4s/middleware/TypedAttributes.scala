@@ -31,6 +31,7 @@ import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.semconv.attributes.ClientAttributes
+import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
 import org.typelevel.otel4s.semconv.attributes.HttpAttributes
 import org.typelevel.otel4s.semconv.attributes.NetworkAttributes
 import org.typelevel.otel4s.semconv.attributes.ServerAttributes
@@ -85,6 +86,10 @@ object TypedAttributes {
   /** @return the `user_agent.original` `Attribute` */
   def userAgentOriginal(userAgent: `User-Agent`): Attribute[String] =
     UserAgentAttributes.UserAgentOriginal(`User-Agent`.headerInstance.value(userAgent))
+
+  /** @return the `error.type` `Attribute` */
+  def errorType(tpe: String): Attribute[String] =
+    ErrorAttributes.ErrorType(tpe)
 
   /** Methods for creating appropriate `Attribute`s from typed HTTP objects
     * within an HTTP client.
