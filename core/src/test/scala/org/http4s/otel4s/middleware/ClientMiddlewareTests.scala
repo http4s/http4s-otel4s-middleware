@@ -17,6 +17,9 @@
 package org.http4s.otel4s.middleware
 
 import cats.effect.IO
+import cats.effect.Resource
+import cats.effect.testkit.TestControl
+import cats.syntax.flatMap._
 import munit.CatsEffectSuite
 import org.http4s.Header
 import org.http4s.Headers
@@ -29,9 +32,16 @@ import org.http4s.client.Client
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.AttributeKey
+import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
+import org.typelevel.otel4s.sdk.trace.data.EventData
+import org.typelevel.otel4s.sdk.trace.data.StatusData
 import org.typelevel.otel4s.trace.SpanKind
+import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
+
+import scala.concurrent.duration.Duration
+import scala.util.control.NoStackTrace
 
 class ClientMiddlewareTests extends CatsEffectSuite {
   test("ClientMiddleware") {
@@ -153,4 +163,137 @@ class ClientMiddlewareTests extends CatsEffectSuite {
         }
       }
   }
+
+  test("record thrown exception from the client") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
+            val error = new RuntimeException("oops") with NoStackTrace {}
+
+            val fakeClient = Client { (_: Request[IO]) =>
+              Resource.raiseError[IO, Response[IO], Throwable](error)
+            }
+
+            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
+            val request = Request[IO](Method.GET, uri"http://localhost/?#")
+
+            val events = Vector(
+              EventData.fromException(Duration.Zero, error, Attributes(), escaped = false)
+            )
+
+            val status = StatusData(StatusCode.Error)
+
+            for {
+              _ <- tracedClient.run(request).use_.attempt
+              spans <- testkit.finishedSpans
+            } yield {
+              val attributes = Attributes(spans.flatMap(_.attributes): _*)
+              assertEquals(attributes.get[String]("exit.case").map(_.value), Some("errored"))
+              assertEquals(spans.map(_.events), List(events))
+              assertEquals(spans.map(_.status), List(status))
+            }
+          }
+        }
+    }
+  }
+
+  test("record cancelation from the client") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
+            val fakeClient = Client { (_: Request[IO]) =>
+              Resource.canceled[IO] >> Resource.never[IO, Response[IO]]
+            }
+
+            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
+            val request = Request[IO](Method.GET, uri"http://localhost/?#")
+
+            val status = StatusData(StatusCode.Error, "canceled")
+
+            for {
+              f <- tracedClient.run(request).use_.start
+              _ <- f.joinWithUnit
+              spans <- testkit.finishedSpans
+            } yield {
+              val attributes = Attributes(spans.flatMap(_.attributes): _*)
+              assertEquals(attributes.get[String]("exit.case").map(_.value), Some("canceled"))
+              assertEquals(spans.flatMap(_.events), Nil)
+              assertEquals(spans.map(_.status), List(status))
+            }
+          }
+        }
+    }
+  }
+
+  test("record thrown exception from the request processing") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
+            val error = new RuntimeException("oops") with NoStackTrace {}
+
+            val fakeClient =
+              Client.fromHttpApp[IO] {
+                HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
+              }
+
+            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
+            val request = Request[IO](Method.GET, uri"http://localhost/?#")
+
+            val events = Vector(
+              EventData.fromException(Duration.Zero, error, Attributes(), escaped = false)
+            )
+
+            val status = StatusData(StatusCode.Error)
+
+            for {
+              _ <- tracedClient.run(request).surround(IO.raiseError(error)).attempt
+              spans <- testkit.finishedSpans
+            } yield {
+              val attributes = Attributes(spans.flatMap(_.attributes): _*)
+              assertEquals(attributes.get[String]("exit.case").map(_.value), Some("errored"))
+              assertEquals(spans.map(_.events), List(events))
+              assertEquals(spans.map(_.status), List(status))
+            }
+          }
+        }
+    }
+  }
+
+  test("record cancelation from the request processing") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
+            val fakeClient =
+              Client.fromHttpApp[IO] {
+                HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
+              }
+
+            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
+            val request = Request[IO](Method.GET, uri"http://localhost/?#")
+
+            val status = StatusData(StatusCode.Error, "canceled")
+
+            for {
+              f <- tracedClient.run(request).surround(IO.canceled).start
+              _ <- f.joinWithUnit
+              spans <- testkit.finishedSpans
+            } yield {
+              val attributes = Attributes(spans.flatMap(_.attributes): _*)
+              assertEquals(attributes.get[String]("exit.case").map(_.value), Some("canceled"))
+              assertEquals(spans.flatMap(_.events), Nil)
+              assertEquals(spans.map(_.status), List(status))
+            }
+          }
+        }
+    }
+  }
+
 }
