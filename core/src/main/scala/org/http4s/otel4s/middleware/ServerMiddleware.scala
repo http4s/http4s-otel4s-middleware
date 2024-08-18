@@ -208,7 +208,7 @@ object ServerMiddleware {
                             .unlessA(resp.status.isSuccess)
                         }
                       case Outcome.Errored(e) =>
-                        span.addAttributes(TypedAttributes.errorType(e.getClass.getName))
+                        span.addAttributes(TypedAttributes.errorType(e))
                       case Outcome.Canceled() =>
                         MonadCancelThrow[G].unit
                     }
@@ -282,7 +282,7 @@ object ServerMiddleware {
     // For HTTP status codes in the 5xx range, as well as any other code the client failed to interpret,
     // span status SHOULD be set to Error.
     if (response.status.responseClass == ServerError)
-      builder += TypedAttributes.errorType(response.status.code.toString)
+      builder += TypedAttributes.errorType(response.status)
 
     builder.result()
   }

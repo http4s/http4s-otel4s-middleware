@@ -88,8 +88,12 @@ object TypedAttributes {
     UserAgentAttributes.UserAgentOriginal(`User-Agent`.headerInstance.value(userAgent))
 
   /** @return the `error.type` `Attribute` */
-  def errorType(tpe: String): Attribute[String] =
-    ErrorAttributes.ErrorType(tpe)
+  def errorType(cause: Throwable): Attribute[String] =
+    ErrorAttributes.ErrorType(cause.getClass.getName)
+
+  /** @return the `error.type` `Attribute` */
+  def errorType(status: Status): Attribute[String] =
+    ErrorAttributes.ErrorType(status.code.toString)
 
   /** Methods for creating appropriate `Attribute`s from typed HTTP objects
     * within an HTTP client.

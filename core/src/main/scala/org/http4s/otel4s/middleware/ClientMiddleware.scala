@@ -170,9 +170,7 @@ object ClientMiddleware {
                 }
 
               case Outcome.Errored(e) =>
-                Resource.eval(
-                  span.addAttributes(TypedAttributes.errorType(e.getClass.getName))
-                )
+                Resource.eval(span.addAttributes(TypedAttributes.errorType(e)))
 
               case Outcome.Canceled() =>
                 Resource.unit
@@ -246,7 +244,7 @@ object ClientMiddleware {
     // to HTTP span status definition, `error.type` SHOULD be set to the status code number (represented as a string),
     // an exception type (if thrown) or a component-specific error identifier.
     if (!response.status.isSuccess)
-      builder += TypedAttributes.errorType(response.status.code.toString)
+      builder += TypedAttributes.errorType(response.status)
 
     builder.result()
   }
