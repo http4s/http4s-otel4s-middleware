@@ -31,6 +31,7 @@ import org.http4s.Status
 import org.http4s.client.Client
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
+import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
@@ -77,9 +78,10 @@ class ClientMiddlewareTests extends CatsEffectSuite {
           val span = spans.head
           assertEquals(span.name, "Http Client - GET")
           assertEquals(span.kind, SpanKind.Client)
+          assertEquals(span.status, StatusData.Unset)
 
           val attributes = span.attributes
-          assertEquals(attributes.size, 11)
+          assertEquals(attributes.size, 10)
           def getAttr[A: AttributeKey.KeySelect](name: String): Option[A] =
             attributes.get[A](name).map(_.value)
 
@@ -95,7 +97,6 @@ class ClientMiddlewareTests extends CatsEffectSuite {
           assertEquals(getAttr[Long]("http.response.status_code"), Some(200L))
           assertEquals(getAttr[Seq[String]]("http.response.header.foo"), None)
           assertEquals(getAttr[Seq[String]]("http.response.header.baz"), Some(Seq("qux")))
-          assertEquals(getAttr[String]("exit.case"), Some("succeeded"))
         }
       }
   }
@@ -177,7 +178,7 @@ class ClientMiddlewareTests extends CatsEffectSuite {
             }
 
             val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
-            val request = Request[IO](Method.GET, uri"http://localhost/?#")
+            val request = Request[IO](Method.GET, uri"http://localhost/")
 
             val events = Vector(
               EventData.fromException(Duration.Zero, error, Attributes(), escaped = false)
@@ -185,12 +186,20 @@ class ClientMiddlewareTests extends CatsEffectSuite {
 
             val status = StatusData(StatusCode.Error)
 
+            val attributes = Attributes(
+              Attribute("http.request.method", "GET"),
+              Attribute("url.path", "/"),
+              Attribute("url.full", "http://localhost/"),
+              Attribute("url.scheme", "http"),
+              Attribute("server.address", "localhost"),
+              Attribute("error.type", error.getClass.getName),
+            )
+
             for {
               _ <- tracedClient.run(request).use_.attempt
               spans <- testkit.finishedSpans
             } yield {
-              val attributes = Attributes(spans.flatMap(_.attributes): _*)
-              assertEquals(attributes.get[String]("exit.case").map(_.value), Some("errored"))
+              assertEquals(spans.map(_.attributes), List(attributes))
               assertEquals(spans.map(_.events), List(events))
               assertEquals(spans.map(_.status), List(status))
             }
@@ -219,8 +228,6 @@ class ClientMiddlewareTests extends CatsEffectSuite {
               _ <- f.joinWithUnit
               spans <- testkit.finishedSpans
             } yield {
-              val attributes = Attributes(spans.flatMap(_.attributes): _*)
-              assertEquals(attributes.get[String]("exit.case").map(_.value), Some("canceled"))
               assertEquals(spans.flatMap(_.events), Nil)
               assertEquals(spans.map(_.status), List(status))
             }
@@ -243,7 +250,7 @@ class ClientMiddlewareTests extends CatsEffectSuite {
               }
 
             val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
-            val request = Request[IO](Method.GET, uri"http://localhost/?#")
+            val request = Request[IO](Method.GET, uri"http://localhost/")
 
             val events = Vector(
               EventData.fromException(Duration.Zero, error, Attributes(), escaped = false)
@@ -251,12 +258,20 @@ class ClientMiddlewareTests extends CatsEffectSuite {
 
             val status = StatusData(StatusCode.Error)
 
+            val attributes = Attributes(
+              Attribute("http.request.method", "GET"),
+              Attribute("http.response.status_code", 200L),
+              Attribute("url.path", "/"),
+              Attribute("url.full", "http://localhost/"),
+              Attribute("url.scheme", "http"),
+              Attribute("server.address", "localhost"),
+            )
+
             for {
               _ <- tracedClient.run(request).surround(IO.raiseError(error)).attempt
               spans <- testkit.finishedSpans
             } yield {
-              val attributes = Attributes(spans.flatMap(_.attributes): _*)
-              assertEquals(attributes.get[String]("exit.case").map(_.value), Some("errored"))
+              assertEquals(spans.map(_.attributes), List(attributes))
               assertEquals(spans.map(_.events), List(events))
               assertEquals(spans.map(_.status), List(status))
             }
@@ -286,8 +301,6 @@ class ClientMiddlewareTests extends CatsEffectSuite {
               _ <- f.joinWithUnit
               spans <- testkit.finishedSpans
             } yield {
-              val attributes = Attributes(spans.flatMap(_.attributes): _*)
-              assertEquals(attributes.get[String]("exit.case").map(_.value), Some("canceled"))
               assertEquals(spans.flatMap(_.events), Nil)
               assertEquals(spans.map(_.status), List(status))
             }
@@ -296,4 +309,42 @@ class ClientMiddlewareTests extends CatsEffectSuite {
     }
   }
 
+  test("record error.type on error response (400-500)") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
+            val fakeClient =
+              Client.fromHttpApp[IO] {
+                HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.InternalServerError)))
+              }
+
+            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
+            val request = Request[IO](Method.GET, uri"http://localhost/")
+
+            val status = StatusData(StatusCode.Error)
+
+            val attributes = Attributes(
+              Attribute("http.request.method", "GET"),
+              Attribute("http.response.status_code", 500L),
+              Attribute("url.path", "/"),
+              Attribute("url.full", "http://localhost/"),
+              Attribute("url.scheme", "http"),
+              Attribute("server.address", "localhost"),
+              Attribute("error.type", "500"),
+            )
+
+            for {
+              _ <- tracedClient.run(request).use_
+              spans <- testkit.finishedSpans
+            } yield {
+              assertEquals(spans.map(_.attributes), List(attributes))
+              assertEquals(spans.flatMap(_.events), Nil)
+              assertEquals(spans.map(_.status), List(status))
+            }
+          }
+        }
+    }
+  }
 }

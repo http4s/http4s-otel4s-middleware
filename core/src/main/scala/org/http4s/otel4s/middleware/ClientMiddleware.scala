@@ -18,8 +18,11 @@ package org.http4s.otel4s.middleware
 
 import cats.effect.Concurrent
 import cats.effect.MonadCancelThrow
+import cats.effect.Outcome
 import cats.effect.Resource
 import cats.effect.SyncIO
+import cats.syntax.applicative._
+import cats.syntax.flatMap._
 import org.http4s.Headers
 import org.http4s.Request
 import org.http4s.RequestPrelude
@@ -34,13 +37,17 @@ import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.trace.SpanKind
+import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.vault.Key
 import org.typelevel.vault.Vault
 
 import scala.collection.immutable
 
-/** Middleware for wrapping an http4s `Client` to add tracing. */
+/** Middleware for wrapping an http4s `Client` to add tracing.
+  *
+  * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client]]
+  */
 object ClientMiddleware {
 
   /** @return a client middleware builder with default configuration */
@@ -151,18 +158,23 @@ object ClientMiddleware {
             traceHeaders <- Resource.eval(Tracer[F].propagate(Headers.empty)).mapK(trace)
             newReq = req.withHeaders(traceHeaders ++ req.headers)
 
-            _ <- Resource.onFinalizeCase { ec =>
-              span.addAttribute(CustomAttributes.exitCase(ec.toOutcome))
+            resp <- poll(client.run(newReq).mapK(trace)).guaranteeCase {
+              case Outcome.Succeeded(fa) =>
+                fa.evalMap { resp =>
+                  val out = response(resp, allowedResponseHeaders) ++
+                    additionalResponseAttributes(resp.responsePrelude)
+
+                  span.addAttributes(out) >> span
+                    .setStatus(StatusCode.Error)
+                    .unlessA(resp.status.isSuccess)
+                }
+
+              case Outcome.Errored(e) =>
+                Resource.eval(span.addAttributes(TypedAttributes.errorType(e)))
+
+              case Outcome.Canceled() =>
+                Resource.unit
             }
-
-            resp <- poll(client.run(newReq).mapK(trace))
-
-            _ <- Resource.eval(
-              span.addAttributes(
-                response(resp, allowedResponseHeaders) ++
-                  additionalResponseAttributes(resp.responsePrelude)
-              )
-            )
           } yield resp
         }
       }
@@ -226,6 +238,13 @@ object ClientMiddleware {
 
     builder ++= TypedAttributes.Headers.response(response.headers, allowedHeaders)
     builder ++= response.attributes.lookup(ExtraAttributesKey).toList.flatten
+
+    // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client
+    // [5]: If response status code was sent or received and status indicates an error according
+    // to HTTP span status definition, `error.type` SHOULD be set to the status code number (represented as a string),
+    // an exception type (if thrown) or a component-specific error identifier.
+    if (!response.status.isSuccess)
+      builder += TypedAttributes.errorType(response.status)
 
     builder.result()
   }

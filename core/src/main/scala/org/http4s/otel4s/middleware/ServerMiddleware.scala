@@ -20,6 +20,7 @@ import cats.data.Kleisli
 import cats.effect.kernel.MonadCancelThrow
 import cats.effect.kernel.Outcome
 import cats.effect.syntax.monadCancel._
+import cats.syntax.applicative._
 import cats.syntax.flatMap._
 import org.http4s.Http
 import org.http4s.HttpApp
@@ -28,6 +29,7 @@ import org.http4s.Request
 import org.http4s.RequestPrelude
 import org.http4s.Response
 import org.http4s.ResponsePrelude
+import org.http4s.Status.ServerError
 import org.http4s.client.RequestKey
 import org.http4s.headers.Host
 import org.http4s.headers.`User-Agent`
@@ -36,11 +38,15 @@ import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.KindTransformer
 import org.typelevel.otel4s.trace.SpanKind
+import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 
 import scala.collection.immutable
 
-/** Middleware for wrapping an http4s `Server` to add tracing. */
+/** Middleware for wrapping an http4s `Server` to add tracing.
+  *
+  * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server]]
+  */
 object ServerMiddleware {
 
   /** @return a server middleware builder with default configuration */
@@ -188,27 +194,23 @@ object ServerMiddleware {
                 .build
                 .use { span =>
                   poll(f.run(req))
-                    .guaranteeCase { outcome =>
-                      (outcome match {
-                        case Outcome.Succeeded(fa) =>
-                          fa.flatMap { resp =>
-                            val out =
-                              response(
-                                resp,
-                                allowedResponseHeaders,
-                              ) ++ additionalResponseAttributes(resp.responsePrelude)
-                            span.addAttributes(out)
-                          }
-                        case Outcome.Errored(e) =>
-                          span.recordException(e)
-                        case Outcome.Canceled() =>
-                          span.addAttributes(
-                            CustomAttributes.Canceled(true),
-                            CustomAttributes.Error(
-                              true
-                            ), // A canceled http is an error for the server. The connection got cut for some reason.
-                          )
-                      }) >> span.addAttribute(CustomAttributes.exitCase(outcome))
+                    .guaranteeCase {
+                      case Outcome.Succeeded(fa) =>
+                        fa.flatMap { resp =>
+                          val out =
+                            response(
+                              resp,
+                              allowedResponseHeaders,
+                            ) ++ additionalResponseAttributes(resp.responsePrelude)
+
+                          span.addAttributes(out) >> span
+                            .setStatus(StatusCode.Error)
+                            .unlessA(resp.status.isSuccess)
+                        }
+                      case Outcome.Errored(e) =>
+                        span.addAttributes(TypedAttributes.errorType(e))
+                      case Outcome.Canceled() =>
+                        MonadCancelThrow[G].unit
                     }
                 }
             }
@@ -269,6 +271,18 @@ object ServerMiddleware {
 
     builder += TypedAttributes.httpResponseStatusCode(response.status)
     builder ++= TypedAttributes.Headers.response(response.headers, allowedHeaders)
+
+    // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server-semantic-conventions
+    // [5]: If response status code was sent or received and status indicates an error according
+    // to HTTP span status definition, `error.type` SHOULD be set to the status code number (represented as a string),
+    // an exception type (if thrown) or a component-specific error identifier.
+    //
+    // For HTTP status codes in the 4xx range span status MUST be left unset in case of SpanKind.SERVER
+    // and SHOULD be set to Error in case of SpanKind.CLIENT.
+    // For HTTP status codes in the 5xx range, as well as any other code the client failed to interpret,
+    // span status SHOULD be set to Error.
+    if (response.status.responseClass == ServerError)
+      builder += TypedAttributes.errorType(response.status)
 
     builder.result()
   }
