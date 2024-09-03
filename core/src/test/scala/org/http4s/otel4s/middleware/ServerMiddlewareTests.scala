@@ -32,7 +32,9 @@ import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
+import org.typelevel.otel4s.sdk.trace.SpanLimits
 import org.typelevel.otel4s.sdk.trace.data.EventData
+import org.typelevel.otel4s.sdk.trace.data.LimitedData
 import org.typelevel.otel4s.sdk.trace.data.StatusData
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
@@ -42,6 +44,9 @@ import scala.concurrent.duration.Duration
 import scala.util.control.NoStackTrace
 
 class ServerMiddlewareTests extends CatsEffectSuite {
+
+  private val spanLimits = SpanLimits.default
+
   test("ServerMiddleware") {
     TracesTestkit
       .inMemory[IO]()
@@ -73,7 +78,7 @@ class ServerMiddlewareTests extends CatsEffectSuite {
           assertEquals(span.kind, SpanKind.Server)
           assertEquals(span.status, StatusData.Unset)
 
-          val attributes = span.attributes
+          val attributes = span.attributes.elements
           assertEquals(attributes.size, 10)
           def getAttr[A: AttributeKey.KeySelect](name: String): Option[A] =
             attributes.get[A](name).map(_.value)
@@ -109,7 +114,13 @@ class ServerMiddlewareTests extends CatsEffectSuite {
             val request = Request[IO](Method.GET, uri"http://localhost/")
 
             val events = Vector(
-              EventData.fromException(Duration.Zero, error, Attributes.empty, escaped = false)
+              EventData.fromException(
+                Duration.Zero,
+                error,
+                LimitedData
+                  .attributes(spanLimits.maxNumberOfAttributes, spanLimits.maxAttributeValueLength),
+                escaped = false,
+              )
             )
 
             val status = StatusData(StatusCode.Error)
@@ -127,8 +138,8 @@ class ServerMiddlewareTests extends CatsEffectSuite {
               _ <- tracedServer.run(request).attempt
               spans <- testkit.finishedSpans
             } yield {
-              assertEquals(spans.map(_.attributes), List(attributes))
-              assertEquals(spans.map(_.events), List(events))
+              assertEquals(spans.map(_.attributes.elements), List(attributes))
+              assertEquals(spans.map(_.events.elements), List(events))
               assertEquals(spans.map(_.status), List(status))
             }
           }
@@ -163,7 +174,7 @@ class ServerMiddlewareTests extends CatsEffectSuite {
               _ <- tracedServer.run(request).attempt
               spans <- testkit.finishedSpans
             } yield {
-              assertEquals(spans.map(_.attributes), List(attributes))
+              assertEquals(spans.map(_.attributes.elements), List(attributes))
               assertEquals(spans.map(_.status), List(status))
             }
           }
@@ -198,8 +209,8 @@ class ServerMiddlewareTests extends CatsEffectSuite {
               _ <- f.joinWithUnit
               spans <- testkit.finishedSpans
             } yield {
-              assertEquals(spans.map(_.attributes), List(attributes))
-              assertEquals(spans.flatMap(_.events), Nil)
+              assertEquals(spans.map(_.attributes.elements), List(attributes))
+              assertEquals(spans.flatMap(_.events.elements), Nil)
               assertEquals(spans.map(_.status), List(status))
             }
           }
