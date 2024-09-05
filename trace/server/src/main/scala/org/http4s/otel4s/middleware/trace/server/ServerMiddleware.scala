@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware
+package org.http4s
+package otel4s.middleware
+package trace
+package server
 
 import cats.data.Kleisli
 import cats.effect.kernel.MonadCancelThrow
@@ -22,15 +25,7 @@ import cats.effect.kernel.Outcome
 import cats.effect.syntax.monadCancel._
 import cats.syntax.applicative._
 import cats.syntax.flatMap._
-import org.http4s.Http
-import org.http4s.HttpApp
-import org.http4s.HttpRoutes
-import org.http4s.Request
-import org.http4s.RequestPrelude
-import org.http4s.Response
-import org.http4s.ResponsePrelude
 import org.http4s.Status.ServerError
-import org.http4s.client.RequestKey
 import org.http4s.headers.Host
 import org.http4s.headers.`User-Agent`
 import org.typelevel.ci.CIString
@@ -238,8 +233,8 @@ object ServerMiddleware {
     builder += TypedAttributes.httpRequestMethod(request.method)
     builder ++= TypedAttributes.url(request.uri, urlRedactor)
     val host = request.headers.get[Host].getOrElse {
-      val key = RequestKey.fromRequest(request)
-      Host(key.authority.host.value, key.authority.port)
+      val authority = request.uri.authority.getOrElse(Uri.Authority())
+      Host(authority.host.value, authority.port)
     }
     builder += TypedAttributes.serverAddress(host)
     request.headers
@@ -247,7 +242,7 @@ object ServerMiddleware {
       .foreach(ua => builder += TypedAttributes.userAgentOriginal(ua))
 
     routeClassifier(request.requestPrelude).foreach(route =>
-      builder += TypedAttributes.Server.httpRoute(route)
+      builder += TypedServerAttributes.httpRoute(route)
     )
 
     request.remote.foreach { socketAddress =>
@@ -255,10 +250,10 @@ object ServerMiddleware {
         TypedAttributes.networkPeerAddress(socketAddress.host)
 
       builder +=
-        TypedAttributes.Server.clientPort(socketAddress.port)
+        TypedServerAttributes.clientPort(socketAddress.port)
     }
 
-    TypedAttributes.Server.clientAddress(request).foreach(builder += _)
+    TypedServerAttributes.clientAddress(request).foreach(builder += _)
     builder ++=
       TypedAttributes.Headers.request(request.headers, allowedHeaders)
 
