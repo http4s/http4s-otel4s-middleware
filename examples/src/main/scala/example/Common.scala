@@ -19,7 +19,6 @@ package example
 import cats._
 import cats.effect.{Trace => _, _}
 import cats.syntax.all._
-import org.http4s.HttpRoutes
 import org.http4s._
 import org.http4s.client.Client
 import org.http4s.dsl.Http4sDsl
