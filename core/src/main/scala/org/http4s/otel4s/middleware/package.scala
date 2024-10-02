@@ -14,10 +14,9 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s
+package org.http4s
+package otel4s
 
-import org.http4s.Header
-import org.http4s.Headers
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.context.propagation.TextMapGetter
 import org.typelevel.otel4s.context.propagation.TextMapUpdater

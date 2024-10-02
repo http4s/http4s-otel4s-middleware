@@ -14,20 +14,14 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware
+package org.http4s
+package otel4s.middleware.trace.client
 
 import cats.effect.IO
 import cats.effect.Resource
 import cats.effect.testkit.TestControl
 import cats.syntax.flatMap._
 import munit.CatsEffectSuite
-import org.http4s.Header
-import org.http4s.Headers
-import org.http4s.HttpApp
-import org.http4s.Method
-import org.http4s.Request
-import org.http4s.Response
-import org.http4s.Status
 import org.http4s.client.Client
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax

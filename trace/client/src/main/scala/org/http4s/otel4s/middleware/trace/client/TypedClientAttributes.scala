@@ -14,18 +14,18 @@
  * limitations under the License.
  */
 
-package org.http4s
-package otel4s.middleware
-package instances
+package org.http4s.otel4s.middleware.trace.client
 
-import org.typelevel.otel4s.context.propagation.TextMapGetter
-import org.typelevel.otel4s.context.propagation.TextMapUpdater
+import com.comcast.ip4s.Port
+import org.typelevel.otel4s.Attribute
+import org.typelevel.otel4s.semconv.attributes.ServerAttributes
 
-/** Implicit instances of
-  * [[org.typelevel.otel4s.context.propagation.TextMapGetter]] and
-  * [[org.typelevel.otel4s.context.propagation.TextMapUpdater]].
+/** Methods for creating appropriate `Attribute`s from typed HTTP objects
+  * within an HTTP client.
   */
-trait TextMapInstances {
-  implicit def headersTextMapGetter: TextMapGetter[Headers] = headersTMG
-  implicit def headersTextMapUpdater: TextMapUpdater[Headers] = headersTMU
+object TypedClientAttributes {
+
+  /** @return the `server.port` `Attribute` */
+  def serverPort(port: Port): Attribute[Long] =
+    ServerAttributes.ServerPort(port.value.toLong)
 }

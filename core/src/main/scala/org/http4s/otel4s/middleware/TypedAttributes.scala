@@ -14,23 +14,16 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware
+package org.http4s
+package otel4s.middleware
 
 import com.comcast.ip4s.IpAddress
-import com.comcast.ip4s.Port
-import org.http4s.Headers
-import org.http4s.Method
-import org.http4s.Request
-import org.http4s.Status
-import org.http4s.Uri
 import org.http4s.headers.Host
 import org.http4s.headers.`User-Agent`
-import org.http4s.headers.`X-Forwarded-For`
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
-import org.typelevel.otel4s.semconv.attributes.ClientAttributes
 import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
 import org.typelevel.otel4s.semconv.attributes.HttpAttributes
 import org.typelevel.otel4s.semconv.attributes.NetworkAttributes
@@ -94,44 +87,6 @@ object TypedAttributes {
   /** @return the `error.type` `Attribute` */
   def errorType(status: Status): Attribute[String] =
     ErrorAttributes.ErrorType(status.code.toString)
-
-  /** Methods for creating appropriate `Attribute`s from typed HTTP objects
-    * within an HTTP client.
-    */
-  object Client {
-
-    /** @return the `server.port` `Attribute` */
-    def serverPort(port: Port): Attribute[Long] =
-      ServerAttributes.ServerPort(port.value.toLong)
-  }
-
-  /** Methods for creating appropriate `Attribute`s from typed HTTP objects
-    * within an HTTP server.
-    */
-  object Server {
-
-    /** @return the `client.address` `Attribute` */
-    def clientAddress[F[_]](request: Request[F]): Option[Attribute[String]] =
-      request.headers
-        .get[`X-Forwarded-For`]
-        .fold(request.remoteAddr)(_.values.head)
-        .map(ip => ClientAttributes.ClientAddress(ip.toString))
-
-    /** @return the `client.port` `Attribute` */
-    def clientPort(port: Port): Attribute[Long] =
-      ClientAttributes.ClientPort(port.value.toLong)
-
-    /** Returns the `http.route` `Attribute`.
-      *
-      * Unfortunately, as this `Attribute` represents the route from the
-      * application root, its value cannot be derived generically, so it is
-      * private. Hopefully at some point we can develop a typed/type-safe API
-      * for deriving the route from the URL or similar, and expose this method
-      * at that time.
-      */
-    private[middleware] def httpRoute(classifiedRoute: String): Attribute[String] =
-      HttpAttributes.HttpRoute(classifiedRoute)
-  }
 
   /** Methods for creating appropriate `Attribute`s from typed HTTP headers. */
   object Headers {

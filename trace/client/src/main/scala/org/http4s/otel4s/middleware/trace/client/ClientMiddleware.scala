@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware
+package org.http4s
+package otel4s.middleware
+package trace.client
 
 import cats.effect.Concurrent
 import cats.effect.MonadCancelThrow
@@ -23,11 +25,6 @@ import cats.effect.Resource
 import cats.effect.SyncIO
 import cats.syntax.applicative._
 import cats.syntax.flatMap._
-import org.http4s.Headers
-import org.http4s.Request
-import org.http4s.RequestPrelude
-import org.http4s.Response
-import org.http4s.ResponsePrelude
 import org.http4s.client.Client
 import org.http4s.client.RequestKey
 import org.http4s.client.middleware.Retry
@@ -213,7 +210,7 @@ object ClientMiddleware {
         TypedAttributes.networkPeerAddress(socketAddress.host)
 
       builder +=
-        TypedAttributes.Client.serverPort(socketAddress.port)
+        TypedClientAttributes.serverPort(socketAddress.port)
 
     }
     retryCount(request.attributes).foreach { count =>

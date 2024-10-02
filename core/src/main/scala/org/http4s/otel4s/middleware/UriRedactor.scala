@@ -14,10 +14,8 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware
-
-import org.http4s.Query
-import org.http4s.Uri
+package org.http4s
+package otel4s.middleware
 
 /** Something that redacts URIs to remove sensitive information.
   *

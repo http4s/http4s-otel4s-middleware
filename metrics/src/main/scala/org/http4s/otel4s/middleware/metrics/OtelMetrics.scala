@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware
+package org.http4s
+package otel4s.middleware
+package metrics
 
 import cats.Monad
 import cats.syntax.all._
-import org.http4s.Method
-import org.http4s.Status
 import org.http4s.metrics.MetricsOps
 import org.http4s.metrics.TerminationType
 import org.typelevel.otel4s.Attribute

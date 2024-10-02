@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware
+package org.http4s
+package otel4s.middleware.metrics
 
 import cats.data.OptionT
 import cats.effect.IO
 import munit.CatsEffectSuite
-import org.http4s._
 import org.http4s.server.middleware.Metrics
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics.Meter
