@@ -93,6 +93,50 @@ class ServerMiddlewareTests extends CatsEffectSuite {
       }
   }
 
+  test("allows filtering out default attributes") {
+    TracesTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        for {
+          tracerIO <- testkit.tracerProvider.get("tracer")
+          _ <- {
+            implicit val tracer: Tracer[IO] = tracerIO
+            val headers =
+              Headers(Header.Raw(ci"foo", "bar"), Header.Raw(ci"baz", "qux"))
+            val response = Response[IO](Status.Ok).withHeaders(headers)
+            val tracedServer =
+              ServerMiddleware
+                .default[IO]
+                .withAllowedRequestHeaders(Set(ci"foo"))
+                .withAllowedResponseHeaders(Set(ci"baz"))
+                .withDefaultRequestAttributesFilter(_.key.name == "http.request.method")
+                .withDefaultResponseAttributesFilter(_.key.name == "http.response.status_code")
+                .buildHttpApp(HttpApp[IO](_.body.compile.drain.as(response)))
+
+            val request =
+              Request[IO](Method.GET, uri"http://localhost/?#")
+                .withHeaders(headers)
+            tracedServer.run(request)
+          }
+          spans <- testkit.finishedSpans
+        } yield {
+          assertEquals(spans.length, 1)
+          val span = spans.head
+          assertEquals(span.name, "Http Server - GET")
+          assertEquals(span.kind, SpanKind.Server)
+          assertEquals(span.status, StatusData.Unset)
+
+          val attributes = span.attributes.elements
+          assertEquals(attributes.size, 2)
+          def getAttr[A: AttributeKey.KeySelect](name: String): Option[A] =
+            attributes.get[A](name).map(_.value)
+
+          assertEquals(getAttr[String]("http.request.method"), Some("GET"))
+          assertEquals(getAttr[Long]("http.response.status_code"), Some(200L))
+        }
+      }
+  }
+
   test("record an exception thrown by the server") {
     TestControl.executeEmbed {
       TracesTestkit
