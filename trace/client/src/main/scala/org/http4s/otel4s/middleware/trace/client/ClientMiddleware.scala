@@ -53,6 +53,8 @@ object ClientMiddleware {
       Defaults.allowedRequestHeaders,
       Defaults.allowedResponseHeaders,
       Defaults.clientSpanName,
+      Defaults.defaultRequestAttributesFilter,
+      Defaults.defaultResponseAttributesFilter,
       Defaults.additionalRequestAttributes,
       Defaults.additionalResponseAttributes,
       Defaults.urlRedactor,
@@ -66,6 +68,8 @@ object ClientMiddleware {
       TypedAttributes.Headers.defaultAllowedHeaders
     val clientSpanName: RequestPrelude => String =
       req => s"Http Client - ${req.method}"
+    val defaultRequestAttributesFilter: Attribute[_] => Boolean = _ => true
+    val defaultResponseAttributesFilter: Attribute[_] => Boolean = _ => true
     val additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]] =
       _ => Nil
     val additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]] =
@@ -78,6 +82,8 @@ object ClientMiddleware {
       private val allowedRequestHeaders: Set[CIString],
       private val allowedResponseHeaders: Set[CIString],
       private val clientSpanName: RequestPrelude => String,
+      private val defaultRequestAttributesFilter: Attribute[_] => Boolean,
+      private val defaultResponseAttributesFilter: Attribute[_] => Boolean,
       private val additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]],
       private val additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]],
       private val urlRedactor: UriRedactor,
@@ -86,6 +92,10 @@ object ClientMiddleware {
         allowedRequestHeaders: Set[CIString] = this.allowedRequestHeaders,
         allowedResponseHeaders: Set[CIString] = this.allowedResponseHeaders,
         clientSpanName: RequestPrelude => String = this.clientSpanName,
+        defaultRequestAttributesFilter: Attribute[_] => Boolean =
+          this.defaultRequestAttributesFilter,
+        defaultResponseAttributesFilter: Attribute[_] => Boolean =
+          this.defaultResponseAttributesFilter,
         additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]] =
           this.additionalRequestAttributes,
         additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]] =
@@ -96,6 +106,8 @@ object ClientMiddleware {
         allowedRequestHeaders,
         allowedResponseHeaders,
         clientSpanName,
+        defaultRequestAttributesFilter,
+        defaultResponseAttributesFilter,
         additionalRequestAttributes,
         additionalResponseAttributes,
         urlRedactor,
@@ -112,6 +124,18 @@ object ClientMiddleware {
     /** Sets how to derive the name of a client span from a request. */
     def withClientSpanName(clientSpanName: RequestPrelude => String): ClientMiddlewareBuilder[F] =
       copy(clientSpanName = clientSpanName)
+
+    /** Allows to filter default request attributes. */
+    def withDefaultRequestAttributesFilter(
+        defaultRequestAttributesFilter: Attribute[_] => Boolean
+    ): ClientMiddlewareBuilder[F] =
+      copy(defaultRequestAttributesFilter = defaultRequestAttributesFilter)
+
+    /** Allows to filter default response attributes. */
+    def withDefaultResponseAttributesFilter(
+        defaultResponseAttributesFilter: Attribute[_] => Boolean
+    ): ClientMiddlewareBuilder[F] =
+      copy(defaultResponseAttributesFilter = defaultResponseAttributesFilter)
 
     /** Sets how to derive additional `Attribute`s from a request to add to the
       *  client span.
@@ -138,7 +162,7 @@ object ClientMiddleware {
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
         val reqPrelude = req.requestPrelude
         val base =
-          request(req, allowedRequestHeaders, urlRedactor) ++
+          request(req, allowedRequestHeaders, urlRedactor, defaultRequestAttributesFilter) ++
             additionalRequestAttributes(reqPrelude)
         MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
           for {
@@ -158,8 +182,9 @@ object ClientMiddleware {
             resp <- poll(client.run(newReq).mapK(trace)).guaranteeCase {
               case Outcome.Succeeded(fa) =>
                 fa.evalMap { resp =>
-                  val out = response(resp, allowedResponseHeaders) ++
-                    additionalResponseAttributes(resp.responsePrelude)
+                  val out =
+                    response(resp, allowedResponseHeaders, defaultResponseAttributesFilter) ++
+                      additionalResponseAttributes(resp.responsePrelude)
 
                   span.addAttributes(out) >> span
                     .setStatus(StatusCode.Error)
@@ -192,6 +217,7 @@ object ClientMiddleware {
       request: Request[F],
       allowedHeaders: Set[CIString],
       urlRedactor: UriRedactor,
+      defaultRequestAttributesFilter: Attribute[_] => Boolean,
   ): Attributes = {
     val builder = Attributes.newBuilder
     builder += TypedAttributes.httpRequestMethod(request.method)
@@ -221,11 +247,15 @@ object ClientMiddleware {
 
     request.attributes.lookup(ExtraAttributesKey).foreach(builder ++= _)
 
-    builder.result()
+    builder.result().filter(defaultRequestAttributesFilter)
   }
 
   /** @return the default `Attribute`s for a response */
-  private def response[F[_]](response: Response[F], allowedHeaders: Set[CIString]): Attributes = {
+  private def response[F[_]](
+      response: Response[F],
+      allowedHeaders: Set[CIString],
+      defaultResponseAttributesFilter: Attribute[_] => Boolean,
+  ): Attributes = {
     val builder = Attributes.newBuilder
 
     builder += TypedAttributes.httpResponseStatusCode(response.status)
@@ -243,7 +273,7 @@ object ClientMiddleware {
     if (!response.status.isSuccess)
       builder += TypedAttributes.errorType(response.status)
 
-    builder.result()
+    builder.result().filter(defaultResponseAttributesFilter)
   }
 
   private def retryCount(vault: Vault): Option[Int] =

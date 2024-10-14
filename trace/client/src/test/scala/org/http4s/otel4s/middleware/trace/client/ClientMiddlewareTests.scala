@@ -100,6 +100,54 @@ class ClientMiddlewareTests extends CatsEffectSuite {
       }
   }
 
+  test("ClientMiddleware allows filtering out default attributes") {
+    TracesTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        for {
+          tracerIO <- testkit.tracerProvider.get("tracer")
+          _ <- {
+            implicit val tracer: Tracer[IO] = tracerIO
+            val headers =
+              Headers(Header.Raw(ci"foo", "bar"), Header.Raw(ci"baz", "qux"))
+            val response = Response[IO](Status.Ok).withHeaders(headers)
+            val fakeClient =
+              Client.fromHttpApp[IO] {
+                HttpApp[IO](_.body.compile.drain.as(response))
+              }
+            val tracedClient =
+              ClientMiddleware
+                .default[IO]
+                .withAllowedRequestHeaders(Set(ci"foo"))
+                .withAllowedResponseHeaders(Set(ci"baz"))
+                .withDefaultRequestAttributesFilter(_.key.name == "http.request.method")
+                .withDefaultResponseAttributesFilter(_.key.name == "http.response.status_code")
+                .build(fakeClient)
+
+            val request =
+              Request[IO](Method.GET, uri"http://localhost/?#")
+                .withHeaders(headers)
+            tracedClient.run(request).use(_.body.compile.drain)
+          }
+          spans <- testkit.finishedSpans
+        } yield {
+          assertEquals(spans.length, 1)
+          val span = spans.head
+          assertEquals(span.name, "Http Client - GET")
+          assertEquals(span.kind, SpanKind.Client)
+          assertEquals(span.status, StatusData.Unset)
+
+          val attributes = span.attributes.elements
+          assertEquals(attributes.size, 2)
+          def getAttr[A: AttributeKey.KeySelect](name: String): Option[A] =
+            attributes.get[A](name).map(_.value)
+
+          assertEquals(getAttr[String]("http.request.method"), Some("GET"))
+          assertEquals(getAttr[Long]("http.response.status_code"), Some(200L))
+        }
+      }
+  }
+
   test("ClientMiddleware allows manipulating spans from inner clients") {
     TracesTestkit
       .inMemory[IO]()
