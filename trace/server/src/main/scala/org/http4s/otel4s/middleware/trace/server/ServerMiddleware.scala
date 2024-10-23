@@ -51,6 +51,8 @@ object ServerMiddleware {
       Defaults.allowedResponseHeaders,
       Defaults.routeClassifier,
       Defaults.serverSpanName,
+      Defaults.defaultRequestAttributesFilter,
+      Defaults.defaultResponseAttributesFilter,
       Defaults.additionalRequestAttributes,
       Defaults.additionalResponseAttributes,
       Defaults.urlRedactor,
@@ -66,6 +68,8 @@ object ServerMiddleware {
     val routeClassifier: RequestPrelude => Option[String] = _ => None
     val serverSpanName: RequestPrelude => String =
       req => s"Http Server - ${req.method}"
+    val defaultRequestAttributesFilter: Attribute[_] => Boolean = _ => true
+    val defaultResponseAttributesFilter: Attribute[_] => Boolean = _ => true
     val additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]] =
       _ => Nil
     val additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]] =
@@ -80,6 +84,8 @@ object ServerMiddleware {
       allowedResponseHeaders: Set[CIString],
       routeClassifier: RequestPrelude => Option[String],
       serverSpanName: RequestPrelude => String,
+      defaultRequestAttributesFilter: Attribute[_] => Boolean,
+      defaultResponseAttributesFilter: Attribute[_] => Boolean,
       additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]],
       additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]],
       urlRedactor: UriRedactor,
@@ -90,6 +96,10 @@ object ServerMiddleware {
         allowedResponseHeaders: Set[CIString] = this.allowedResponseHeaders,
         routeClassifier: RequestPrelude => Option[String] = this.routeClassifier,
         serverSpanName: RequestPrelude => String = this.serverSpanName,
+        defaultRequestAttributesFilter: Attribute[_] => Boolean =
+          this.defaultRequestAttributesFilter,
+        defaultResponseAttributesFilter: Attribute[_] => Boolean =
+          this.defaultResponseAttributesFilter,
         additionalRequestAttributes: RequestPrelude => immutable.Iterable[Attribute[_]] =
           this.additionalRequestAttributes,
         additionalResponseAttributes: ResponsePrelude => immutable.Iterable[Attribute[_]] =
@@ -102,6 +112,8 @@ object ServerMiddleware {
         allowedResponseHeaders,
         routeClassifier,
         serverSpanName,
+        defaultRequestAttributesFilter,
+        defaultResponseAttributesFilter,
         additionalRequestAttributes,
         additionalResponseAttributes,
         urlRedactor,
@@ -128,6 +140,18 @@ object ServerMiddleware {
     /** Sets how to derive the name of a server span from a request. */
     def withServerSpanName(serverSpanName: RequestPrelude => String): ServerMiddlewareBuilder[F] =
       copy(serverSpanName = serverSpanName)
+
+    /** Allows to filter default request attributes. */
+    def withDefaultRequestAttributesFilter(
+        defaultRequestAttributesFilter: Attribute[_] => Boolean
+    ): ServerMiddlewareBuilder[F] =
+      copy(defaultRequestAttributesFilter = defaultRequestAttributesFilter)
+
+    /** Allows to filter default response attributes. */
+    def withDefaultResponseAttributesFilter(
+        defaultResponseAttributesFilter: Attribute[_] => Boolean
+    ): ServerMiddlewareBuilder[F] =
+      copy(defaultResponseAttributesFilter = defaultResponseAttributesFilter)
 
     /** Sets how to derive additional `Attribute`s from a request to add to the
       *  server span.
@@ -178,6 +202,7 @@ object ServerMiddleware {
               allowedRequestHeaders,
               routeClassifier,
               urlRedactor,
+              defaultRequestAttributesFilter,
             ) ++ additionalRequestAttributes(reqPrelude)
           MonadCancelThrow[G].uncancelable { poll =>
             val tracerG = Tracer[F].mapK[G]
@@ -196,6 +221,7 @@ object ServerMiddleware {
                             response(
                               resp,
                               allowedResponseHeaders,
+                              defaultResponseAttributesFilter,
                             ) ++ additionalResponseAttributes(resp.responsePrelude)
 
                           span.addAttributes(out) >> span
@@ -228,6 +254,7 @@ object ServerMiddleware {
       allowedHeaders: Set[CIString],
       routeClassifier: RequestPrelude => Option[String],
       urlRedactor: UriRedactor,
+      defaultRequestAttributesFilter: Attribute[_] => Boolean,
   ): Attributes = {
     val builder = Attributes.newBuilder
     builder += TypedAttributes.httpRequestMethod(request.method)
@@ -257,11 +284,15 @@ object ServerMiddleware {
     builder ++=
       TypedAttributes.Headers.request(request.headers, allowedHeaders)
 
-    builder.result()
+    builder.result().filter(defaultRequestAttributesFilter)
   }
 
   /** @return the default `Attribute`s for a response */
-  private def response[F[_]](response: Response[F], allowedHeaders: Set[CIString]): Attributes = {
+  private def response[F[_]](
+      response: Response[F],
+      allowedHeaders: Set[CIString],
+      defaultResponseAttributesFilter: Attribute[_] => Boolean,
+  ): Attributes = {
     val builder = Attributes.newBuilder
 
     builder += TypedAttributes.httpResponseStatusCode(response.status)
@@ -279,6 +310,6 @@ object ServerMiddleware {
     if (response.status.responseClass == ServerError)
       builder += TypedAttributes.errorType(response.status)
 
-    builder.result()
+    builder.result().filter(defaultResponseAttributesFilter)
   }
 }
