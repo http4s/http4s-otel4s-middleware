@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.10" // your current series x.y
+ThisBuild / tlBaseVersion := "0.11" // your current series x.y
 
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
@@ -114,6 +114,7 @@ lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.typelevel" %%% "otel4s-core-common" % otel4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
       "org.typelevel" %%% "otel4s-semconv" % otel4sV,
+      "org.http4s" %%% "http4s-dsl" % http4sV % Test,
     ),
   )
 
