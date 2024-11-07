@@ -15,7 +15,8 @@
  */
 
 package org.http4s
-package otel4s.middleware.trace.client
+package otel4s.middleware.trace
+package client
 
 import cats.effect.IO
 import cats.effect.Resource
@@ -24,6 +25,7 @@ import cats.syntax.flatMap._
 import munit.CatsEffectSuite
 import org.http4s.client.Client
 import org.http4s.syntax.literals._
+import org.typelevel.ci.CIString
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
@@ -41,6 +43,7 @@ import scala.concurrent.duration.Duration
 import scala.util.control.NoStackTrace
 
 class ClientMiddlewareTests extends CatsEffectSuite {
+  import ClientMiddlewareTests.MinimalRedactor
 
   private val spanLimits = SpanLimits.default
 
@@ -60,10 +63,14 @@ class ClientMiddlewareTests extends CatsEffectSuite {
                 HttpApp[IO](_.body.compile.drain.as(response))
               }
             val tracedClient =
-              ClientMiddleware
-                .default[IO]
-                .withAllowedRequestHeaders(Set(ci"foo"))
-                .withAllowedResponseHeaders(Set(ci"baz"))
+              ClientMiddlewareBuilder
+                .default[IO](MinimalRedactor)
+                .withHeadersAllowedAsAttributes(
+                  HeadersAllowedAsAttributes(
+                    request = Set(ci"foo"),
+                    response = Set(ci"baz"),
+                  )
+                )
                 .build(fakeClient)
 
             val request =
@@ -75,24 +82,23 @@ class ClientMiddlewareTests extends CatsEffectSuite {
         } yield {
           assertEquals(spans.length, 1)
           val span = spans.head
-          assertEquals(span.name, "Http Client - GET")
+          assertEquals(span.name, "GET")
           assertEquals(span.kind, SpanKind.Client)
           assertEquals(span.status, StatusData.Unset)
 
           val attributes = span.attributes.elements
-          assertEquals(attributes.size, 10)
+          assertEquals(attributes.size, 9)
           def getAttr[A: AttributeKey.KeySelect](name: String): Option[A] =
             attributes.get[A](name).map(_.value)
 
           assertEquals(getAttr[String]("http.request.method"), Some("GET"))
           assertEquals(getAttr[Seq[String]]("http.request.header.foo"), Some(Seq("bar")))
           assertEquals(getAttr[Seq[String]]("http.request.header.baz"), None)
+          assertEquals(getAttr[String]("network.protocol.version"), Some("1.1"))
+          assertEquals(getAttr[String]("server.address"), Some("localhost"))
+          assertEquals(getAttr[Long]("server.port"), Some(80L))
           assertEquals(getAttr[String]("url.full"), Some("http://localhost/?#"))
           assertEquals(getAttr[String]("url.scheme"), Some("http"))
-          assertEquals(getAttr[String]("url.path"), Some("/"))
-          assertEquals(getAttr[String]("url.query"), Some(""))
-          assertEquals(getAttr[String]("url.fragment"), Some(""))
-          assertEquals(getAttr[String]("server.address"), Some("localhost"))
           assertEquals(getAttr[Long]("http.response.status_code"), Some(200L))
           assertEquals(getAttr[Seq[String]]("http.response.header.foo"), None)
           assertEquals(getAttr[Seq[String]]("http.response.header.baz"), Some(Seq("qux")))
@@ -118,7 +124,8 @@ class ClientMiddlewareTests extends CatsEffectSuite {
                 .run(req)
                 .evalTap(_ => Tracer[IO].currentSpanOrThrow.flatMap(_.updateName("NEW SPAN NAME")))
             }
-            val tracedClient = ClientMiddleware.default[IO].build(traceManipulatingClient)
+            val tracedClient =
+              ClientMiddlewareBuilder.default[IO](MinimalRedactor).build(traceManipulatingClient)
 
             val request = Request[IO](Method.GET, uri"http://localhost/?#")
             tracedClient.run(request).use(_.body.compile.drain)
@@ -133,6 +140,39 @@ class ClientMiddlewareTests extends CatsEffectSuite {
   }
 
   test("ClientMiddleware allows overriding span name") {
+    val provider: SpanDataProvider = new SpanDataProvider {
+      type Shared = None.type
+
+      def processSharedData[F[_]](
+          request: Request[F],
+          urlTemplateClassifier: UriTemplateClassifier,
+          urlRedactor: UriRedactor,
+      ): Shared = None
+
+      def spanName[F[_]](
+          request: Request[F],
+          urlTemplateClassifier: UriTemplateClassifier,
+          urlRedactor: UriRedactor,
+          sharedProcessedData: Shared,
+      ): String = "Overridden span name"
+
+      def requestAttributes[F[_]](
+          request: Request[F],
+          urlTemplateClassifier: UriTemplateClassifier,
+          urlRedactor: UriRedactor,
+          sharedProcessedData: Shared,
+          headersAllowedAsAttributes: Set[CIString],
+      ): Attributes = Attributes.empty
+
+      def responseAttributes[F[_]](
+          response: Response[F],
+          headersAllowedAsAttributes: Set[CIString],
+      ): Attributes = Attributes.empty
+
+      def exceptionAttributes(cause: Throwable): Attributes =
+        Attributes.empty
+    }
+
     val spanName = "Overridden span name"
     TracesTestkit
       .inMemory[IO]()
@@ -147,12 +187,12 @@ class ClientMiddlewareTests extends CatsEffectSuite {
                 HttpApp[IO](_.body.compile.drain.as(response))
               }
             val tracedClient =
-              ClientMiddleware
-                .default[IO]
+              ClientMiddlewareBuilder
+                .default[IO](MinimalRedactor)
+                .withSpanDataProvider(provider)
                 .build(fakeClient)
 
             val request = Request[IO](Method.GET, uri"http://localhost/?#")
-              .withAttribute(ClientMiddleware.OverrideSpanNameKey, spanName)
             tracedClient.run(request).use(_.body.compile.drain)
           }
           spans <- testkit.finishedSpans
@@ -176,7 +216,8 @@ class ClientMiddlewareTests extends CatsEffectSuite {
               Resource.raiseError[IO, Response[IO], Throwable](error)
             }
 
-            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
+            val tracedClient =
+              ClientMiddlewareBuilder.default[IO](MinimalRedactor).build(fakeClient)
             val request = Request[IO](Method.GET, uri"http://localhost/")
 
             val events = Vector(
@@ -192,12 +233,13 @@ class ClientMiddlewareTests extends CatsEffectSuite {
             val status = StatusData(StatusCode.Error)
 
             val attributes = Attributes(
+              Attribute("error.type", error.getClass.getName),
               Attribute("http.request.method", "GET"),
-              Attribute("url.path", "/"),
+              Attribute("network.protocol.version", "1.1"),
+              Attribute("server.address", "localhost"),
+              Attribute("server.port", 80L),
               Attribute("url.full", "http://localhost/"),
               Attribute("url.scheme", "http"),
-              Attribute("server.address", "localhost"),
-              Attribute("error.type", error.getClass.getName),
             )
 
             for {
@@ -223,7 +265,8 @@ class ClientMiddlewareTests extends CatsEffectSuite {
               Resource.canceled[IO] >> Resource.never[IO, Response[IO]]
             }
 
-            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
+            val tracedClient =
+              ClientMiddlewareBuilder.default[IO](MinimalRedactor).build(fakeClient)
             val request = Request[IO](Method.GET, uri"http://localhost/?#")
 
             val status = StatusData(StatusCode.Error, "canceled")
@@ -254,7 +297,8 @@ class ClientMiddlewareTests extends CatsEffectSuite {
                 HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
               }
 
-            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
+            val tracedClient =
+              ClientMiddlewareBuilder.default[IO](MinimalRedactor).build(fakeClient)
             val request = Request[IO](Method.GET, uri"http://localhost/")
 
             val events = Vector(
@@ -272,10 +316,11 @@ class ClientMiddlewareTests extends CatsEffectSuite {
             val attributes = Attributes(
               Attribute("http.request.method", "GET"),
               Attribute("http.response.status_code", 200L),
-              Attribute("url.path", "/"),
+              Attribute("network.protocol.version", "1.1"),
+              Attribute("server.address", "localhost"),
+              Attribute("server.port", 80L),
               Attribute("url.full", "http://localhost/"),
               Attribute("url.scheme", "http"),
-              Attribute("server.address", "localhost"),
             )
 
             for {
@@ -302,7 +347,8 @@ class ClientMiddlewareTests extends CatsEffectSuite {
                 HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
               }
 
-            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
+            val tracedClient =
+              ClientMiddlewareBuilder.default[IO](MinimalRedactor).build(fakeClient)
             val request = Request[IO](Method.GET, uri"http://localhost/?#")
 
             val status = StatusData(StatusCode.Error, "canceled")
@@ -331,19 +377,21 @@ class ClientMiddlewareTests extends CatsEffectSuite {
                 HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.InternalServerError)))
               }
 
-            val tracedClient = ClientMiddleware.default[IO].build(fakeClient)
+            val tracedClient =
+              ClientMiddlewareBuilder.default[IO](MinimalRedactor).build(fakeClient)
             val request = Request[IO](Method.GET, uri"http://localhost/")
 
             val status = StatusData(StatusCode.Error)
 
             val attributes = Attributes(
+              Attribute("error.type", "500"),
               Attribute("http.request.method", "GET"),
               Attribute("http.response.status_code", 500L),
-              Attribute("url.path", "/"),
+              Attribute("network.protocol.version", "1.1"),
+              Attribute("server.address", "localhost"),
+              Attribute("server.port", 80L),
               Attribute("url.full", "http://localhost/"),
               Attribute("url.scheme", "http"),
-              Attribute("server.address", "localhost"),
-              Attribute("error.type", "500"),
             )
 
             for {
@@ -358,4 +406,34 @@ class ClientMiddlewareTests extends CatsEffectSuite {
         }
     }
   }
+
+  test("don't trace when PerRequestTracingFilter returns Disabled") {
+    TracesTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
+          val clientMiddleware =
+            ClientMiddlewareBuilder
+              .default[IO](MinimalRedactor)
+              .withPerRequestTracingFilter(PerRequestTracingFilter.neverTrace)
+              .build
+          for {
+            _ <- {
+              val fakeClient =
+                Client.fromHttpApp[IO] {
+                  HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
+                }
+              clientMiddleware(fakeClient)
+                .run(Request[IO](Method.GET, uri"http://localhost/?#"))
+                .use(_.body.compile.drain)
+            }
+            spans <- testkit.finishedSpans
+          } yield assertEquals(spans.length, 0)
+        }
+      }
+  }
+}
+
+object ClientMiddlewareTests {
+  object MinimalRedactor extends UriRedactor.OnlyRedactUserInfo
 }
