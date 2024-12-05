@@ -20,12 +20,17 @@ import cats.effect._
 import cats.effect.syntax.all._
 import com.comcast.ip4s._
 import fs2.io.net.Network
+import org.http4s.Query
+import org.http4s.Uri
+import org.http4s.Uri.Fragment
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
 import org.http4s.otel4s.middleware.metrics.OtelMetrics
-import org.http4s.otel4s.middleware.trace.client.ClientMiddleware
-import org.http4s.otel4s.middleware.trace.server.ServerMiddleware
+import org.http4s.otel4s.middleware.redact
+import org.http4s.otel4s.middleware.trace.client.ClientMiddlewareBuilder
+import org.http4s.otel4s.middleware.trace.client.UriRedactor
+import org.http4s.otel4s.middleware.trace.server.ServerMiddlewareBuilder
 import org.http4s.server.Server
 import org.http4s.server.middleware.Metrics
 import org.typelevel.otel4s.Otel4s
@@ -51,6 +56,20 @@ import org.typelevel.otel4s.trace.Tracer
   */
 object Http4sExample extends IOApp with Common {
 
+  // you probably want to be a bit more permissive than this
+  val redactor: UriRedactor = new UriRedactor {
+    def redactPath(path: Uri.Path): Uri.Path =
+      if (path.isEmpty) path
+      else Uri.Path.Root / redact.REDACTED
+
+    def redactQuery(query: Query): Query =
+      if (query.isEmpty) query
+      else Query(redact.REDACTED -> None)
+
+    def redactFragment(fragment: Fragment): Option[Fragment] =
+      Some(if (fragment.isEmpty) fragment else redact.REDACTED)
+  }
+
   def tracer[F[_]](otel: Otel4s[F]): F[Tracer[F]] =
     otel.tracerProvider.tracer("Http4sExample").get
 
@@ -63,9 +82,9 @@ object Http4sExample extends IOApp with Common {
       client <- EmberClientBuilder
         .default[F]
         .build
-        .map(ClientMiddleware.default.build)
+        .map(ClientMiddlewareBuilder.default(redactor).build)
       metricsOps <- OtelMetrics.serverMetricsOps[F]().toResource
-      app = ServerMiddleware.default[F].buildHttpApp {
+      app = ServerMiddlewareBuilder.default[F](redactor).buildHttpApp {
         Metrics(metricsOps)(routes(client)).orNotFound
       }
       sv <- EmberServerBuilder.default[F].withPort(port"8080").withHttpApp(app).build
