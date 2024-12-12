@@ -22,7 +22,7 @@ import cats.effect.IO
 import munit.CatsEffectSuite
 import org.http4s.server.middleware.Metrics
 import org.typelevel.otel4s.Attributes
-import org.typelevel.otel4s.metrics.Meter
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.metrics.data.MetricPoints
 import org.typelevel.otel4s.sdk.metrics.data.PointData
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricsTestkit
@@ -33,9 +33,8 @@ class OtelMetricsTests extends CatsEffectSuite {
       .inMemory[IO]()
       .use { testkit =>
         for {
-          meterIO <- testkit.meterProvider.get("meter")
           metricsOps <- {
-            implicit val meter: Meter[IO] = meterIO
+            implicit val MP: MeterProvider[IO] = testkit.meterProvider
             OtelMetrics.serverMetricsOps[IO]()
           }
           _ <- {

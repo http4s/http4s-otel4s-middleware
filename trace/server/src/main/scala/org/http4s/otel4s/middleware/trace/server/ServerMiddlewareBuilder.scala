@@ -25,17 +25,18 @@ import cats.effect.kernel.Outcome
 import cats.effect.syntax.monadCancel._
 import cats.syntax.applicative._
 import cats.syntax.flatMap._
+import cats.syntax.functor._
 import fs2.Stream
 import org.typelevel.otel4s.KindTransformer
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
-import org.typelevel.otel4s.trace.Tracer
+import org.typelevel.otel4s.trace.TracerProvider
 
 /** Middleware builder for wrapping an http4s `Server` to add tracing.
   *
   * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server]]
   */
-class ServerMiddlewareBuilder[F[_]: Tracer: MonadCancelThrow] private (
+class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
     redactor: PathAndQueryRedactor, // cannot safely have default value
     spanDataProvider: SpanDataProvider,
     routeClassifier: RouteClassifier,
@@ -90,11 +91,16 @@ class ServerMiddlewareBuilder[F[_]: Tracer: MonadCancelThrow] private (
     */
   def buildGenericTracedHttp[G[_]: MonadCancelThrow](
       f: Http[G, F]
-  )(implicit kt: KindTransformer[F, G]): Http[G, F] =
-    Kleisli { (req: Request[F]) =>
+  )(implicit kt: KindTransformer[F, G]): F[Http[G, F]] =
+    for {
+      tracerF <- TracerProvider[F]
+        .tracer("org.http4s.otel4s.middleware.server")
+        .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
+        .get
+    } yield Kleisli { (req: Request[F]) =>
       if (
         !perRequestTracingFilter(req.requestPrelude).isEnabled ||
-        !Tracer[F].meta.isEnabled
+        !tracerF.meta.isEnabled
       ) {
         f(req)
       } else {
@@ -112,7 +118,7 @@ class ServerMiddlewareBuilder[F[_]: Tracer: MonadCancelThrow] private (
             headersAllowedAsAttributes.request,
           )
         MonadCancelThrow[G].uncancelable { poll =>
-          val tracerG = Tracer[F].mapK[G]
+          val tracerG = tracerF.mapK[G]
           tracerG.joinOrRoot(req.headers) {
             tracerG
               .spanBuilder(spanName)
@@ -145,18 +151,18 @@ class ServerMiddlewareBuilder[F[_]: Tracer: MonadCancelThrow] private (
     }
 
   /** @return a configured middleware for `HttpApp` */
-  def buildHttpApp(f: HttpApp[F]): HttpApp[F] =
+  def buildHttpApp(f: HttpApp[F]): F[HttpApp[F]] =
     buildGenericTracedHttp(f)
 
   /** @return a configured middleware for `HttpRoutes` */
-  def buildHttpRoutes(f: HttpRoutes[F]): HttpRoutes[F] =
+  def buildHttpRoutes(f: HttpRoutes[F]): F[HttpRoutes[F]] =
     buildGenericTracedHttp(f)
 }
 
 object ServerMiddlewareBuilder {
 
   /** @return a server middleware builder with default configuration */
-  def default[F[_]: Tracer: MonadCancelThrow](
+  def default[F[_]: TracerProvider: MonadCancelThrow](
       redactor: PathAndQueryRedactor
   ): ServerMiddlewareBuilder[F] =
     new ServerMiddlewareBuilder[F](

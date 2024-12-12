@@ -35,7 +35,7 @@ import org.typelevel.otel4s.sdk.trace.data.LimitedData
 import org.typelevel.otel4s.sdk.trace.data.StatusData
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
-import org.typelevel.otel4s.trace.Tracer
+import org.typelevel.otel4s.trace.TracerProvider
 
 import scala.concurrent.duration.Duration
 import scala.util.control.NoStackTrace
@@ -49,24 +49,22 @@ class ServerMiddlewareTests extends CatsEffectSuite {
     TracesTestkit
       .inMemory[IO]()
       .use { testkit =>
+        val headers = Headers(Header.Raw(ci"foo", "bar"), Header.Raw(ci"baz", "qux"))
+        val response = Response[IO](Status.Ok).withHeaders(headers)
         for {
-          tracerIO <- testkit.tracerProvider.get("tracer")
-          _ <- {
-            implicit val tracer: Tracer[IO] = tracerIO
-            val headers =
-              Headers(Header.Raw(ci"foo", "bar"), Header.Raw(ci"baz", "qux"))
-            val response = Response[IO](Status.Ok).withHeaders(headers)
-            val tracedServer =
-              ServerMiddlewareBuilder
-                .default[IO](NoopRedactor)
-                .withHeadersAllowedAsAttributes(
-                  HeadersAllowedAsAttributes(
-                    request = Set(ci"foo"),
-                    response = Set(ci"baz"),
-                  )
+          tracedServer <- {
+            implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+            ServerMiddlewareBuilder
+              .default[IO](NoopRedactor)
+              .withHeadersAllowedAsAttributes(
+                HeadersAllowedAsAttributes(
+                  request = Set(ci"foo"),
+                  response = Set(ci"baz"),
                 )
-                .buildHttpApp(HttpApp[IO](_.body.compile.drain.as(response)))
-
+              )
+              .buildHttpApp(HttpApp[IO](_.body.compile.drain.as(response)))
+          }
+          _ <- {
             val request =
               Request[IO](Method.GET, uri"http://localhost/?#")
                 .withHeaders(headers)
@@ -104,44 +102,46 @@ class ServerMiddlewareTests extends CatsEffectSuite {
       TracesTestkit
         .inMemory[IO]()
         .use { testkit =>
-          testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
-            val error = new RuntimeException("oops") with NoStackTrace {}
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          val error = new RuntimeException("oops") with NoStackTrace {}
+          ServerMiddlewareBuilder
+            .default[IO](NoopRedactor)
+            .buildHttpApp(HttpApp[IO](_ => IO.raiseError(error)))
+            .flatMap { implicit tracedServer =>
+              val request = Request[IO](Method.GET, uri"http://localhost/")
 
-            val tracedServer = ServerMiddlewareBuilder
-              .default[IO](NoopRedactor)
-              .buildHttpApp(HttpApp[IO](_ => IO.raiseError(error)))
-
-            val request = Request[IO](Method.GET, uri"http://localhost/")
-
-            val events = Vector(
-              EventData.fromException(
-                Duration.Zero,
-                error,
-                LimitedData
-                  .attributes(spanLimits.maxNumberOfAttributes, spanLimits.maxAttributeValueLength),
-                escaped = false,
+              val events = Vector(
+                EventData.fromException(
+                  Duration.Zero,
+                  error,
+                  LimitedData
+                    .attributes(
+                      spanLimits.maxNumberOfAttributes,
+                      spanLimits.maxAttributeValueLength,
+                    ),
+                  escaped = false,
+                )
               )
-            )
 
-            val status = StatusData(StatusCode.Error)
+              val status = StatusData(StatusCode.Error)
 
-            val attributes = Attributes(
-              Attribute("error.type", error.getClass.getName),
-              Attribute("http.request.method", "GET"),
-              Attribute("network.protocol.version", "1.1"),
-              Attribute("url.path", "/"),
-              Attribute("url.scheme", "http"),
-            )
+              val attributes = Attributes(
+                Attribute("error.type", error.getClass.getName),
+                Attribute("http.request.method", "GET"),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("url.path", "/"),
+                Attribute("url.scheme", "http"),
+              )
 
-            for {
-              _ <- tracedServer.run(request).attempt
-              spans <- testkit.finishedSpans
-            } yield {
-              assertEquals(spans.map(_.attributes.elements), List(attributes))
-              assertEquals(spans.map(_.events.elements), List(events))
-              assertEquals(spans.map(_.status), List(status))
+              for {
+                _ <- tracedServer.run(request).attempt
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.map(_.events.elements), List(events))
+                assertEquals(spans.map(_.status), List(status))
+              }
             }
-          }
         }
     }
   }
@@ -151,31 +151,31 @@ class ServerMiddlewareTests extends CatsEffectSuite {
       TracesTestkit
         .inMemory[IO]()
         .use { testkit =>
-          testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
-            val tracedServer = ServerMiddlewareBuilder
-              .default[IO](NoopRedactor)
-              .buildHttpApp(HttpApp[IO](_ => IO.pure(Response[IO](Status.InternalServerError))))
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ServerMiddlewareBuilder
+            .default[IO](NoopRedactor)
+            .buildHttpApp(HttpApp[IO](_ => IO.pure(Response[IO](Status.InternalServerError))))
+            .flatMap { implicit tracedServer =>
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+              val status = StatusData(StatusCode.Error)
 
-            val request = Request[IO](Method.GET, uri"http://localhost/")
-            val status = StatusData(StatusCode.Error)
+              val attributes = Attributes(
+                Attribute("error.type", "500"),
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 500L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("url.path", "/"),
+                Attribute("url.scheme", "http"),
+              )
 
-            val attributes = Attributes(
-              Attribute("error.type", "500"),
-              Attribute("http.request.method", "GET"),
-              Attribute("http.response.status_code", 500L),
-              Attribute("network.protocol.version", "1.1"),
-              Attribute("url.path", "/"),
-              Attribute("url.scheme", "http"),
-            )
-
-            for {
-              _ <- tracedServer.run(request).attempt
-              spans <- testkit.finishedSpans
-            } yield {
-              assertEquals(spans.map(_.attributes.elements), List(attributes))
-              assertEquals(spans.map(_.status), List(status))
+              for {
+                _ <- tracedServer.run(request).attempt
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.map(_.status), List(status))
+              }
             }
-          }
         }
     }
   }
@@ -185,32 +185,32 @@ class ServerMiddlewareTests extends CatsEffectSuite {
       TracesTestkit
         .inMemory[IO]()
         .use { testkit =>
-          testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
-            val tracedServer = ServerMiddlewareBuilder
-              .default[IO](NoopRedactor)
-              .buildHttpApp(HttpApp[IO](_ => IO.canceled.as(Response[IO](Status.Ok))))
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ServerMiddlewareBuilder
+            .default[IO](NoopRedactor)
+            .buildHttpApp(HttpApp[IO](_ => IO.canceled.as(Response[IO](Status.Ok))))
+            .flatMap { implicit tracedServer =>
+              val request = Request[IO](Method.GET, uri"http://localhost/")
 
-            val request = Request[IO](Method.GET, uri"http://localhost/")
+              val status = StatusData(StatusCode.Error, "canceled")
 
-            val status = StatusData(StatusCode.Error, "canceled")
+              val attributes = Attributes(
+                Attribute("http.request.method", "GET"),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("url.path", "/"),
+                Attribute("url.scheme", "http"),
+              )
 
-            val attributes = Attributes(
-              Attribute("http.request.method", "GET"),
-              Attribute("network.protocol.version", "1.1"),
-              Attribute("url.path", "/"),
-              Attribute("url.scheme", "http"),
-            )
-
-            for {
-              f <- tracedServer.run(request).void.start
-              _ <- f.joinWithUnit
-              spans <- testkit.finishedSpans
-            } yield {
-              assertEquals(spans.map(_.attributes.elements), List(attributes))
-              assertEquals(spans.flatMap(_.events.elements), Nil)
-              assertEquals(spans.map(_.status), List(status))
+              for {
+                f <- tracedServer.run(request).void.start
+                _ <- f.joinWithUnit
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(status))
+              }
             }
-          }
         }
     }
   }
@@ -219,18 +219,18 @@ class ServerMiddlewareTests extends CatsEffectSuite {
     TracesTestkit
       .inMemory[IO]()
       .use { testkit =>
-        testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
-          val response = Response[IO](Status.Ok)
-          val tracedServer =
+        val response = Response[IO](Status.Ok)
+        for {
+          tracedServer <- {
+            implicit val TP: TracerProvider[IO] = testkit.tracerProvider
             ServerMiddlewareBuilder
               .default[IO](NoopRedactor)
               .withPerRequestTracingFilter(PerRequestTracingFilter.neverTrace)
               .buildHttpApp(HttpApp[IO](_.body.compile.drain.as(response)))
-          for {
-            _ <- tracedServer.run(Request[IO](Method.GET, uri"http://localhost/?#"))
-            spans <- testkit.finishedSpans
-          } yield assertEquals(spans.length, 0)
-        }
+          }
+          _ <- tracedServer.run(Request[IO](Method.GET, uri"http://localhost/?#"))
+          spans <- testkit.finishedSpans
+        } yield assertEquals(spans.length, 0)
       }
   }
 }

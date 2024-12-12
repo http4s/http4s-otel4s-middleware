@@ -34,9 +34,10 @@ import org.http4s.otel4s.middleware.trace.server.ServerMiddlewareBuilder
 import org.http4s.server.Server
 import org.http4s.server.middleware.Metrics
 import org.typelevel.otel4s.Otel4s
-import org.typelevel.otel4s.metrics.Meter
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.oteljava.OtelJava
 import org.typelevel.otel4s.trace.Tracer
+import org.typelevel.otel4s.trace.TracerProvider
 
 /** Start up Jaeger thus:
   *
@@ -73,20 +74,21 @@ object Http4sExample extends IOApp with Common {
   def tracer[F[_]](otel: Otel4s[F]): F[Tracer[F]] =
     otel.tracerProvider.tracer("Http4sExample").get
 
-  def meter[F[_]](otel: Otel4s[F]): F[Meter[F]] =
-    otel.meterProvider.meter("Http4sExample").get
-
   // Our main app resource
-  def server[F[_]: Async: Network: Tracer: Meter]: Resource[F, Server] =
+  def server[F[_]: Async: Network: TracerProvider: Tracer: MeterProvider]: Resource[F, Server] =
     for {
+      clientMiddleware <- ClientMiddlewareBuilder.default(redactor).build.toResource
       client <- EmberClientBuilder
         .default[F]
         .build
-        .map(ClientMiddlewareBuilder.default(redactor).build)
+        .map(clientMiddleware)
       metricsOps <- OtelMetrics.serverMetricsOps[F]().toResource
-      app = ServerMiddlewareBuilder.default[F](redactor).buildHttpApp {
-        Metrics(metricsOps)(routes(client)).orNotFound
-      }
+      app <- ServerMiddlewareBuilder
+        .default[F](redactor)
+        .buildHttpApp {
+          Metrics(metricsOps)(routes(client)).orNotFound
+        }
+        .toResource
       sv <- EmberServerBuilder.default[F].withPort(port"8080").withHttpApp(app).build
     } yield sv
 
@@ -95,10 +97,10 @@ object Http4sExample extends IOApp with Common {
     OtelJava
       .autoConfigured[IO]()
       .flatMap { otel4s =>
+        implicit val TP: TracerProvider[IO] = otel4s.tracerProvider
+        implicit val MP: MeterProvider[IO] = otel4s.meterProvider
         Resource.eval(tracer(otel4s)).flatMap { implicit T: Tracer[IO] =>
-          Resource.eval(meter(otel4s)).flatMap { implicit M: Meter[IO] =>
-            server[IO]
-          }
+          server[IO]
         }
       }
       .use(_ => IO.never)

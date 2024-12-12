@@ -25,17 +25,18 @@ import cats.effect.Outcome
 import cats.effect.Resource
 import cats.syntax.applicative._
 import cats.syntax.flatMap._
+import cats.syntax.functor._
 import fs2.Stream
 import org.http4s.client.Client
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
-import org.typelevel.otel4s.trace.Tracer
+import org.typelevel.otel4s.trace.TracerProvider
 
 /** Middleware builder for wrapping an http4s `Client` to add tracing.
   *
   * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client]]
   */
-class ClientMiddlewareBuilder[F[_]: Tracer: Concurrent] private (
+class ClientMiddlewareBuilder[F[_]: TracerProvider: Concurrent] private (
     urlRedactor: UriRedactor,
     spanDataProvider: SpanDataProvider,
     urlTemplateClassifier: UriTemplateClassifier,
@@ -85,81 +86,89 @@ class ClientMiddlewareBuilder[F[_]: Tracer: Concurrent] private (
     copy(perRequestTracingFilter = perRequestTracingFilter)
 
   /** @return the configured middleware */
-  def build: Client[F] => Client[F] = (client: Client[F]) =>
-    Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
-      if (
-        !perRequestTracingFilter(req.requestPrelude).isEnabled ||
-        !Tracer[F].meta.isEnabled
-      ) {
-        client.run(req)
-      } else {
-        val reqNoBody = req.withBodyStream(Stream.empty)
-        val shared =
-          spanDataProvider.processSharedData(
-            reqNoBody,
-            urlTemplateClassifier,
-            urlRedactor,
-          )
-        val spanName =
-          spanDataProvider.spanName(
-            reqNoBody,
-            urlTemplateClassifier,
-            urlRedactor,
-            shared,
-          )
-        val reqAttributes =
-          spanDataProvider.requestAttributes(
-            reqNoBody,
-            urlTemplateClassifier,
-            urlRedactor,
-            shared,
-            headersAllowedAsAttributes.request,
-          )
+  def build: F[Client[F] => Client[F]] =
+    for {
+      tracer <- TracerProvider[F]
+        .tracer("org.http4s.otel4s.middleware.client")
+        .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
+        .get
+    } yield (client: Client[F]) =>
+      Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
+        if (
+          !perRequestTracingFilter(req.requestPrelude).isEnabled ||
+          !tracer.meta.isEnabled
+        ) {
+          client.run(req)
+        } else {
+          val reqNoBody = req.withBodyStream(Stream.empty)
+          val shared =
+            spanDataProvider.processSharedData(
+              reqNoBody,
+              urlTemplateClassifier,
+              urlRedactor,
+            )
+          val spanName =
+            spanDataProvider.spanName(
+              reqNoBody,
+              urlTemplateClassifier,
+              urlRedactor,
+              shared,
+            )
+          val reqAttributes =
+            spanDataProvider.requestAttributes(
+              reqNoBody,
+              urlTemplateClassifier,
+              urlRedactor,
+              shared,
+              headersAllowedAsAttributes.request,
+            )
 
-        MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
-          for {
-            res <- Tracer[F]
-              .spanBuilder(spanName)
-              .withSpanKind(SpanKind.Client)
-              .addAttributes(reqAttributes)
-              .build
-              .resource
-            span = res.span
-            trace = res.trace
-            traceHeaders <- Resource.eval(Tracer[F].propagate(Headers.empty)).mapK(trace)
-            newReq = req.withHeaders(traceHeaders ++ req.headers)
+          MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
+            for {
+              res <- tracer
+                .spanBuilder(spanName)
+                .withSpanKind(SpanKind.Client)
+                .addAttributes(reqAttributes)
+                .build
+                .resource
+              span = res.span
+              trace = res.trace
+              traceHeaders <- Resource.eval(tracer.propagate(Headers.empty)).mapK(trace)
+              newReq = req.withHeaders(traceHeaders ++ req.headers)
 
-            resp <- poll(client.run(newReq).mapK(trace)).guaranteeCase {
-              case Outcome.Succeeded(fa) =>
-                fa.evalMap { resp =>
-                  val respAttributes =
-                    spanDataProvider.responseAttributes(
-                      resp.withBodyStream(Stream.empty),
-                      headersAllowedAsAttributes.response,
-                    )
-                  span.addAttributes(respAttributes) >> span
-                    .setStatus(StatusCode.Error)
-                    .unlessA(resp.status.isSuccess)
-                }
+              resp <- poll(client.run(newReq).mapK(trace)).guaranteeCase {
+                case Outcome.Succeeded(fa) =>
+                  fa.evalMap { resp =>
+                    val respAttributes =
+                      spanDataProvider.responseAttributes(
+                        resp.withBodyStream(Stream.empty),
+                        headersAllowedAsAttributes.response,
+                      )
+                    span.addAttributes(respAttributes) >> span
+                      .setStatus(StatusCode.Error)
+                      .unlessA(resp.status.isSuccess)
+                  }
 
-              case Outcome.Errored(e) =>
-                Resource.eval {
-                  span.addAttributes(spanDataProvider.exceptionAttributes(e))
-                }
+                case Outcome.Errored(e) =>
+                  Resource.eval {
+                    span.addAttributes(spanDataProvider.exceptionAttributes(e))
+                  }
 
-              case Outcome.Canceled() =>
-                Resource.unit
-            }
-          } yield resp
+                case Outcome.Canceled() =>
+                  Resource.unit
+              }
+            } yield resp
+          }
         }
       }
-    }
 }
 
 object ClientMiddlewareBuilder {
 
   /** @return a client middleware builder with default configuration */
-  def default[F[_]: Tracer: Concurrent](urlRedactor: UriRedactor): ClientMiddlewareBuilder[F] =
+  def default[F[_]: TracerProvider: Concurrent](
+      urlRedactor: UriRedactor
+  ): ClientMiddlewareBuilder[F] =
     new ClientMiddlewareBuilder[F](
       urlRedactor,
       Defaults.spanDataProvider,

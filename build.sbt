@@ -49,6 +49,7 @@ lazy val `http4s-otel4s-middleware` = tlCrossRootProject
 lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("core"))
+  .enablePlugins(BuildInfoPlugin)
   .settings(sharedSettings)
   .settings(
     name := s"$baseName-core",
@@ -57,6 +58,9 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.typelevel" %%% "otel4s-core-common" % otel4sV,
       "org.typelevel" %%% "otel4s-semconv" % otel4sV,
     ),
+    buildInfoKeys := Seq(version),
+    buildInfoPackage := "org.http4s.otel4s.middleware",
+    buildInfoOptions += BuildInfoOption.PackagePrivate,
   )
 
 lazy val metrics = crossProject(JVMPlatform, JSPlatform, NativePlatform)

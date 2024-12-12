@@ -47,7 +47,7 @@ object OtelMetrics {
     * @param attributes additional [[org.typelevel.otel4s.Attributes]] that are added to all metrics
     * @param responseDurationSecondsHistogramBuckets histogram buckets for the response duration metrics
     */
-  def clientMetricsOps[F[_]: Monad: Meter](
+  def clientMetricsOps[F[_]: Monad: MeterProvider](
       attributes: Attributes = Attributes.empty,
       responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
   ): F[MetricsOps[F]] =
@@ -72,7 +72,7 @@ object OtelMetrics {
     * @param attributes additional [[org.typelevel.otel4s.Attributes]] that are added to all metrics
     * @param responseDurationSecondsHistogramBuckets histogram buckets for the response duration metrics
     */
-  def serverMetricsOps[F[_]: Monad: Meter](
+  def serverMetricsOps[F[_]: Monad: MeterProvider](
       attributes: Attributes = Attributes.empty,
       responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
   ): F[MetricsOps[F]] =
@@ -82,16 +82,23 @@ object OtelMetrics {
       responseDurationSecondsHistogramBuckets,
     )
 
-  private def metricsOps[F[_]: Monad: Meter](
+  private def metricsOps[F[_]: Monad: MeterProvider](
       kind: String,
       attributes: Attributes,
       responseDurationSecondsHistogramBuckets: BucketBoundaries,
   ): F[MetricsOps[F]] =
     for {
-      metrics <- createMetricsCollection(
-        kind,
-        responseDurationSecondsHistogramBuckets,
-      )
+      meter <- MeterProvider[F]
+        .meter(s"org.http4s.otel4s.middleware.$kind")
+        .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
+        .get
+      metrics <- {
+        implicit val M: Meter[F] = meter
+        createMetricsCollection(
+          kind,
+          responseDurationSecondsHistogramBuckets,
+        )
+      }
     } yield createMetricsOps(
       metrics,
       attributes,
