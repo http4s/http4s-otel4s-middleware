@@ -34,6 +34,11 @@ import java.util.Locale
 /** Methods for creating appropriate `Attribute`s from typed HTTP objects. */
 object TypedAttributes {
   private[this] lazy val knownMethods: Set[Method] = Method.all.toSet
+  private[middleware] val middlewareVersion: Attribute[String] =
+    Attribute(
+      "org.http4s.otel4s.middleware.version",
+      org.http4s.otel4s.middleware.BuildInfo.version,
+    )
 
   /** The http.request.method `Attribute` with the special value _OTHER */
   val httpRequestMethodOther: Attribute[String] =

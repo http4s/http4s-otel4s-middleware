@@ -95,3 +95,23 @@ trait AttributeProvider { self =>
         self.exceptionAttributes(cause) ++ that.exceptionAttributes(cause)
     }
 }
+
+object AttributeProvider {
+
+  /** Provides an `Attribute` containing this middleware's version. */
+  val middlewareVersion: AttributeProvider =
+    new AttributeProvider {
+      def requestAttributes[F[_]](
+          request: Request[F],
+          urlTemplateClassifier: UriTemplateClassifier,
+          urlRedactor: UriRedactor,
+          headersAllowedAsAttributes: Set[AuthScheme],
+      ): Attributes = Attributes(TypedAttributes.middlewareVersion)
+      def responseAttributes[F[_]](
+          response: Response[F],
+          headersAllowedAsAttributes: Set[AuthScheme],
+      ): Attributes = Attributes.empty
+      def exceptionAttributes(cause: Throwable): Attributes =
+        Attributes.empty
+    }
+}

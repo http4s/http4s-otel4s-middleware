@@ -79,7 +79,7 @@ class ServerMiddlewareTests extends CatsEffectSuite {
           assertEquals(span.status, StatusData.Unset)
 
           val attributes = span.attributes.elements
-          assertEquals(attributes.size, 8)
+          assertEquals(attributes.size, 9)
           def getAttr[A: AttributeKey.KeySelect](name: String): Option[A] =
             attributes.get[A](name).map(_.value)
 
@@ -93,6 +93,10 @@ class ServerMiddlewareTests extends CatsEffectSuite {
           assertEquals(getAttr[Long]("http.response.status_code"), Some(200L))
           assertEquals(getAttr[Seq[String]]("http.response.header.foo"), None)
           assertEquals(getAttr[Seq[String]]("http.response.header.baz"), Some(Seq("qux")))
+          assertEquals(
+            getAttr[String]("org.http4s.otel4s.middleware.version"),
+            Some(org.http4s.otel4s.middleware.BuildInfo.version),
+          )
         }
       }
   }
@@ -131,6 +135,10 @@ class ServerMiddlewareTests extends CatsEffectSuite {
                 Attribute("network.protocol.version", "1.1"),
                 Attribute("url.path", "/"),
                 Attribute("url.scheme", "http"),
+                Attribute(
+                  "org.http4s.otel4s.middleware.version",
+                  org.http4s.otel4s.middleware.BuildInfo.version,
+                ),
               )
 
               for {
@@ -166,6 +174,10 @@ class ServerMiddlewareTests extends CatsEffectSuite {
                 Attribute("network.protocol.version", "1.1"),
                 Attribute("url.path", "/"),
                 Attribute("url.scheme", "http"),
+                Attribute(
+                  "org.http4s.otel4s.middleware.version",
+                  org.http4s.otel4s.middleware.BuildInfo.version,
+                ),
               )
 
               for {
@@ -199,6 +211,10 @@ class ServerMiddlewareTests extends CatsEffectSuite {
                 Attribute("network.protocol.version", "1.1"),
                 Attribute("url.path", "/"),
                 Attribute("url.scheme", "http"),
+                Attribute(
+                  "org.http4s.otel4s.middleware.version",
+                  org.http4s.otel4s.middleware.BuildInfo.version,
+                ),
               )
 
               for {

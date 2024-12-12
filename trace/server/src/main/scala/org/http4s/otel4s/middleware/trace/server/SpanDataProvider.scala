@@ -154,9 +154,6 @@ trait SpanDataProvider extends AttributeProvider { self =>
 
 object SpanDataProvider {
 
-  /** The default provider, which follows OpenTelemetry semantic conventions. */
-  def default: SpanDataProvider = openTelemetry
-
   /** A `SpanAndAttributeProvider` following OpenTelemetry semantic conventions. */
   val openTelemetry: SpanDataProvider = {
     final case class Data(
@@ -261,4 +258,9 @@ object SpanDataProvider {
         Attributes(TypedAttributes.errorType(cause))
     }
   }
+
+  /** The default provider, which follows OpenTelemetry semantic conventions
+    * and includes this middleware's version.
+    */
+  val default: SpanDataProvider = openTelemetry.and(AttributeProvider.middlewareVersion)
 }
