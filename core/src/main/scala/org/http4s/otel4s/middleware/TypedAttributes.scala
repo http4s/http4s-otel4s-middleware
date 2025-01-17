@@ -18,7 +18,7 @@ package org.http4s
 package otel4s.middleware
 
 import com.comcast.ip4s.IpAddress
-import org.http4s.headers.Host
+import com.comcast.ip4s.Port
 import org.http4s.headers.`User-Agent`
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
@@ -27,22 +27,39 @@ import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
 import org.typelevel.otel4s.semconv.attributes.HttpAttributes
 import org.typelevel.otel4s.semconv.attributes.NetworkAttributes
-import org.typelevel.otel4s.semconv.attributes.ServerAttributes
-import org.typelevel.otel4s.semconv.attributes.UrlAttributes
 import org.typelevel.otel4s.semconv.attributes.UserAgentAttributes
 
 import java.util.Locale
 
 /** Methods for creating appropriate `Attribute`s from typed HTTP objects. */
 object TypedAttributes {
+  private[this] lazy val knownMethods: Set[Method] = Method.all.toSet
+  private[middleware] val middlewareVersion: Attribute[String] =
+    Attribute(
+      "org.http4s.otel4s.middleware.version",
+      org.http4s.otel4s.middleware.BuildInfo.version,
+    )
+
+  /** The http.request.method `Attribute` with the special value _OTHER */
+  val httpRequestMethodOther: Attribute[String] =
+    HttpAttributes.HttpRequestMethod("_OTHER")
+
+  /** @return the `error.type` `Attribute` */
+  def errorType(cause: Throwable): Attribute[String] =
+    ErrorAttributes.ErrorType(cause.getClass.getName)
+
+  /** @return the `error.type` `Attribute` */
+  def errorType(status: Status): Attribute[String] =
+    ErrorAttributes.ErrorType(s"${status.code}")
 
   /** @return the `http.request.method` `Attribute` */
   def httpRequestMethod(method: Method): Attribute[String] =
-    HttpAttributes.HttpRequestMethod(method.name)
+    if (knownMethods.contains(method)) HttpAttributes.HttpRequestMethod(method.name)
+    else httpRequestMethodOther
 
-  /** @return the `http.request.resend_count` `Attribute` */
-  def httpRequestResendCount(count: Long): Attribute[Long] =
-    HttpAttributes.HttpRequestResendCount(count)
+  /** @return the `http.request.method_original` `Attribute` */
+  def httpRequestMethodOriginal(method: Method): Attribute[String] =
+    HttpAttributes.HttpRequestMethodOriginal(method.name)
 
   /** @return the `http.response.status_code` `Attribute` */
   def httpResponseStatusCode(status: Status): Attribute[Long] =
@@ -52,195 +69,75 @@ object TypedAttributes {
   def networkPeerAddress(ip: IpAddress): Attribute[String] =
     NetworkAttributes.NetworkPeerAddress(ip.toString)
 
-  /** @return the `server.address` `Attribute` */
-  def serverAddress(host: Host): Attribute[String] =
-    ServerAttributes.ServerAddress(Host.headerInstance.value(host))
+  /** @return the `network.peer.port` `Attribute` */
+  def networkPeerPort(port: Port): Attribute[Long] =
+    NetworkAttributes.NetworkPeerPort(port.value.toLong)
 
-  /** Returns of the following `Attribute`s when their corresponding values are
-    * present in the URL and not redacted by the provided [[`UriRedactor`]]:
-    *
-    *  - `url.full`
-    *  - `url.scheme`
-    *  - `url.path`
-    *  - `url.query`
-    *  - `url.fragment` (extremely unlikely to be present)
-    */
-  def url(unredacted: Uri, redactor: UriRedactor): Attributes =
-    redactor.redact(unredacted).fold(Attributes.empty) { url =>
-      val b = Attributes.newBuilder
-      b += UrlAttributes.UrlFull(url.renderString)
-      url.scheme.foreach(scheme => b += UrlAttributes.UrlScheme(scheme.value))
-      if (url.path != Uri.Path.empty) b += UrlAttributes.UrlPath(url.path.renderString)
-      if (url.query.nonEmpty) b += UrlAttributes.UrlQuery(url.query.renderString)
-      url.fragment.foreach(b += UrlAttributes.UrlFragment(_))
-      b.result()
+  /** @return the `network.protocol.version` `Attribute` */
+  def networkProtocolVersion(version: HttpVersion): Attribute[String] = {
+    val rendered = version.major match {
+      case m if m <= 1 => s"$m.${version.minor}"
+      case m /* if m >= 2 */ => s"$m"
     }
+    NetworkAttributes.NetworkProtocolVersion(rendered)
+  }
 
   /** @return the `user_agent.original` `Attribute` */
-  def userAgentOriginal(userAgent: `User-Agent`): Attribute[String] =
-    UserAgentAttributes.UserAgentOriginal(`User-Agent`.headerInstance.value(userAgent))
+  def userAgentOriginal(headers: Headers): Option[Attribute[String]] =
+    headers
+      .get(`User-Agent`.name)
+      .map(nel => UserAgentAttributes.UserAgentOriginal(nel.head.value))
 
-  /** @return the `error.type` `Attribute` */
-  def errorType(cause: Throwable): Attribute[String] =
-    ErrorAttributes.ErrorType(cause.getClass.getName)
-
-  /** @return the `error.type` `Attribute` */
-  def errorType(status: Status): Attribute[String] =
-    ErrorAttributes.ErrorType(status.code.toString)
+  /* header stuff here, because it's long */
 
   /** Methods for creating appropriate `Attribute`s from typed HTTP headers. */
-  object Headers {
-    private[this] def generic(
-        headers: Headers,
-        allowedHeaders: Set[CIString],
-        prefixKey: AttributeKey[Seq[String]],
-    ): Attributes =
-      headers
-        .redactSensitive()
-        .headers
-        .groupMap(_.name)(_.value)
-        .view
-        .collect {
-          case (name, values) if allowedHeaders.contains(name) =>
-            val key =
-              prefixKey
-                .transformName(_ + "." + name.toString.toLowerCase(Locale.ROOT))
-            Attribute(key, values)
-        }
-        .to(Attributes)
+  private[this] def genericHttpHeaders(
+      headers: Headers,
+      allowedHeaders: Set[CIString],
+      prefixKey: AttributeKey[Seq[String]],
+  )(b: Attributes.Builder): b.type =
+    b ++= headers
+      .redactSensitive()
+      .headers
+      .groupMap(_.name)(_.value)
+      .view
+      .collect {
+        case (name, values) if allowedHeaders.contains(name) =>
+          val key =
+            prefixKey
+              .transformName(_ + "." + name.toString.toLowerCase(Locale.ROOT))
+          Attribute(key, values)
+      }
 
-    /** @return `http.request.header.<lowercase name>` `Attribute`s for
-      *          all headers in `allowedHeaders`
-      */
-    def request(headers: Headers, allowedHeaders: Set[CIString]): Attributes =
-      generic(headers, allowedHeaders, HttpAttributes.HttpRequestHeader)
+  /** Adds the `http.request.header.<lowercase name>` `Attribute`s for all
+    * headers in `allowedHeaders` to the provided builder.
+    */
+  def httpRequestHeadersForBuilder(headers: Headers, allowedHeaders: Set[CIString])(
+      b: Attributes.Builder
+  ): b.type =
+    if (allowedHeaders.isEmpty) b
+    else genericHttpHeaders(headers, allowedHeaders, HttpAttributes.HttpRequestHeader)(b)
 
-    /** @return `http.response.header.<lowercase name>` `Attribute`s for
-      *          all headers in `allowedHeaders`
-      */
-    def response(headers: Headers, allowedHeaders: Set[CIString]): Attributes =
-      generic(headers, allowedHeaders, HttpAttributes.HttpResponseHeader)
+  /** @return `http.request.header.<lowercase name>` `Attributes` for
+    *          all headers in `allowedHeaders`
+    */
+  def httpRequestHeaders(headers: Headers, allowedHeaders: Set[CIString]): Attributes =
+    if (allowedHeaders.isEmpty) Attributes.empty
+    else httpRequestHeadersForBuilder(headers, allowedHeaders)(Attributes.newBuilder).result()
 
-    /** The default set of headers allowed to be turned into `Attribute`s. */
-    lazy val defaultAllowedHeaders: Set[CIString] = Set(
-      "Accept",
-      "Accept-CH",
-      "Accept-Charset",
-      "Accept-CH-Lifetime",
-      "Accept-Encoding",
-      "Accept-Language",
-      "Accept-Ranges",
-      "Access-Control-Allow-Credentials",
-      "Access-Control-Allow-Headers",
-      "Access-Control-Allow-Origin",
-      "Access-Control-Expose-Methods",
-      "Access-Control-Max-Age",
-      "Access-Control-Request-Headers",
-      "Access-Control-Request-Method",
-      "Age",
-      "Allow",
-      "Alt-Svc",
-      "B3",
-      "Cache-Control",
-      "Clear-Site-Data",
-      "Connection",
-      "Content-Disposition",
-      "Content-Encoding",
-      "Content-Language",
-      "Content-Length",
-      "Content-Location",
-      "Content-Range",
-      "Content-Security-Policy",
-      "Content-Security-Policy-Report-Only",
-      "Content-Type",
-      "Cross-Origin-Embedder-Policy",
-      "Cross-Origin-Opener-Policy",
-      "Cross-Origin-Resource-Policy",
-      "Date",
-      "Deprecation",
-      "Device-Memory",
-      "DNT",
-      "Early-Data",
-      "ETag",
-      "Expect",
-      "Expect-CT",
-      "Expires",
-      "Feature-Policy",
-      "Forwarded",
-      "From",
-      "Host",
-      "If-Match",
-      "If-Modified-Since",
-      "If-None-Match",
-      "If-Range",
-      "If-Unmodified-Since",
-      "Keep-Alive",
-      "Large-Allocation",
-      "Last-Modified",
-      "Link",
-      "Location",
-      "Max-Forwards",
-      "Origin",
-      "Pragma",
-      "Proxy-Authenticate",
-      "Public-Key-Pins",
-      "Public-Key-Pins-Report-Only",
-      "Range",
-      "Referer",
-      "Referer-Policy",
-      "Retry-After",
-      "Save-Data",
-      "Sec-CH-UA",
-      "Sec-CH-UA-Arch",
-      "Sec-CH-UA-Bitness",
-      "Sec-CH-UA-Full-Version",
-      "Sec-CH-UA-Full-Version-List",
-      "Sec-CH-UA-Mobile",
-      "Sec-CH-UA-Model",
-      "Sec-CH-UA-Platform",
-      "Sec-CH-UA-Platform-Version",
-      "Sec-Fetch-Dest",
-      "Sec-Fetch-Mode",
-      "Sec-Fetch-Site",
-      "Sec-Fetch-User",
-      "Server",
-      "Server-Timing",
-      "SourceMap",
-      "Strict-Transport-Security",
-      "TE",
-      "Timing-Allow-Origin",
-      "Tk",
-      "Trailer",
-      "Transfer-Encoding",
-      "Upgrade",
-      "User-Agent",
-      "Vary",
-      "Via",
-      "Viewport-Width",
-      "Warning",
-      "Width",
-      "WWW-Authenticate",
-      "X-B3-Sampled",
-      "X-B3-SpanId",
-      "X-B3-TraceId",
-      "X-Content-Type-Options",
-      "X-DNS-Prefetch-Control",
-      "X-Download-Options",
-      "X-Forwarded-For",
-      "X-Forwarded-Host",
-      "X-Forwarded-Port",
-      "X-Forwarded-Proto",
-      "X-Forwarded-Scheme",
-      "X-Frame-Options",
-      "X-Permitted-Cross-Domain-Policies",
-      "X-Powered-By",
-      "X-Real-Ip",
-      "X-Request-Id",
-      "X-Request-Start",
-      "X-Runtime",
-      "X-Scheme",
-      "X-SourceMap",
-      "X-XSS-Protection",
-    ).map(CIString(_))
-  }
+  /** Adds the `http.response.header.<lowercase name>` `Attribute`s for all
+    * headers in `allowedHeaders` to the provided builder.
+    */
+  def httpResponseHeadersForBuilder(headers: Headers, allowedHeaders: Set[CIString])(
+      b: Attributes.Builder
+  ): b.type =
+    if (allowedHeaders.isEmpty) b
+    else genericHttpHeaders(headers, allowedHeaders, HttpAttributes.HttpResponseHeader)(b)
+
+  /** @return `http.response.header.<lowercase name>` `Attribute`s for
+    *          all headers in `allowedHeaders`
+    */
+  def httpResponseHeaders(headers: Headers, allowedHeaders: Set[CIString]): Attributes =
+    if (allowedHeaders.isEmpty) Attributes.empty
+    else httpResponseHeadersForBuilder(headers, allowedHeaders)(Attributes.newBuilder).result()
 }

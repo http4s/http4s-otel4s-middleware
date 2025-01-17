@@ -14,24 +14,10 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware.trace
+package org.http4s.otel4s.middleware
 
-/** Whether or not to trace something. */
-sealed trait ShouldTrace {
+package object redact {
 
-  /** Whether or not to trace something. */
-  def shouldTrace: Boolean
-}
-
-object ShouldTrace {
-
-  /** Trace the thing. */
-  case object Trace extends ShouldTrace {
-    def shouldTrace: Boolean = true
-  }
-
-  /** Do not trace the thing. */
-  case object DoNotTrace extends ShouldTrace {
-    def shouldTrace: Boolean = false
-  }
+  /** The string "REDACTED" */
+  final val REDACTED = "REDACTED"
 }

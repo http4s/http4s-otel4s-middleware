@@ -20,18 +20,24 @@ import cats.effect._
 import cats.effect.syntax.all._
 import com.comcast.ip4s._
 import fs2.io.net.Network
+import org.http4s.Query
+import org.http4s.Uri
+import org.http4s.Uri.Fragment
 import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
 import org.http4s.otel4s.middleware.metrics.OtelMetrics
-import org.http4s.otel4s.middleware.trace.client.ClientMiddleware
-import org.http4s.otel4s.middleware.trace.server.ServerMiddleware
+import org.http4s.otel4s.middleware.redact
+import org.http4s.otel4s.middleware.trace.client.ClientMiddlewareBuilder
+import org.http4s.otel4s.middleware.trace.client.UriRedactor
+import org.http4s.otel4s.middleware.trace.server.ServerMiddlewareBuilder
 import org.http4s.server.Server
 import org.http4s.server.middleware.Metrics
 import org.typelevel.otel4s.Otel4s
-import org.typelevel.otel4s.metrics.Meter
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.oteljava.OtelJava
 import org.typelevel.otel4s.trace.Tracer
+import org.typelevel.otel4s.trace.TracerProvider
 
 /** Start up Jaeger thus:
   *
@@ -51,23 +57,38 @@ import org.typelevel.otel4s.trace.Tracer
   */
 object Http4sExample extends IOApp with Common {
 
+  // you probably want to be a bit more permissive than this
+  val redactor: UriRedactor = new UriRedactor {
+    def redactPath(path: Uri.Path): Uri.Path =
+      if (path.isEmpty) path
+      else Uri.Path.Root / redact.REDACTED
+
+    def redactQuery(query: Query): Query =
+      if (query.isEmpty) query
+      else Query(redact.REDACTED -> None)
+
+    def redactFragment(fragment: Fragment): Option[Fragment] =
+      Some(if (fragment.isEmpty) fragment else redact.REDACTED)
+  }
+
   def tracer[F[_]](otel: Otel4s[F]): F[Tracer[F]] =
     otel.tracerProvider.tracer("Http4sExample").get
 
-  def meter[F[_]](otel: Otel4s[F]): F[Meter[F]] =
-    otel.meterProvider.meter("Http4sExample").get
-
   // Our main app resource
-  def server[F[_]: Async: Network: Tracer: Meter]: Resource[F, Server] =
+  def server[F[_]: Async: Network: TracerProvider: Tracer: MeterProvider]: Resource[F, Server] =
     for {
+      clientMiddleware <- ClientMiddlewareBuilder.default(redactor).build.toResource
       client <- EmberClientBuilder
         .default[F]
         .build
-        .map(ClientMiddleware.default.build)
+        .map(clientMiddleware)
       metricsOps <- OtelMetrics.serverMetricsOps[F]().toResource
-      app = ServerMiddleware.default[F].buildHttpApp {
-        Metrics(metricsOps)(routes(client)).orNotFound
-      }
+      app <- ServerMiddlewareBuilder
+        .default[F](redactor)
+        .buildHttpApp {
+          Metrics(metricsOps)(routes(client)).orNotFound
+        }
+        .toResource
       sv <- EmberServerBuilder.default[F].withPort(port"8080").withHttpApp(app).build
     } yield sv
 
@@ -76,10 +97,10 @@ object Http4sExample extends IOApp with Common {
     OtelJava
       .autoConfigured[IO]()
       .flatMap { otel4s =>
+        implicit val TP: TracerProvider[IO] = otel4s.tracerProvider
+        implicit val MP: MeterProvider[IO] = otel4s.meterProvider
         Resource.eval(tracer(otel4s)).flatMap { implicit T: Tracer[IO] =>
-          Resource.eval(meter(otel4s)).flatMap { implicit M: Meter[IO] =>
-            server[IO]
-          }
+          server[IO]
         }
       }
       .use(_ => IO.never)
