@@ -30,13 +30,14 @@ import fs2.Stream
 import org.typelevel.otel4s.KindTransformer
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
+import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
 
 /** Middleware builder for wrapping an http4s `Server` to add tracing.
   *
   * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server]]
   */
-class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
+class ServerMiddlewareBuilder[F[_]: MonadCancelThrow] private (
     redactor: PathAndQueryRedactor, // cannot safely have default value
     spanDataProvider: SpanDataProvider,
     routeClassifier: RouteClassifier,
@@ -91,13 +92,33 @@ class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
     */
   def buildGenericTracedHttp[G[_]: MonadCancelThrow](
       f: Http[G, F]
-  )(implicit kt: KindTransformer[F, G]): F[Http[G, F]] =
-    for {
-      tracerF <- TracerProvider[F]
-        .tracer("org.http4s.otel4s.middleware.server")
-        .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
-        .get
-    } yield Kleisli { (req: Request[F]) =>
+  )(implicit kt: KindTransformer[F, G], tracerProvider: TracerProvider[F]): F[Http[G, F]] =
+    tracerProvider
+      .tracer("org.http4s.otel4s.middleware.server")
+      .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
+      .get
+      .map(implicit tracer => buildGenericTracedHttpForTracer[G](f))
+
+  /** @return a configured middleware for `HttpApp` */
+  def buildHttpApp(f: HttpApp[F])(implicit tracerProvider: TracerProvider[F]): F[HttpApp[F]] =
+    buildGenericTracedHttp(f)
+
+  /** @return a configured middleware for `HttpRoutes` */
+  def buildHttpRoutes(f: HttpRoutes[F])(implicit tracerProvider: TracerProvider[F]): F[HttpRoutes[F]] =
+    buildGenericTracedHttp(f)
+
+  /** Returns a middleware in a way that abstracts over
+    * [[org.http4s.HttpApp `HttpApp`]] and
+    * [[org.http4s.HttpRoutes `HttpRoutes`]]. In most cases, it is preferable
+    * to use the methods that directly build the specific desired type.
+    *
+    * @see [[buildHttpAppForTracer]]
+    * @see [[buildHttpRoutesForTracer]]
+    */
+  def buildGenericTracedHttpForTracer[G[_]: MonadCancelThrow](
+      f: Http[G, F]
+  )(implicit kt: KindTransformer[F, G], tracerF: Tracer[F]): Http[G, F] =
+    Kleisli { (req: Request[F]) =>
       if (
         !perRequestTracingFilter(req.requestPrelude).isEnabled ||
         !tracerF.meta.isEnabled
@@ -151,18 +172,18 @@ class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
     }
 
   /** @return a configured middleware for `HttpApp` */
-  def buildHttpApp(f: HttpApp[F]): F[HttpApp[F]] =
-    buildGenericTracedHttp(f)
+  def buildHttpAppForTracer(f: HttpApp[F])(implicit tracerF: Tracer[F]): HttpApp[F] =
+    buildGenericTracedHttpForTracer(f)
 
   /** @return a configured middleware for `HttpRoutes` */
-  def buildHttpRoutes(f: HttpRoutes[F]): F[HttpRoutes[F]] =
-    buildGenericTracedHttp(f)
+  def buildHttpRoutesForTracer(f: HttpRoutes[F])(implicit tracerF: Tracer[F]): HttpRoutes[F] =
+    buildGenericTracedHttpForTracer(f)
 }
 
 object ServerMiddlewareBuilder {
 
   /** @return a server middleware builder with default configuration */
-  def default[F[_]: TracerProvider: MonadCancelThrow](
+  def default[F[_]: MonadCancelThrow](
       redactor: PathAndQueryRedactor
   ): ServerMiddlewareBuilder[F] =
     new ServerMiddlewareBuilder[F](
