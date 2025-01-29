@@ -21,6 +21,8 @@ package trace.server
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attributes
 
+import scala.collection.immutable.ArraySeq
+
 /** Provides attributes for spans using requests and responses.
   *
   * It is RECOMMENDED that callers pass `Request`s and `Response`s that have
@@ -63,40 +65,50 @@ trait AttributeProvider { self =>
   /** @return an `AttributeProvider` that provides the attributes from this and
     *         another `AttributeProvider`
     */
-  def and(that: AttributeProvider): AttributeProvider =
-    new AttributeProvider {
+  def and(that: AttributeProvider): AttributeProvider = that match {
+    case AttributeProvider.Multi(providers) =>
+      AttributeProvider.Multi(this +: providers)
+    case _ => AttributeProvider.Multi(ArraySeq(this, that))
+  }
+}
+
+object AttributeProvider {
+
+  private[server] trait Multi extends AttributeProvider {
+    protected def providers: Seq[AttributeProvider]
+  }
+
+  private[server] object Multi {
+    private[this] final class Impl(protected val providers: Seq[AttributeProvider]) extends Multi {
       def requestAttributes[F[_]](
           request: Request[F],
           routeClassifier: RouteClassifier,
           redactor: PathAndQueryRedactor,
           headersAllowedAsAttributes: Set[CIString],
       ): Attributes =
-        self.requestAttributes(
-          request,
-          routeClassifier,
-          redactor,
-          headersAllowedAsAttributes,
-        ) ++
-          that.requestAttributes(
-            request,
-            routeClassifier,
-            redactor,
-            headersAllowedAsAttributes,
-          )
-
+        providers.foldLeft(Attributes.empty)(
+          _ ++ _.requestAttributes(request, routeClassifier, redactor, headersAllowedAsAttributes)
+        )
       def responseAttributes[F[_]](
           response: Response[F],
           headersAllowedAsAttributes: Set[CIString],
       ): Attributes =
-        self.responseAttributes(response, headersAllowedAsAttributes) ++
-          that.responseAttributes(response, headersAllowedAsAttributes)
-
+        providers.foldLeft(Attributes.empty)(
+          _ ++ _.responseAttributes(response, headersAllowedAsAttributes)
+        )
       def exceptionAttributes(cause: Throwable): Attributes =
-        self.exceptionAttributes(cause) ++ that.exceptionAttributes(cause)
-    }
-}
+        providers.foldLeft(Attributes.empty)(_ ++ _.exceptionAttributes(cause))
 
-object AttributeProvider {
+      override def and(that: AttributeProvider): AttributeProvider = that match {
+        case Multi(ps) => new Impl(providers ++ ps)
+        case _ => new Impl(providers :+ that)
+      }
+    }
+
+    def apply(providers: Seq[AttributeProvider]): Multi = new Impl(providers)
+
+    def unapply(multi: Multi): Some[Seq[AttributeProvider]] = Some(multi.providers)
+  }
 
   /** Provides an `Attribute` containing this middleware's version. */
   val middlewareVersion: AttributeProvider =
@@ -105,11 +117,11 @@ object AttributeProvider {
           request: Request[F],
           routeClassifier: RouteClassifier,
           redactor: PathAndQueryRedactor,
-          headersAllowedAsAttributes: Set[AuthScheme],
+          headersAllowedAsAttributes: Set[CIString],
       ): Attributes = Attributes(TypedAttributes.middlewareVersion)
       def responseAttributes[F[_]](
           response: Response[F],
-          headersAllowedAsAttributes: Set[AuthScheme],
+          headersAllowedAsAttributes: Set[CIString],
       ): Attributes = Attributes.empty
       def exceptionAttributes(cause: Throwable): Attributes =
         Attributes.empty

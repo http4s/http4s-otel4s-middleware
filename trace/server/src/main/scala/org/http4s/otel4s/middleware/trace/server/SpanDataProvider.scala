@@ -23,6 +23,8 @@ import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 
+import scala.collection.immutable.ArraySeq
+
 /** Provides a name and attributes for spans using requests and responses.
   *
   * It is RECOMMENDED that callers pass `Request`s and `Response`s that have
@@ -94,65 +96,72 @@ trait SpanDataProvider extends AttributeProvider { self =>
       headersAllowedAsAttributes,
     )
 
-  /** Returns an `AttributeProvider` that provides the attributes from this and
-    * another `AttributeProvider`.
+  /** Returns a `SpanDataProvider` that provides the attributes from this and
+    * another [[`AttributeProvider`]].
     *
-    * If `that` is a `SpanAndAttributeProvider`, it will not be used to provide
+    * If `that` is a `SpanDataProvider`, it will not be used to provide
     * span names.
     */
-  override def and(that: AttributeProvider): SpanDataProvider =
-    new SpanDataProvider {
-      type Shared = self.Shared
-
-      def processSharedData[F[_]](
-          request: Request[F],
-          routeClassifier: RouteClassifier,
-          redactor: PathAndQueryRedactor,
-      ): Shared =
-        self.processSharedData(request, routeClassifier, redactor)
-
-      def spanName[F[_]](
-          request: Request[F],
-          routeClassifier: RouteClassifier,
-          redactor: PathAndQueryRedactor,
-          sharedProcessedData: Shared,
-      ): String =
-        self.spanName(request, routeClassifier, redactor, sharedProcessedData)
-
-      def requestAttributes[F[_]](
-          request: Request[F],
-          routeClassifier: RouteClassifier,
-          redactor: PathAndQueryRedactor,
-          sharedProcessedData: Shared,
-          headersAllowedAsAttributes: Set[CIString],
-      ): Attributes =
-        self.requestAttributes(
-          request,
-          routeClassifier,
-          redactor,
-          sharedProcessedData,
-          headersAllowedAsAttributes,
-        ) ++
-          that.requestAttributes(
-            request,
-            routeClassifier,
-            redactor,
-            headersAllowedAsAttributes,
-          )
-
-      def responseAttributes[F[_]](
-          response: Response[F],
-          headersAllowedAsAttributes: Set[CIString],
-      ): Attributes =
-        self.responseAttributes(response, headersAllowedAsAttributes) ++
-          that.responseAttributes(response, headersAllowedAsAttributes)
-
-      def exceptionAttributes(cause: Throwable): Attributes =
-        self.exceptionAttributes(cause) ++ that.exceptionAttributes(cause)
-    }
+  override def and(that: AttributeProvider): SpanDataProvider = that match {
+    case AttributeProvider.Multi(providers) =>
+      SpanDataProvider.Multi(this, providers)
+    case _ => SpanDataProvider.Multi(this, ArraySeq(that))
+  }
 }
 
 object SpanDataProvider {
+
+  // it is crucial that `primary` is never an instance of `Multi`
+  private final case class Multi(primary: SpanDataProvider, others: Seq[AttributeProvider])
+      extends SpanDataProvider
+      with AttributeProvider.Multi {
+    type Shared = primary.Shared
+    protected def providers: Seq[AttributeProvider] = primary +: others
+    def processSharedData[F[_]](
+        request: Request[F],
+        routeClassifier: RouteClassifier,
+        redactor: PathAndQueryRedactor,
+    ): Shared = primary.processSharedData(request, routeClassifier, redactor)
+    def spanName[F[_]](
+        request: Request[F],
+        routeClassifier: RouteClassifier,
+        redactor: PathAndQueryRedactor,
+        sharedProcessedData: Shared,
+    ): String = primary.spanName(request, routeClassifier, redactor, sharedProcessedData)
+    def requestAttributes[F[_]](
+        request: Request[F],
+        routeClassifier: RouteClassifier,
+        redactor: PathAndQueryRedactor,
+        sharedProcessedData: Shared,
+        headersAllowedAsAttributes: Set[CIString],
+    ): Attributes =
+      others.foldLeft(
+        primary
+          .requestAttributes(
+            request,
+            routeClassifier,
+            redactor,
+            sharedProcessedData,
+            headersAllowedAsAttributes,
+          )
+      )(_ ++ _.requestAttributes(request, routeClassifier, redactor, headersAllowedAsAttributes))
+    def responseAttributes[F[_]](
+        response: Response[F],
+        headersAllowedAsAttributes: Set[CIString],
+    ): Attributes =
+      others.foldLeft(primary.responseAttributes(response, headersAllowedAsAttributes))(
+        _ ++ _.responseAttributes(response, headersAllowedAsAttributes)
+      )
+    def exceptionAttributes(cause: Throwable): Attributes =
+      others.foldLeft(primary.exceptionAttributes(cause))(
+        _ ++ _.exceptionAttributes(cause)
+      )
+
+    override def and(that: AttributeProvider): SpanDataProvider = that match {
+      case AttributeProvider.Multi(providers) => copy(others = others ++ providers)
+      case _ => copy(others = others :+ that)
+    }
+  }
 
   /** A `SpanAndAttributeProvider` following OpenTelemetry semantic conventions. */
   val openTelemetry: SpanDataProvider = {
