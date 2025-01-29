@@ -43,8 +43,8 @@ import org.typelevel.otel4s.trace.TracerProvider
 import scala.concurrent.duration.Duration
 import scala.util.control.NoStackTrace
 
-class ClientMiddlewareTests extends CatsEffectSuite {
-  import ClientMiddlewareTests.MinimalRedactor
+class ClientMiddlewareTest extends CatsEffectSuite {
+  import ClientMiddlewareTest.MinimalRedactor
 
   private val spanLimits = SpanLimits.default
 
@@ -474,6 +474,6 @@ class ClientMiddlewareTests extends CatsEffectSuite {
   }
 }
 
-object ClientMiddlewareTests {
+object ClientMiddlewareTest {
   object MinimalRedactor extends UriRedactor.OnlyRedactUserInfo
 }
