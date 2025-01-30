@@ -17,7 +17,6 @@
 package org.http4s
 package otel4s.middleware.trace.server
 
-import cats.effect.IO
 import com.comcast.ip4s.IpAddress
 import com.comcast.ip4s.Ipv4Address
 import com.comcast.ip4s.Ipv6Address
@@ -25,7 +24,6 @@ import com.comcast.ip4s.Port
 import com.comcast.ip4s.SocketAddress
 import munit.FunSuite
 import munit.Location
-import org.http4s.dsl.Http4sDsl
 import org.http4s.headers.Forwarded
 import org.http4s.otel4s.middleware.redact
 import org.http4s.syntax.literals._
@@ -143,48 +141,17 @@ class TypedServerAttributesTest extends FunSuite {
   }
 
   test("httpRoute") {
-    val classifier = locally {
-      val http4sDsl = Http4sDsl[IO]
-      import http4sDsl._
-      RouteClassifier.of[IO] {
-        case POST -> Root / "users" => "/users"
-        case (GET | PUT) -> Root / "users" / UUIDVar(_) / "profile" =>
-          "/users/{userId}/profile"
-        case (HEAD | DELETE) -> Root / "users" / UUIDVar(_) =>
-          "/users/{userId}"
-      }
-    }
+    // this is a terrible classifier, but it's just for testing that it gets used
+    val classifier: RouteClassifier =
+      req => Option.when(req.method == Method.GET)(req.uri.path.renderString)
     def check(method: Method, uri: Uri, expected: Option[String]): Unit =
       checkOpt(
         _.httpRoute(Request(method, uri), classifier),
         expected.map(Attribute("http.route", _)),
       )
 
-    check(Method.POST, uri"/users", Some("/users"))
-    check(Method.POST, uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87", None)
-    check(Method.POST, uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87/profile", None)
-    check(
-      Method.GET,
-      uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87/profile?foo=bar",
-      Some("/users/{userId}/profile"),
-    )
-    check(Method.GET, uri"/users/not-a-uuid/profile", None)
-    check(Method.GET, uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87", None)
-    check(
-      Method.PUT,
-      uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87/profile",
-      Some("/users/{userId}/profile"),
-    )
-    check(Method.PUT, uri"/users/not-a-uuid/profile", None)
-    check(Method.PUT, uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87", None)
-    check(Method.HEAD, uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87", Some("/users/{userId}"))
-    check(Method.HEAD, uri"/users/not-a-uuid", None)
-    check(Method.HEAD, uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87/profile", None)
-    check(Method.HEAD, uri"/users", None)
-    check(Method.DELETE, uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87", Some("/users/{userId}"))
-    check(Method.DELETE, uri"/users/not-a-uuid", None)
-    check(Method.DELETE, uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87/profile", None)
-    check(Method.DELETE, uri"/users", None)
+    check(Method.GET, uri"/test", Some("/test"))
+    check(Method.POST, uri"/test", None)
   }
 
   test("serverAddressAndPort") {

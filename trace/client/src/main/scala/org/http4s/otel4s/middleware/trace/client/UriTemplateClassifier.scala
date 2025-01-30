@@ -17,6 +17,8 @@
 package org.http4s
 package otel4s.middleware.trace.client
 
+import scala.collection.immutable.ArraySeq
+
 /** Determines the template of an
   * [[https://www.rfc-editor.org/rfc/rfc3986#section-4.2 absolute path reference]]
   * from a URI.
@@ -29,10 +31,38 @@ package otel4s.middleware.trace.client
   *       for more information.
   */
 trait UriTemplateClassifier {
+
+  /** Determines the template of an absolute path reference from a URI.
+    * A value of `None` indicates that the template could not be determined.
+    */
   def classify(url: Uri): Option[String]
+
+  /** @return a classifier which attempts to determine the template of a URI
+    *         first using `this`, and then using `that` if `this.classify`
+    *         returns `None`
+    */
+  def orElse(that: UriTemplateClassifier): UriTemplateClassifier = that match {
+    case UriTemplateClassifier.Multi(classifiers) =>
+      UriTemplateClassifier.Multi(this +: classifiers)
+    case _ => UriTemplateClassifier.Multi(ArraySeq(this, that))
+  }
 }
 
 object UriTemplateClassifier {
+
+  private final case class Multi(classifiers: Seq[UriTemplateClassifier])
+      extends UriTemplateClassifier {
+    def classify(url: Uri): Option[String] =
+      classifiers.view
+        .map(_.classify(url))
+        .find(_.isDefined)
+        .flatten
+
+    override def orElse(that: UriTemplateClassifier): UriTemplateClassifier = that match {
+      case Multi(cs) => Multi(classifiers ++ cs)
+      case _ => Multi(classifiers :+ that)
+    }
+  }
 
   /** A classifier that does not classify any URI templates. */
   val indeterminate: UriTemplateClassifier = _ => None

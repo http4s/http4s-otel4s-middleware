@@ -91,6 +91,7 @@ class ClientMiddlewareBuilder[F[_]: TracerProvider: Concurrent] private (
       tracer <- TracerProvider[F]
         .tracer("org.http4s.otel4s.middleware.client")
         .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
+        .withSchemaUrl("https://opentelemetry.io/schemas/1.29.0")
         .get
     } yield (client: Client[F]) =>
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]

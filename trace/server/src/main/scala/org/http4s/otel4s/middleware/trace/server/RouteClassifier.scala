@@ -17,6 +17,8 @@
 package org.http4s
 package otel4s.middleware.trace.server
 
+import scala.collection.immutable.ArraySeq
+
 /** Determines the route within the application from a request.
   *
   * @note This trait is used to provide the value for the `http.route`
@@ -37,9 +39,32 @@ trait RouteClassifier {
     * A value of `None` indicates that the route could not be determined.
     */
   def classify(request: RequestPrelude): Option[String]
+
+  /** @return a classifier which attempts to determine the route of an
+    *          application first using `this`, and then using `that` if
+    *          `this.classify` returns `None`
+    */
+  def orElse(that: RouteClassifier): RouteClassifier = that match {
+    case RouteClassifier.Multi(classifiers) =>
+      RouteClassifier.Multi(this +: classifiers)
+    case _ => RouteClassifier.Multi(ArraySeq(this, that))
+  }
 }
 
 object RouteClassifier {
+
+  private final case class Multi(classifiers: Seq[RouteClassifier]) extends RouteClassifier {
+    def classify(request: RequestPrelude): Option[String] =
+      classifiers.view
+        .map(_.classify(request))
+        .find(_.isDefined)
+        .flatten
+
+    override def orElse(that: RouteClassifier): RouteClassifier = that match {
+      case Multi(cs) => Multi(classifiers ++ cs)
+      case _ => Multi(classifiers :+ that)
+    }
+  }
 
   /** A classifier that is never able to classify any routes. */
   val indeterminate: RouteClassifier = _ => None
