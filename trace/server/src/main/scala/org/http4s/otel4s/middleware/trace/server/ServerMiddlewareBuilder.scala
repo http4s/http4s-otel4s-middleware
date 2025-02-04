@@ -96,6 +96,7 @@ class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
       tracerF <- TracerProvider[F]
         .tracer("org.http4s.otel4s.middleware.server")
         .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
+        .withSchemaUrl("https://opentelemetry.io/schemas/1.29.0")
         .get
     } yield Kleisli { (req: Request[F]) =>
       if (

@@ -23,12 +23,13 @@ import org.http4s._
 import org.http4s.client.Client
 import org.http4s.dsl.Http4sDsl
 import org.http4s.implicits._
+import org.http4s.otel4s.middleware.trace.server.RouteClassifier
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.trace.Tracer
 
 trait Common {
 
-  // A dumb subroutine that does some tracing
+  // A trivial subroutine that does some tracing
   def greet[F[_]: Monad: Tracer](input: String): F[String] =
     Tracer[F].span("greet").use { span =>
       for {
@@ -36,11 +37,12 @@ trait Common {
       } yield s"Hello $input!\n"
     }
 
-  // Our routes, in abstract F with a Trace constraint.
+  // Our routes, in abstract F with a Tracer constraint.
   def routes[F[_]: Tracer: Concurrent](client: Client[F]): HttpRoutes[F] = {
-    object dsl extends Http4sDsl[F]; import dsl._ // bleh
-    HttpRoutes.of[F] {
+    val dsl = new Http4sDsl[F] {}
+    import dsl._
 
+    HttpRoutes.of[F] {
       case GET -> Root / "hello" / name =>
         for {
           str <- greet[F](name)
@@ -54,8 +56,22 @@ trait Common {
         client.toHttpApp.run(Request[F](Method.GET, uri"http://localhost:8080/client/hello" / name))
       case GET -> Root / "fail" =>
         Concurrent[F].raiseError(new RuntimeException("💥 Boom!"))
-
     }
   }
 
+  def routeClassifier[F[_]]: RouteClassifier = {
+    val dsl = new Http4sDsl[F] {}
+    import dsl._
+
+    RouteClassifier.of[F] {
+      case GET -> Root / "hello" / _ =>
+        "/hello/{name}"
+      case GET -> Root / "client" / "hello" / _ =>
+        "/client/hello/{name}"
+      case GET -> Root / "client" / "proxy" / "hello" / _ =>
+        "/client/proxy/hello/{name}"
+      case GET -> Root / "fail" =>
+        "/fail"
+    }
+  }
 }

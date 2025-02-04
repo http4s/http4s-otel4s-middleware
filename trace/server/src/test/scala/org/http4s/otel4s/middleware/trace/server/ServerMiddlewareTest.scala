@@ -40,8 +40,8 @@ import org.typelevel.otel4s.trace.TracerProvider
 import scala.concurrent.duration.Duration
 import scala.util.control.NoStackTrace
 
-class ServerMiddlewareTests extends CatsEffectSuite {
-  import ServerMiddlewareTests.NoopRedactor
+class ServerMiddlewareTest extends CatsEffectSuite {
+  import ServerMiddlewareTest.NoopRedactor
 
   private val spanLimits = SpanLimits.default
 
@@ -251,6 +251,6 @@ class ServerMiddlewareTests extends CatsEffectSuite {
   }
 }
 
-object ServerMiddlewareTests {
+object ServerMiddlewareTest {
   object NoopRedactor extends PathRedactor.NeverRedact with QueryRedactor.NeverRedact
 }

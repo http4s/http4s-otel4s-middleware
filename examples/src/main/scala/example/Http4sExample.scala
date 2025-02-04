@@ -85,6 +85,7 @@ object Http4sExample extends IOApp with Common {
       metricsOps <- OtelMetrics.serverMetricsOps[F]().toResource
       app <- ServerMiddlewareBuilder
         .default[F](redactor)
+        .withRouteClassifier(routeClassifier)
         .buildHttpApp {
           Metrics(metricsOps)(routes(client)).orNotFound
         }
