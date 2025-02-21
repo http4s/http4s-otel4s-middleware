@@ -16,11 +16,8 @@
 
 package org.http4s.otel4s.middleware.trace
 
-import org.http4s.otel4s.middleware.trace.redact.PathRedactor
-import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
+package object redact {
 
-package object server {
-
-  /** Redacts the path and query of a request. */
-  type PathAndQueryRedactor = PathRedactor with QueryRedactor
+  /** The string "REDACTED" */
+  final val REDACTED = "REDACTED"
 }

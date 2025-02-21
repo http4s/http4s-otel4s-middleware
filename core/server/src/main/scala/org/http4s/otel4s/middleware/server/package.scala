@@ -14,13 +14,20 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware.trace
+package org.http4s.otel4s.middleware
 
-import org.http4s.otel4s.middleware.trace.redact.PathRedactor
-import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
+import org.http4s.headers.Forwarded
 
 package object server {
 
-  /** Redacts the path and query of a request. */
-  type PathAndQueryRedactor = PathRedactor with QueryRedactor
+  /** @return the first value of a particular directive for the `Forwarded`
+    *         header, if present
+    */
+  private[middleware] def findFirstInForwarded[A](
+      forwarded: Forwarded,
+      directive: Forwarded.Element => Option[A],
+  ): Option[A] =
+    forwarded.values.toList
+      .flatMap(directive)
+      .headOption
 }

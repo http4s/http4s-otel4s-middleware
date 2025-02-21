@@ -14,13 +14,23 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware.trace
+package org.http4s
+package otel4s.middleware.trace.redact
 
-import org.http4s.otel4s.middleware.trace.redact.PathRedactor
-import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
+import munit.FunSuite
+import munit.Location
 
-package object server {
+class QueryRedactorTest extends FunSuite {
+  test("QueryRedactor.NeverRedact") {
+    val redactor = new QueryRedactor.NeverRedact {}
 
-  /** Redacts the path and query of a request. */
-  type PathAndQueryRedactor = PathRedactor with QueryRedactor
+    def check(query: Query)(implicit loc: Location): Unit =
+      assertEquals(redactor.redactQuery(query), query)
+
+    check(Query.empty)
+    check(Query.blank)
+    check(Query("foo" -> None, "bar" -> None))
+    check(Query("empty" -> None, "foo" -> Some("bar"), "baz" -> Some("qux")))
+    check(Query("foo" -> Some("1"), "foo" -> Some("2")))
+  }
 }

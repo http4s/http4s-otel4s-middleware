@@ -16,10 +16,11 @@
 
 package org.http4s
 package otel4s.middleware
-package trace.client
+package trace
+package client
 
-import org.http4s.otel4s.middleware.redact.PathRedactor
-import org.http4s.otel4s.middleware.redact.QueryRedactor
+import org.http4s.otel4s.middleware.trace.redact.PathRedactor
+import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 
 /** Redacts URIs to remove sensitive information. */
 trait UriRedactor extends PathRedactor with QueryRedactor {

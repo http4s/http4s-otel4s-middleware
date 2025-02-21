@@ -24,8 +24,8 @@ import cats.effect.testkit.TestControl
 import cats.syntax.flatMap._
 import munit.CatsEffectSuite
 import org.http4s.client.Client
+import org.http4s.otel4s.middleware.trace.redact.HeaderRedactor
 import org.http4s.syntax.literals._
-import org.typelevel.ci.CIString
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
@@ -55,15 +55,19 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         for {
           clientMiddleware <- {
             implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-            ClientMiddlewareBuilder
-              .default[IO](MinimalRedactor)
-              .withHeadersAllowedAsAttributes(
-                HeadersAllowedAsAttributes(
-                  request = Set(ci"foo"),
-                  response = Set(ci"baz"),
+            ClientMiddlewareBuilder(
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(
+                  HeaderRedactor(Set(ci"foo"), HeaderRedactor.Behavior.Elide)
                 )
-              )
-              .build
+                .optIntoHttpResponseHeaders(
+                  HeaderRedactor(Set(ci"baz"), HeaderRedactor.Behavior.Elide)
+                )
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+                .and(AttributeProvider.middlewareVersion)
+            ).build
           }
           _ <- {
             val headers =
@@ -118,7 +122,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         for {
           clientMiddleware <- {
             implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-            ClientMiddlewareBuilder.default[IO](MinimalRedactor).build
+            ClientMiddlewareBuilder(
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            ).build
           }
           tracerIO <- testkit.tracerProvider.get("tracer")
           _ <- {
@@ -148,34 +159,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
 
   test("ClientMiddleware allows overriding span name") {
     val provider: SpanDataProvider = new SpanDataProvider {
-      type Shared = None.type
-
-      def processSharedData[F[_]](
-          request: Request[F],
-          urlTemplateClassifier: UriTemplateClassifier,
-          urlRedactor: UriRedactor,
-      ): Shared = None
-
-      def spanName[F[_]](
-          request: Request[F],
-          urlTemplateClassifier: UriTemplateClassifier,
-          urlRedactor: UriRedactor,
-          sharedProcessedData: Shared,
-      ): String = "Overridden span name"
-
-      def requestAttributes[F[_]](
-          request: Request[F],
-          urlTemplateClassifier: UriTemplateClassifier,
-          urlRedactor: UriRedactor,
-          sharedProcessedData: Shared,
-          headersAllowedAsAttributes: Set[CIString],
-      ): Attributes = Attributes.empty
-
-      def responseAttributes[F[_]](
-          response: Response[F],
-          headersAllowedAsAttributes: Set[CIString],
-      ): Attributes = Attributes.empty
-
+      type Shared = Null
+      def processSharedData[F[_]](request: Request[F]): Null = null
+      def spanName[F[_]](request: Request[F], sharedProcessedData: Null): String =
+        "Overridden span name"
+      def requestAttributes[F[_]](request: Request[F], sharedProcessedData: Null): Attributes =
+        Attributes.empty
+      def responseAttributes[F[_]](response: Response[F]): Attributes =
+        Attributes.empty
       def exceptionAttributes(cause: Throwable): Attributes =
         Attributes.empty
     }
@@ -187,10 +178,16 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         for {
           clientMiddleware <- {
             implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-            ClientMiddlewareBuilder
-              .default[IO](MinimalRedactor)
-              .withSpanDataProvider(provider)
-              .build
+            ClientMiddlewareBuilder(
+              provider.and(
+                ClientSpanDataProvider
+                  .openTelemetry(MinimalRedactor)
+                  .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                  .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                  .optIntoUrlScheme
+                  .optIntoUserAgentOriginal
+              )
+            ).build
           }
           _ <- {
             val response = Response[IO](Status.Ok)
@@ -217,9 +214,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ClientMiddlewareBuilder
-            .default[IO](MinimalRedactor)
-            .build
+          ClientMiddlewareBuilder(
+            ClientSpanDataProvider
+              .openTelemetry(MinimalRedactor)
+              .optIntoHttpRequestHeaders(HeaderRedactor.default)
+              .optIntoHttpResponseHeaders(HeaderRedactor.default)
+              .optIntoUrlScheme
+              .optIntoUserAgentOriginal
+          ).build
             .flatMap { clientMiddleware =>
               val error = new RuntimeException("oops") with NoStackTrace {}
 
@@ -253,10 +255,6 @@ class ClientMiddlewareTest extends CatsEffectSuite {
                 Attribute("server.port", 80L),
                 Attribute("url.full", "http://localhost/"),
                 Attribute("url.scheme", "http"),
-                Attribute(
-                  "org.http4s.otel4s.middleware.version",
-                  org.http4s.otel4s.middleware.BuildInfo.version,
-                ),
               )
 
               for {
@@ -278,9 +276,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ClientMiddlewareBuilder
-            .default[IO](MinimalRedactor)
-            .build
+          ClientMiddlewareBuilder(
+            ClientSpanDataProvider
+              .openTelemetry(MinimalRedactor)
+              .optIntoHttpRequestHeaders(HeaderRedactor.default)
+              .optIntoHttpResponseHeaders(HeaderRedactor.default)
+              .optIntoUrlScheme
+              .optIntoUserAgentOriginal
+          ).build
             .flatMap { clientMiddleware =>
               val fakeClient = Client { (_: Request[IO]) =>
                 Resource.canceled[IO] >> Resource.never[IO, Response[IO]]
@@ -310,9 +313,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ClientMiddlewareBuilder
-            .default[IO](MinimalRedactor)
-            .build
+          ClientMiddlewareBuilder(
+            ClientSpanDataProvider
+              .openTelemetry(MinimalRedactor)
+              .optIntoHttpRequestHeaders(HeaderRedactor.default)
+              .optIntoHttpResponseHeaders(HeaderRedactor.default)
+              .optIntoUrlScheme
+              .optIntoUserAgentOriginal
+          ).build
             .flatMap { clientMiddleware =>
               val error = new RuntimeException("oops") with NoStackTrace {}
 
@@ -347,10 +355,6 @@ class ClientMiddlewareTest extends CatsEffectSuite {
                 Attribute("server.port", 80L),
                 Attribute("url.full", "http://localhost/"),
                 Attribute("url.scheme", "http"),
-                Attribute(
-                  "org.http4s.otel4s.middleware.version",
-                  org.http4s.otel4s.middleware.BuildInfo.version,
-                ),
               )
 
               for {
@@ -372,9 +376,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ClientMiddlewareBuilder
-            .default[IO](MinimalRedactor)
-            .build
+          ClientMiddlewareBuilder(
+            ClientSpanDataProvider
+              .openTelemetry(MinimalRedactor)
+              .optIntoHttpRequestHeaders(HeaderRedactor.default)
+              .optIntoHttpResponseHeaders(HeaderRedactor.default)
+              .optIntoUrlScheme
+              .optIntoUserAgentOriginal
+          ).build
             .flatMap { clientMiddleware =>
               val fakeClient =
                 Client.fromHttpApp[IO] {
@@ -405,9 +414,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ClientMiddlewareBuilder
-            .default[IO](MinimalRedactor)
-            .build
+          ClientMiddlewareBuilder(
+            ClientSpanDataProvider
+              .openTelemetry(MinimalRedactor)
+              .optIntoHttpRequestHeaders(HeaderRedactor.default)
+              .optIntoHttpResponseHeaders(HeaderRedactor.default)
+              .optIntoUrlScheme
+              .optIntoUserAgentOriginal
+          ).build
             .flatMap { clientMiddleware =>
               val fakeClient =
                 Client.fromHttpApp[IO] {
@@ -428,10 +442,6 @@ class ClientMiddlewareTest extends CatsEffectSuite {
                 Attribute("server.port", 80L),
                 Attribute("url.full", "http://localhost/"),
                 Attribute("url.scheme", "http"),
-                Attribute(
-                  "org.http4s.otel4s.middleware.version",
-                  org.http4s.otel4s.middleware.BuildInfo.version,
-                ),
               )
 
               for {
@@ -454,8 +464,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         for {
           clientMiddleware <- {
             implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-            ClientMiddlewareBuilder
-              .default[IO](MinimalRedactor)
+            ClientMiddlewareBuilder(
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            )
               .withPerRequestTracingFilter(PerRequestTracingFilter.neverTrace)
               .build
           }

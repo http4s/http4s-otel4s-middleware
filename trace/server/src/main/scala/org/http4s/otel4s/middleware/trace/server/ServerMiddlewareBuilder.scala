@@ -37,41 +37,16 @@ import org.typelevel.otel4s.trace.TracerProvider
   * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server]]
   */
 class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
-    redactor: PathAndQueryRedactor, // cannot safely have default value
     spanDataProvider: SpanDataProvider,
-    routeClassifier: RouteClassifier,
-    headersAllowedAsAttributes: HeadersAllowedAsAttributes,
     perRequestTracingFilter: PerRequestTracingFilter,
 ) {
-  private def copy(
-      spanDataProvider: SpanDataProvider = this.spanDataProvider,
-      routeClassifier: RouteClassifier = this.routeClassifier,
-      headersAllowedAsAttributes: HeadersAllowedAsAttributes = this.headersAllowedAsAttributes,
-      perRequestTracingFilter: PerRequestTracingFilter = this.perRequestTracingFilter,
+  private[this] def copy(
+      perRequestTracingFilter: PerRequestTracingFilter
   ): ServerMiddlewareBuilder[F] =
     new ServerMiddlewareBuilder[F](
-      this.redactor,
-      spanDataProvider,
-      routeClassifier,
-      headersAllowedAsAttributes,
+      this.spanDataProvider,
       perRequestTracingFilter,
     )
-
-  /** Sets how a span's name and `Attributes` are derived from a request and
-    * response.
-    */
-  def withSpanDataProvider(spanDataProvider: SpanDataProvider): ServerMiddlewareBuilder[F] =
-    copy(spanDataProvider = spanDataProvider)
-
-  /** Sets how to determine the route within the application from a request. */
-  def withRouteClassifier(routeClassifier: RouteClassifier): ServerMiddlewareBuilder[F] =
-    copy(routeClassifier = routeClassifier)
-
-  /** Sets which headers are allowed to be made into `Attribute`s. */
-  def withHeadersAllowedAsAttributes(
-      headersAllowedAsAttributes: HeadersAllowedAsAttributes
-  ): ServerMiddlewareBuilder[F] =
-    copy(headersAllowedAsAttributes = headersAllowedAsAttributes)
 
   /** Sets a filter that determines whether each request and its response
     * should be traced.
@@ -96,7 +71,7 @@ class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
       tracerF <- TracerProvider[F]
         .tracer("org.http4s.otel4s.middleware.server")
         .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
-        .withSchemaUrl("https://opentelemetry.io/schemas/1.29.0")
+        .withSchemaUrl("https://opentelemetry.io/schemas/1.30.0")
         .get
     } yield Kleisli { (req: Request[F]) =>
       if (
@@ -106,18 +81,9 @@ class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
         f(req)
       } else {
         val reqNoBody = req.withBodyStream(Stream.empty)
-        val shared =
-          spanDataProvider.processSharedData(reqNoBody, routeClassifier, redactor)
-        val spanName =
-          spanDataProvider.spanName(reqNoBody, routeClassifier, redactor, shared)
-        val reqAttributes =
-          spanDataProvider.requestAttributes(
-            reqNoBody,
-            routeClassifier,
-            redactor,
-            shared,
-            headersAllowedAsAttributes.request,
-          )
+        val shared = spanDataProvider.processSharedData(reqNoBody)
+        val spanName = spanDataProvider.spanName(reqNoBody, shared)
+        val reqAttributes = spanDataProvider.requestAttributes(reqNoBody, shared)
         MonadCancelThrow[G].uncancelable { poll =>
           val tracerG = tracerF.mapK[G]
           tracerG.joinOrRoot(req.headers) {
@@ -132,10 +98,7 @@ class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
                     case Outcome.Succeeded(fa) =>
                       fa.flatMap { resp =>
                         val respAttributes =
-                          spanDataProvider.responseAttributes(
-                            resp.withBodyStream(Stream.empty),
-                            headersAllowedAsAttributes.response,
-                          )
+                          spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
                         span.addAttributes(respAttributes) >> span
                           .setStatus(StatusCode.Error)
                           .unlessA(resp.status.isSuccess)
@@ -162,25 +125,11 @@ class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
 
 object ServerMiddlewareBuilder {
 
-  /** @return a server middleware builder with default configuration */
-  def default[F[_]: TracerProvider: MonadCancelThrow](
-      redactor: PathAndQueryRedactor
+  /** @return a server middleware builder that uses the given [[`SpanDataProvider`]]
+    * @see [[ServerSpanDataProvider]] for creating an OpenTelemetry-compliant provider
+    */
+  def apply[F[_]: TracerProvider: MonadCancelThrow](
+      spanDataProvider: SpanDataProvider
   ): ServerMiddlewareBuilder[F] =
-    new ServerMiddlewareBuilder[F](
-      redactor,
-      Defaults.spanDataProvider,
-      Defaults.routeClassifier,
-      Defaults.headersAllowedAsAttributes,
-      Defaults.perRequestTracingFilter,
-    )
-
-  /** The default configuration values for a server middleware builder. */
-  object Defaults {
-    def spanDataProvider: SpanDataProvider = SpanDataProvider.default
-    val routeClassifier: RouteClassifier = RouteClassifier.indeterminate
-    def headersAllowedAsAttributes: HeadersAllowedAsAttributes =
-      HeadersAllowedAsAttributes.default
-    def perRequestTracingFilter: PerRequestTracingFilter =
-      PerRequestTracingFilter.default
-  }
+    new ServerMiddlewareBuilder[F](spanDataProvider, PerRequestTracingFilter.default)
 }

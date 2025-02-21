@@ -14,13 +14,21 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware.trace
+package org.http4s
+package otel4s.middleware.trace.redact
 
-import org.http4s.otel4s.middleware.trace.redact.PathRedactor
-import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
+import munit.FunSuite
+import munit.Location
 
-package object server {
+class PathRedactorTest extends FunSuite {
+  test("PathRedactor.NeverRedact") {
+    val redactor = new PathRedactor.NeverRedact {}
 
-  /** Redacts the path and query of a request. */
-  type PathAndQueryRedactor = PathRedactor with QueryRedactor
+    def check(path: Uri.Path)(implicit loc: Location): Unit =
+      assertEquals(redactor.redactPath(path), path)
+
+    check(Uri.Path.empty)
+    check(Uri.Path.Root)
+    check(Uri.Path.Root / "foo" / "bar")
+  }
 }

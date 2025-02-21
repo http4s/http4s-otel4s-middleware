@@ -27,10 +27,13 @@ import org.http4s.ember.client.EmberClientBuilder
 import org.http4s.ember.server.EmberServerBuilder
 import org.http4s.implicits._
 import org.http4s.otel4s.middleware.metrics.OtelMetrics
-import org.http4s.otel4s.middleware.redact
 import org.http4s.otel4s.middleware.trace.client.ClientMiddlewareBuilder
+import org.http4s.otel4s.middleware.trace.client.ClientSpanDataProvider
 import org.http4s.otel4s.middleware.trace.client.UriRedactor
+import org.http4s.otel4s.middleware.trace.redact
+import org.http4s.otel4s.middleware.trace.redact.HeaderRedactor
 import org.http4s.otel4s.middleware.trace.server.ServerMiddlewareBuilder
+import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
 import org.http4s.server.Server
 import org.http4s.server.middleware.Metrics
 import org.typelevel.otel4s.Otel4s
@@ -77,19 +80,31 @@ object Http4sExample extends IOApp with Common {
   // Our main app resource
   def server[F[_]: Async: Network: TracerProvider: Tracer: MeterProvider]: Resource[F, Server] =
     for {
-      clientMiddleware <- ClientMiddlewareBuilder.default(redactor).build.toResource
+      clientMiddleware <- ClientMiddlewareBuilder(
+        ClientSpanDataProvider
+          .openTelemetry(redactor)
+          .withUrlTemplateClassifier(urlTemplateClassifier)
+          .optIntoHttpRequestHeaders(HeaderRedactor.default)
+          .optIntoHttpResponseHeaders(HeaderRedactor.default)
+          .optIntoUrlScheme
+          .optIntoUrlTemplate
+          .optIntoUserAgentOriginal
+      ).build.toResource
       client <- EmberClientBuilder
         .default[F]
         .build
         .map(clientMiddleware)
       metricsOps <- OtelMetrics.serverMetricsOps[F]().toResource
-      app <- ServerMiddlewareBuilder
-        .default[F](redactor)
-        .withRouteClassifier(routeClassifier)
-        .buildHttpApp {
-          Metrics(metricsOps)(routes(client)).orNotFound
-        }
-        .toResource
+      app <- ServerMiddlewareBuilder(
+        ServerSpanDataProvider
+          .openTelemetry(redactor)
+          .withRouteClassifier(routeClassifier)
+          .optIntoClientPort
+          .optIntoHttpRequestHeaders(HeaderRedactor.default)
+          .optIntoHttpResponseHeaders(HeaderRedactor.default)
+      ).buildHttpApp {
+        Metrics(metricsOps)(routes(client)).orNotFound
+      }.toResource
       sv <- EmberServerBuilder.default[F].withPort(port"8080").withHttpApp(app).build
     } yield sv
 
