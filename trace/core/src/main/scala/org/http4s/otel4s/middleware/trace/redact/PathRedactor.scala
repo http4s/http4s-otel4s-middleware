@@ -14,13 +14,22 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware.trace
+package org.http4s
+package otel4s.middleware.trace.redact
 
-import org.http4s.otel4s.middleware.trace.redact.PathRedactor
-import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
+/** Redacts a URI or request path. */
+trait PathRedactor {
 
-package object server {
+  /** @return a redacted URI or request path, or `Uri.Path.empty` if the entire
+    *         path is sensitive
+    */
+  def redactPath(path: Uri.Path): Uri.Path
+}
 
-  /** Redacts the path and query of a request. */
-  type PathAndQueryRedactor = PathRedactor with QueryRedactor
+object PathRedactor {
+
+  /** A `PathRedactor` that never redacts anything. */
+  trait NeverRedact extends PathRedactor {
+    def redactPath(path: Uri.Path): Uri.Path = path
+  }
 }

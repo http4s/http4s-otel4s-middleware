@@ -14,13 +14,22 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware.trace
+package org.http4s
+package otel4s.middleware.trace.redact
 
-import org.http4s.otel4s.middleware.trace.redact.PathRedactor
-import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
+/** Redacts a URI or request query. */
+trait QueryRedactor {
 
-package object server {
+  /** @return a redacted URI or request query, or `Query.empty` if the entire
+    *         query is sensitive
+    */
+  def redactQuery(query: Query): Query
+}
 
-  /** Redacts the path and query of a request. */
-  type PathAndQueryRedactor = PathRedactor with QueryRedactor
+object QueryRedactor {
+
+  /** A `QueryRedactor` that never redacts anything. */
+  trait NeverRedact extends QueryRedactor {
+    def redactQuery(query: Query): Query = query
+  }
 }

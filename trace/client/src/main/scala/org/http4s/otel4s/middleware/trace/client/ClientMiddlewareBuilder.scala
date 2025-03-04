@@ -37,45 +37,16 @@ import org.typelevel.otel4s.trace.TracerProvider
   * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client]]
   */
 class ClientMiddlewareBuilder[F[_]: TracerProvider: Concurrent] private (
-    urlRedactor: UriRedactor,
     spanDataProvider: SpanDataProvider,
-    urlTemplateClassifier: UriTemplateClassifier,
-    headersAllowedAsAttributes: HeadersAllowedAsAttributes,
     perRequestTracingFilter: PerRequestTracingFilter,
 ) {
   private[this] def copy(
-      spanDataProvider: SpanDataProvider = this.spanDataProvider,
-      urlTemplateClassifier: UriTemplateClassifier = this.urlTemplateClassifier,
-      headersAllowedAsAttributes: HeadersAllowedAsAttributes = this.headersAllowedAsAttributes,
-      perRequestTracingFilter: PerRequestTracingFilter = this.perRequestTracingFilter,
+      perRequestTracingFilter: PerRequestTracingFilter
   ): ClientMiddlewareBuilder[F] =
     new ClientMiddlewareBuilder[F](
-      this.urlRedactor,
-      spanDataProvider,
-      urlTemplateClassifier,
-      headersAllowedAsAttributes,
+      this.spanDataProvider,
       perRequestTracingFilter,
     )
-
-  /** Sets how a span's name and `Attributes` are derived from a request and
-    * response.
-    */
-  def withSpanDataProvider(spanDataProvider: SpanDataProvider): ClientMiddlewareBuilder[F] =
-    copy(spanDataProvider = spanDataProvider)
-
-  /** Sets how to determine the template of an absolute path reference from a
-    * URL.
-    */
-  def withUrlTemplateClassifier(
-      urlTemplateClassifier: UriTemplateClassifier
-  ): ClientMiddlewareBuilder[F] =
-    copy(urlTemplateClassifier = urlTemplateClassifier)
-
-  /** Sets which headers are allowed to be made into `Attribute`s. */
-  def withHeadersAllowedAsAttributes(
-      headersAllowedAsAttributes: HeadersAllowedAsAttributes
-  ): ClientMiddlewareBuilder[F] =
-    copy(headersAllowedAsAttributes = headersAllowedAsAttributes)
 
   /** Sets a filter that determines whether each request and its response
     * should be traced.
@@ -91,7 +62,7 @@ class ClientMiddlewareBuilder[F[_]: TracerProvider: Concurrent] private (
       tracer <- TracerProvider[F]
         .tracer("org.http4s.otel4s.middleware.client")
         .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
-        .withSchemaUrl("https://opentelemetry.io/schemas/1.29.0")
+        .withSchemaUrl("https://opentelemetry.io/schemas/1.30.0")
         .get
     } yield (client: Client[F]) =>
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
@@ -102,27 +73,9 @@ class ClientMiddlewareBuilder[F[_]: TracerProvider: Concurrent] private (
           client.run(req)
         } else {
           val reqNoBody = req.withBodyStream(Stream.empty)
-          val shared =
-            spanDataProvider.processSharedData(
-              reqNoBody,
-              urlTemplateClassifier,
-              urlRedactor,
-            )
-          val spanName =
-            spanDataProvider.spanName(
-              reqNoBody,
-              urlTemplateClassifier,
-              urlRedactor,
-              shared,
-            )
-          val reqAttributes =
-            spanDataProvider.requestAttributes(
-              reqNoBody,
-              urlTemplateClassifier,
-              urlRedactor,
-              shared,
-              headersAllowedAsAttributes.request,
-            )
+          val shared = spanDataProvider.processSharedData(reqNoBody)
+          val spanName = spanDataProvider.spanName(reqNoBody, shared)
+          val reqAttributes = spanDataProvider.requestAttributes(reqNoBody, shared)
 
           MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
             for {
@@ -141,10 +94,7 @@ class ClientMiddlewareBuilder[F[_]: TracerProvider: Concurrent] private (
                 case Outcome.Succeeded(fa) =>
                   fa.evalMap { resp =>
                     val respAttributes =
-                      spanDataProvider.responseAttributes(
-                        resp.withBodyStream(Stream.empty),
-                        headersAllowedAsAttributes.response,
-                      )
+                      spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
                     span.addAttributes(respAttributes) >> span
                       .setStatus(StatusCode.Error)
                       .unlessA(resp.status.isSuccess)
@@ -166,26 +116,11 @@ class ClientMiddlewareBuilder[F[_]: TracerProvider: Concurrent] private (
 
 object ClientMiddlewareBuilder {
 
-  /** @return a client middleware builder with default configuration */
-  def default[F[_]: TracerProvider: Concurrent](
-      urlRedactor: UriRedactor
+  /** @return a client middleware builder that uses the given [[`SpanDataProvider`]]
+    * @see [[ClientSpanDataProvider]] for creating an OpenTelemetry-compliant provider
+    */
+  def apply[F[_]: TracerProvider: Concurrent](
+      spanDataProvider: SpanDataProvider
   ): ClientMiddlewareBuilder[F] =
-    new ClientMiddlewareBuilder[F](
-      urlRedactor,
-      Defaults.spanDataProvider,
-      Defaults.urlTemplateClassifier,
-      Defaults.headersAllowedAsAttributes,
-      Defaults.perRequestTracingFilter,
-    )
-
-  /** The default configuration values for a client middleware builder. */
-  object Defaults {
-    def spanDataProvider: SpanDataProvider = SpanDataProvider.default
-    def urlTemplateClassifier: UriTemplateClassifier =
-      UriTemplateClassifier.indeterminate
-    def headersAllowedAsAttributes: HeadersAllowedAsAttributes =
-      HeadersAllowedAsAttributes.default
-    def perRequestTracingFilter: PerRequestTracingFilter =
-      PerRequestTracingFilter.default
-  }
+    new ClientMiddlewareBuilder[F](spanDataProvider, PerRequestTracingFilter.default)
 }

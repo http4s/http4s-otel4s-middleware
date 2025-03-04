@@ -21,8 +21,9 @@ package server
 import cats.effect.IO
 import cats.effect.testkit.TestControl
 import munit.CatsEffectSuite
-import org.http4s.otel4s.middleware.redact.PathRedactor
-import org.http4s.otel4s.middleware.redact.QueryRedactor
+import org.http4s.otel4s.middleware.trace.redact.HeaderRedactor
+import org.http4s.otel4s.middleware.trace.redact.PathRedactor
+import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
@@ -54,14 +55,18 @@ class ServerMiddlewareTest extends CatsEffectSuite {
         for {
           tracedServer <- {
             implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-            ServerMiddlewareBuilder
-              .default[IO](NoopRedactor)
-              .withHeadersAllowedAsAttributes(
-                HeadersAllowedAsAttributes(
-                  request = Set(ci"foo"),
-                  response = Set(ci"baz"),
+            ServerMiddlewareBuilder(
+              ServerSpanDataProvider
+                .openTelemetry(NoopRedactor)
+                .optIntoClientPort
+                .optIntoHttpRequestHeaders(
+                  HeaderRedactor(Set(ci"foo"), HeaderRedactor.Behavior.Elide)
                 )
-              )
+                .optIntoHttpResponseHeaders(
+                  HeaderRedactor(Set(ci"baz"), HeaderRedactor.Behavior.Elide)
+                )
+                .and(AttributeProvider.middlewareVersion)
+            )
               .buildHttpApp(HttpApp[IO](_.body.compile.drain.as(response)))
           }
           _ <- {
@@ -108,8 +113,13 @@ class ServerMiddlewareTest extends CatsEffectSuite {
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
           val error = new RuntimeException("oops") with NoStackTrace {}
-          ServerMiddlewareBuilder
-            .default[IO](NoopRedactor)
+          ServerMiddlewareBuilder(
+            ServerSpanDataProvider
+              .openTelemetry(NoopRedactor)
+              .optIntoClientPort
+              .optIntoHttpRequestHeaders(HeaderRedactor.default)
+              .optIntoHttpResponseHeaders(HeaderRedactor.default)
+          )
             .buildHttpApp(HttpApp[IO](_ => IO.raiseError(error)))
             .flatMap { implicit tracedServer =>
               val request = Request[IO](Method.GET, uri"http://localhost/")
@@ -135,10 +145,6 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 Attribute("network.protocol.version", "1.1"),
                 Attribute("url.path", "/"),
                 Attribute("url.scheme", "http"),
-                Attribute(
-                  "org.http4s.otel4s.middleware.version",
-                  org.http4s.otel4s.middleware.BuildInfo.version,
-                ),
               )
 
               for {
@@ -160,8 +166,13 @@ class ServerMiddlewareTest extends CatsEffectSuite {
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ServerMiddlewareBuilder
-            .default[IO](NoopRedactor)
+          ServerMiddlewareBuilder(
+            ServerSpanDataProvider
+              .openTelemetry(NoopRedactor)
+              .optIntoClientPort
+              .optIntoHttpRequestHeaders(HeaderRedactor.default)
+              .optIntoHttpResponseHeaders(HeaderRedactor.default)
+          )
             .buildHttpApp(HttpApp[IO](_ => IO.pure(Response[IO](Status.InternalServerError))))
             .flatMap { implicit tracedServer =>
               val request = Request[IO](Method.GET, uri"http://localhost/")
@@ -174,10 +185,6 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 Attribute("network.protocol.version", "1.1"),
                 Attribute("url.path", "/"),
                 Attribute("url.scheme", "http"),
-                Attribute(
-                  "org.http4s.otel4s.middleware.version",
-                  org.http4s.otel4s.middleware.BuildInfo.version,
-                ),
               )
 
               for {
@@ -198,8 +205,13 @@ class ServerMiddlewareTest extends CatsEffectSuite {
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ServerMiddlewareBuilder
-            .default[IO](NoopRedactor)
+          ServerMiddlewareBuilder(
+            ServerSpanDataProvider
+              .openTelemetry(NoopRedactor)
+              .optIntoClientPort
+              .optIntoHttpRequestHeaders(HeaderRedactor.default)
+              .optIntoHttpResponseHeaders(HeaderRedactor.default)
+          )
             .buildHttpApp(HttpApp[IO](_ => IO.canceled.as(Response[IO](Status.Ok))))
             .flatMap { implicit tracedServer =>
               val request = Request[IO](Method.GET, uri"http://localhost/")
@@ -211,10 +223,6 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 Attribute("network.protocol.version", "1.1"),
                 Attribute("url.path", "/"),
                 Attribute("url.scheme", "http"),
-                Attribute(
-                  "org.http4s.otel4s.middleware.version",
-                  org.http4s.otel4s.middleware.BuildInfo.version,
-                ),
               )
 
               for {
@@ -239,8 +247,13 @@ class ServerMiddlewareTest extends CatsEffectSuite {
         for {
           tracedServer <- {
             implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-            ServerMiddlewareBuilder
-              .default[IO](NoopRedactor)
+            ServerMiddlewareBuilder(
+              ServerSpanDataProvider
+                .openTelemetry(NoopRedactor)
+                .optIntoClientPort
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+            )
               .withPerRequestTracingFilter(PerRequestTracingFilter.neverTrace)
               .buildHttpApp(HttpApp[IO](_.body.compile.drain.as(response)))
           }

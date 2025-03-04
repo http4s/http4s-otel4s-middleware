@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.11" // your current series x.y
+ThisBuild / tlBaseVersion := "0.12" // your current series x.y
 
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
@@ -28,6 +28,9 @@ val baseName = "http4s-otel4s-middleware"
 
 val sharedSettings = Seq(
   libraryDependencies ++= Seq(
+    "org.http4s" %%% "http4s-core" % http4sV,
+    "org.typelevel" %%% "otel4s-core-common" % otel4sV,
+    "org.typelevel" %%% "otel4s-semconv" % otel4sV,
     "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
     "org.scalameta" %%% "munit" % munitV % Test,
     "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
@@ -39,6 +42,8 @@ val sharedSettings = Seq(
 lazy val `http4s-otel4s-middleware` = tlCrossRootProject
   .aggregate(
     core,
+    `core-client`,
+    `core-server`,
     metrics,
     `trace-core`,
     `trace-client`,
@@ -48,19 +53,38 @@ lazy val `http4s-otel4s-middleware` = tlCrossRootProject
 
 lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
-  .in(file("core"))
+  .in(file("core/common"))
   .enablePlugins(BuildInfoPlugin)
   .settings(sharedSettings)
   .settings(
     name := s"$baseName-core",
-    libraryDependencies ++= Seq(
-      "org.http4s" %%% "http4s-core" % http4sV,
-      "org.typelevel" %%% "otel4s-core-common" % otel4sV,
-      "org.typelevel" %%% "otel4s-semconv" % otel4sV,
-    ),
     buildInfoKeys := Seq(version),
     buildInfoPackage := "org.http4s.otel4s.middleware",
     buildInfoOptions += BuildInfoOption.PackagePrivate,
+  )
+
+lazy val `core-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("core/client"))
+  .dependsOn(core)
+  .settings(sharedSettings)
+  .settings(
+    name := s"$baseName-core-client",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %%% "otel4s-semconv-experimental" % otel4sV
+    ),
+  )
+
+lazy val `core-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("core/server"))
+  .dependsOn(core)
+  .settings(sharedSettings)
+  .settings(
+    name := s"$baseName-core-server",
+    libraryDependencies ++= Seq(
+      "org.http4s" %%% "http4s-dsl" % http4sV % Test
+    ),
   )
 
 lazy val metrics = crossProject(JVMPlatform, JSPlatform, NativePlatform)
@@ -71,10 +95,7 @@ lazy val metrics = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .settings(
     name := s"$baseName-metrics",
     libraryDependencies ++= Seq(
-      "org.http4s" %%% "http4s-core" % http4sV,
-      "org.typelevel" %%% "otel4s-core-common" % otel4sV,
       "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
-      "org.typelevel" %%% "otel4s-semconv" % otel4sV,
       "org.http4s" %%% "http4s-server" % http4sV % Test,
     ),
   )
@@ -91,34 +112,27 @@ lazy val `trace-core` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
 lazy val `trace-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("trace/client"))
-  .dependsOn(`trace-core`)
+  .dependsOn(`trace-core`, `core-client`)
   .settings(sharedSettings)
   .settings(
     name := s"$baseName-trace-client",
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "cats-effect" % catsEffectV,
       "org.http4s" %%% "http4s-client" % http4sV,
-      "org.http4s" %%% "http4s-core" % http4sV,
-      "org.typelevel" %%% "otel4s-core-common" % otel4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
-      "org.typelevel" %%% "otel4s-semconv" % otel4sV,
     ),
   )
 
 lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("trace/server"))
-  .dependsOn(`trace-core`)
+  .dependsOn(`trace-core`, `core-server`)
   .settings(sharedSettings)
   .settings(
     name := s"$baseName-trace-server",
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "cats-effect" % catsEffectV,
-      "org.http4s" %%% "http4s-core" % http4sV,
-      "org.typelevel" %%% "otel4s-core-common" % otel4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
-      "org.typelevel" %%% "otel4s-semconv" % otel4sV,
-      "org.http4s" %%% "http4s-dsl" % http4sV % Test,
     ),
   )
 

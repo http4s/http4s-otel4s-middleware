@@ -23,7 +23,8 @@ import org.http4s._
 import org.http4s.client.Client
 import org.http4s.dsl.Http4sDsl
 import org.http4s.implicits._
-import org.http4s.otel4s.middleware.trace.server.RouteClassifier
+import org.http4s.otel4s.middleware.client.UriTemplateClassifier
+import org.http4s.otel4s.middleware.server.RouteClassifier
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.trace.Tracer
 
@@ -73,5 +74,22 @@ trait Common {
       case GET -> Root / "fail" =>
         "/fail"
     }
+  }
+
+  def urlTemplateClassifier: UriTemplateClassifier = {
+    val clientSegment = Uri.Path.Segment("client")
+    val failSegment = Uri.Path.Segment("fail")
+    val helloSegment = Uri.Path.Segment("hello")
+    val proxySegment = Uri.Path.Segment("proxy")
+
+    uri =>
+      uri.path.segments match {
+        case Seq(`helloSegment`, _) => Some("/hello/{name}")
+        case Seq(`clientSegment`, `helloSegment`, _) => Some("/client/hello/{name}")
+        case Seq(`clientSegment`, `proxySegment`, `helloSegment`, _) =>
+          Some("/client/proxy/hello/{name}")
+        case Seq(`failSegment`) => Some("/fail")
+        case _ => None
+      }
   }
 }
