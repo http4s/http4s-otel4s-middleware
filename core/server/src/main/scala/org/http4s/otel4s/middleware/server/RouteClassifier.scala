@@ -72,6 +72,17 @@ object RouteClassifier {
   /** Mirrors `HttpRoutes.of` for use with `Http4sDsl`. The `Request` passed to
     * the provided `PartialFunction` will only be populated by the values from
     * a `RequestPrelude`.
+    *
+    * @example
+    * {{{
+    * val http4sDsl = Http4sDsl[F]
+    * import http4sDsl._
+    * object Limit extends QueryParamDecoderMatcher[Int]("limit")
+    * RouteClassifier.of[F] {
+    *   case GET -> Root / "users" / UUIDVar(_) / "posts" :? Limit(_) =>
+    *     "/users/{userId}/posts?limit={count}"
+    * }
+    * }}}
     */
   def of[F[_]](pf: PartialFunction[Request[F], String]): RouteClassifier = {
     val lifted = pf.lift

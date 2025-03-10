@@ -34,7 +34,7 @@ private[middleware] trait TypedServerAttributes extends TypedAttributes {
       request: RequestPrelude,
       classifier: RouteClassifier,
   ): Option[Attribute[String]] =
-    classifier.classify(request).map(HttpAttributes.HttpRoute.apply)
+    HttpAttributes.HttpRoute.maybe(classifier.classify(request))
 
   /** @return the `http.route` `Attribute` */
   final def httpRoute[F[_]](

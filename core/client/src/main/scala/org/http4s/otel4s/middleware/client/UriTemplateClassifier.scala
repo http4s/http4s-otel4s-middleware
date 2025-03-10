@@ -65,4 +65,24 @@ object UriTemplateClassifier {
 
   /** A classifier that does not classify any URI templates. */
   val indeterminate: UriTemplateClassifier = _ => None
+
+  /** Somewhat similar to `HttpRoutes.of` for use with `Http4sDsl`.
+    *
+    * @example
+    * {{{
+    * val http4sDsl = Http4sDsl[F]
+    * import http4sDsl._
+    * object Limit extends QueryParamDecoderMatcher[Int]("limit")
+    * UriTemplateClassifier.matchingPathAndQuery {
+    *   case (Root / "users" / UUIDVar(_) / "posts", Limit(_)) =>
+    *     "/users/{userId}/posts?limit={count}"
+    * }
+    * }}}
+    */
+  def matchingPathAndQuery(
+      pf: PartialFunction[(Uri.Path, Map[String, collection.Seq[String]]), String]
+  ): UriTemplateClassifier = {
+    val lifted = pf.lift
+    url => lifted(url.path -> url.query.multiParams)
+  }
 }

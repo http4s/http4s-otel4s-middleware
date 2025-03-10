@@ -71,7 +71,8 @@ lazy val `core-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .settings(
     name := s"$baseName-core-client",
     libraryDependencies ++= Seq(
-      "org.typelevel" %%% "otel4s-semconv-experimental" % otel4sV
+      "org.typelevel" %%% "otel4s-semconv-experimental" % otel4sV,
+      "org.http4s" %%% "http4s-dsl" % http4sV % Test,
     ),
   )
 

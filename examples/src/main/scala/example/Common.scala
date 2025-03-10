@@ -61,8 +61,8 @@ trait Common {
   }
 
   def routeClassifier[F[_]]: RouteClassifier = {
-    val dsl = new Http4sDsl[F] {}
-    import dsl._
+    val http4sDsl = Http4sDsl[F]
+    import http4sDsl._
 
     RouteClassifier.of[F] {
       case GET -> Root / "hello" / _ =>
@@ -76,20 +76,19 @@ trait Common {
     }
   }
 
-  def urlTemplateClassifier: UriTemplateClassifier = {
-    val clientSegment = Uri.Path.Segment("client")
-    val failSegment = Uri.Path.Segment("fail")
-    val helloSegment = Uri.Path.Segment("hello")
-    val proxySegment = Uri.Path.Segment("proxy")
+  def urlTemplateClassifier[F[_]]: UriTemplateClassifier = {
+    val http4sDsl = Http4sDsl[F]
+    import http4sDsl._
 
-    uri =>
-      uri.path.segments match {
-        case Seq(`helloSegment`, _) => Some("/hello/{name}")
-        case Seq(`clientSegment`, `helloSegment`, _) => Some("/client/hello/{name}")
-        case Seq(`clientSegment`, `proxySegment`, `helloSegment`, _) =>
-          Some("/client/proxy/hello/{name}")
-        case Seq(`failSegment`) => Some("/fail")
-        case _ => None
-      }
+    UriTemplateClassifier.matchingPathAndQuery {
+      case (Root / "hello" / _, _) =>
+        "/hello/{name}"
+      case (Root / "client" / "hello" / _, _) =>
+        "/client/hello/{name}"
+      case (Root / "client" / "proxy" / "hello" / _, _) =>
+        "/client/proxy/hello/{name}"
+      case (Root / "fail", _) =>
+        "/fail"
+    }
   }
 }
