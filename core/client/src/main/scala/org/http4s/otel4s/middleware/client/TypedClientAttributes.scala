@@ -54,7 +54,7 @@ private[middleware] trait TypedClientAttributes extends TypedAttributes {
       .map(_.value.toLong)
       .orElse(url.port.map(_.toLong))
       .orElse(portFromScheme(url.scheme))
-      .map(ServerAttributes.ServerPort.apply)
+      .map(ServerAttributes.ServerPort(_))
 
   /** @return the `url.scheme` `Attribute` */
   final def urlScheme(scheme: Uri.Scheme): Attribute[String] =
@@ -84,9 +84,7 @@ object TypedClientAttributes extends TypedClientAttributes {
 
     /** @return the `url.template` `Attribute` */
     final def urlTemplate(url: Uri, classifier: UriTemplateClassifier): Option[Attribute[String]] =
-      classifier
-        .classify(url)
-        .map(UrlExperimentalAttributes.UrlTemplate(_))
+      UrlExperimentalAttributes.UrlTemplate.maybe(classifier.classify(url))
   }
 
   private object _Experimental extends Experimental

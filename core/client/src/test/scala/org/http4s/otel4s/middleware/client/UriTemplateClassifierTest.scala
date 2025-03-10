@@ -17,15 +17,52 @@
 package org.http4s
 package otel4s.middleware.client
 
+import cats.effect.IO
 import munit.FunSuite
+import org.http4s.dsl.Http4sDsl
 import org.http4s.syntax.literals._
 
 class UriTemplateClassifierTest extends FunSuite {
+  test("forPathAndQuery") {
+    val classifier = locally {
+      val http4sDsl = Http4sDsl[IO]
+      import http4sDsl._
+      object Id extends QueryParamDecoderMatcher[String]("id")
+      UriTemplateClassifier.matchingPathAndQuery {
+        case (Root / "users", Id(_)) => "/users?id={userId}"
+        case (Root / "users" / UUIDVar(_) / "profile", _) =>
+          "/users/{userId}/profile"
+        case (Root / "users" / UUIDVar(_), _) =>
+          "/users/{userId}"
+      }
+    }
+    def check(uri: Uri, expected: Option[String]): Unit =
+      assertEquals(classifier.classify(uri), expected)
+
+    check(uri"/users", None)
+    check(uri"/users?id=295472d0-ef9e-48a7-84bd-100a4672ff87", Some("/users?id={userId}"))
+    check(uri"/users?id=not-a-uuid", Some("/users?id={userId}"))
+    check(uri"/users?id=1234&foo=bar", Some("/users?id={userId}"))
+    check(uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87", Some("/users/{userId}"))
+    check(uri"/users/not-a-uuid", None)
+    check(
+      uri"/users/295472d0-ef9e-48a7-84bd-100a4672ff87/profile?foo=bar",
+      Some("/users/{userId}/profile"),
+    )
+    check(uri"/users/not-a-uuid/profile", None)
+  }
+
   test("orElse") {
-    val a: UriTemplateClassifier =
-      uri => Option.when(uri.path == Uri.Path.Root / "a")("/a")
-    val b: UriTemplateClassifier =
-      uri => Option.when(uri.path == Uri.Path.Root / "b")("/b")
+    val a = locally {
+      val http4sDsl = Http4sDsl[IO]
+      import http4sDsl._
+      UriTemplateClassifier.matchingPathAndQuery { case (Root / "a", _) => "/a" }
+    }
+    val b = locally {
+      val http4sDsl = Http4sDsl[IO]
+      import http4sDsl._
+      UriTemplateClassifier.matchingPathAndQuery { case (Root / "b", _) => "/b" }
+    }
     val classifier = a.orElse(b)
     def check(uri: Uri, expected: Option[String]): Unit =
       assertEquals(classifier.classify(uri), expected)

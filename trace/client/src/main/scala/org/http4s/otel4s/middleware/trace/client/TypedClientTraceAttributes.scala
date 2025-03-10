@@ -39,7 +39,7 @@ object TypedClientTraceAttributes extends TypedClientAttributes with TypedTraceA
       .collect {
         case c if c > 1 => c - 1L
       }
-      .map(HttpAttributes.HttpRequestResendCount.apply)
+      .map(HttpAttributes.HttpRequestResendCount(_))
 
   /** @return the `url.full` `Attribute` containing the URL after redacting it
     *         with the provided [[`UriRedactor`]].
