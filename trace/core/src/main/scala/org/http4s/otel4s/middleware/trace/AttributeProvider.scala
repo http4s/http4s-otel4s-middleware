@@ -59,6 +59,7 @@ trait AttributeProvider {
     *         another `AttributeProvider`
     */
   def and(that: AttributeProvider): AttributeProvider = that match {
+    case AttributeProvider.Empty => this
     case AttributeProvider.Multi(providers) =>
       AttributeProvider.Multi(this +: providers)
     case _ => AttributeProvider.Multi(ArraySeq(this, that))
@@ -66,6 +67,14 @@ trait AttributeProvider {
 }
 
 object AttributeProvider {
+
+  private[trace] object Empty extends AttributeProvider {
+    def requestAttributes[F[_]](request: Request[F]): Attributes = Attributes.empty
+    def responseAttributes[F[_]](response: Response[F]): Attributes = Attributes.empty
+    def exceptionAttributes(cause: Throwable): Attributes = Attributes.empty
+
+    override def and(that: AttributeProvider): AttributeProvider = that
+  }
 
   /** Base trait for a wrapper around multiple [[`AttributeProvider`]]s. */
   private[trace] trait Multi extends AttributeProvider {
@@ -82,6 +91,7 @@ object AttributeProvider {
         providers.foldLeft(Attributes.empty)(_ ++ _.exceptionAttributes(cause))
 
       override def and(that: AttributeProvider): AttributeProvider = that match {
+        case Empty => this
         case Multi(ps) => new Impl(providers ++ ps)
         case _ => new Impl(providers :+ that)
       }
@@ -109,7 +119,8 @@ object AttributeProvider {
 
   /** @return an `AttributeProvider` that provides the given `Attribute`s */
   def const(attributes: immutable.Iterable[Attribute[_]]): AttributeProvider =
-    new Const(attributes.to(Attributes))
+    if (attributes.isEmpty) Empty
+    else new Const(attributes.to(Attributes))
 
   /** @return an `AttributeProvider` that provides the given `Attribute`s */
   def const(attributes: Attribute[_]*): AttributeProvider =

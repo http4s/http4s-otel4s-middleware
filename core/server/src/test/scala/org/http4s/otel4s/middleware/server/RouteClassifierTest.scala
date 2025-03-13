@@ -19,11 +19,27 @@ package otel4s.middleware.server
 
 import cats.effect.IO
 import munit.FunSuite
+import munit.Location
 import org.http4s.dsl.Http4sDsl
 import org.http4s.syntax.literals._
 
 class RouteClassifierTest extends FunSuite {
-  test("of") {
+  test(".indeterminate") {
+    def check(method: Method, uri: Uri)(implicit loc: Location): Unit =
+      assertEquals(
+        RouteClassifier.indeterminate.classify(Request(method, uri).requestPrelude),
+        None,
+      )
+
+    check(Method.GET, uri"/test")
+    check(Method.POST, uri"/test")
+    check(Method.PUT, uri"https://example.com")
+    check(Method.DELETE, uri"https://example.com")
+    check(Method.PATCH, uri"https://example.com/foo")
+    check(Method.HEAD, uri"https://example.com/foo")
+  }
+
+  test(".of") {
     val classifier = locally {
       val http4sDsl = Http4sDsl[IO]
       import http4sDsl._
@@ -35,7 +51,7 @@ class RouteClassifierTest extends FunSuite {
           "/users/{userId}"
       }
     }
-    def check(method: Method, uri: Uri, expected: Option[String]): Unit =
+    def check(method: Method, uri: Uri, expected: Option[String])(implicit loc: Location): Unit =
       assertEquals(classifier.classify(Request(method, uri).requestPrelude), expected)
 
     check(Method.POST, uri"/users", Some("/users"))
@@ -65,23 +81,19 @@ class RouteClassifierTest extends FunSuite {
     check(Method.DELETE, uri"/users", None)
   }
 
-  test("orElse") {
+  test("#orElse") {
     val a = locally {
       val http4sDsl = Http4sDsl[IO]
       import http4sDsl._
-      RouteClassifier.of[IO] { case POST -> Root / "test" =>
-        "/test"
-      }
+      RouteClassifier.of[IO] { case POST -> Root / "test" => "/test" }
     }
     val b = locally {
       val http4sDsl = Http4sDsl[IO]
       import http4sDsl._
-      RouteClassifier.of[IO] { case GET -> Root / "test" =>
-        "/test"
-      }
+      RouteClassifier.of[IO] { case GET -> Root / "test" => "/test" }
     }
     val classifier = a.orElse(b)
-    def check(method: Method, uri: Uri, expected: Option[String]): Unit =
+    def check(method: Method, uri: Uri, expected: Option[String])(implicit loc: Location): Unit =
       assertEquals(classifier.classify(Request(method, uri).requestPrelude), expected)
 
     check(Method.POST, uri"/test", Some("/test"))
@@ -89,5 +101,10 @@ class RouteClassifierTest extends FunSuite {
     check(Method.DELETE, uri"/test", None)
     check(Method.POST, uri"/other", None)
     check(Method.GET, uri"/other", None)
+
+    assert(a.orElse(RouteClassifier.indeterminate) eq a)
+    assert(RouteClassifier.indeterminate.orElse(a) eq a)
+    assert(classifier.orElse(RouteClassifier.indeterminate) eq classifier)
+    assert(RouteClassifier.indeterminate.orElse(classifier) eq classifier)
   }
 }

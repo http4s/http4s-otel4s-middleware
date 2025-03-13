@@ -45,6 +45,7 @@ trait RouteClassifier {
     *          `this.classify` returns `None`
     */
   def orElse(that: RouteClassifier): RouteClassifier = that match {
+    case RouteClassifier.Indeterminate => this
     case RouteClassifier.Multi(classifiers) =>
       RouteClassifier.Multi(this +: classifiers)
     case _ => RouteClassifier.Multi(ArraySeq(this, that))
@@ -52,6 +53,11 @@ trait RouteClassifier {
 }
 
 object RouteClassifier {
+
+  private object Indeterminate extends RouteClassifier {
+    def classify(request: RequestPrelude): Option[String] = None
+    override def orElse(that: RouteClassifier): RouteClassifier = that
+  }
 
   private final case class Multi(classifiers: Seq[RouteClassifier]) extends RouteClassifier {
     def classify(request: RequestPrelude): Option[String] =
@@ -61,13 +67,14 @@ object RouteClassifier {
         .flatten
 
     override def orElse(that: RouteClassifier): RouteClassifier = that match {
+      case Indeterminate => this
       case Multi(cs) => Multi(classifiers ++ cs)
       case _ => Multi(classifiers :+ that)
     }
   }
 
   /** A classifier that is never able to classify any routes. */
-  val indeterminate: RouteClassifier = _ => None
+  def indeterminate: RouteClassifier = Indeterminate
 
   /** Mirrors `HttpRoutes.of` for use with `Http4sDsl`. The `Request` passed to
     * the provided `PartialFunction` will only be populated by the values from

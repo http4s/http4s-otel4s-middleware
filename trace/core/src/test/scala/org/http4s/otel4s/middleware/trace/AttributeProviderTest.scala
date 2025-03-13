@@ -47,6 +47,10 @@ class AttributeProviderTest extends FunSuite {
     assert(p.responseAttributes(null).isEmpty)
     assert(p.exceptionAttributes(null).isEmpty)
     assert(p.requestAttributes(null) eq p.requestAttributes(null))
+
+    val e = AttributeProvider.const()
+    assert(p.and(e) eq p)
+    assert(e.and(p) eq p)
   }
 
   test("middlewareVersion") {

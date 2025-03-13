@@ -73,6 +73,7 @@ trait SpanDataProvider extends AttributeProvider {
     * span names.
     */
   override def and(that: AttributeProvider): SpanDataProvider = that match {
+    case AttributeProvider.Empty => this
     case AttributeProvider.Multi(providers) =>
       SpanDataProvider.Multi(this, providers)
     case _ => SpanDataProvider.Multi(this, ArraySeq(that))
@@ -101,6 +102,7 @@ object SpanDataProvider {
       others.foldLeft(primary.exceptionAttributes(cause))(_ ++ _.exceptionAttributes(cause))
 
     override def and(that: AttributeProvider): SpanDataProvider = that match {
+      case AttributeProvider.Empty => this
       case AttributeProvider.Multi(providers) => copy(others = others ++ providers)
       case _ => copy(others = others :+ that)
     }

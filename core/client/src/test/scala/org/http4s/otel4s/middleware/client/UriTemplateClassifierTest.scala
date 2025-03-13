@@ -19,11 +19,21 @@ package otel4s.middleware.client
 
 import cats.effect.IO
 import munit.FunSuite
+import munit.Location
 import org.http4s.dsl.Http4sDsl
 import org.http4s.syntax.literals._
 
 class UriTemplateClassifierTest extends FunSuite {
-  test("forPathAndQuery") {
+  test(".indeterminate") {
+    def check(uri: Uri)(implicit loc: Location): Unit =
+      assertEquals(UriTemplateClassifier.indeterminate.classify(uri), None)
+
+    check(uri"/test")
+    check(uri"https://example.com")
+    check(uri"https://example.com/foo")
+  }
+
+  test(".forPathAndQuery") {
     val classifier = locally {
       val http4sDsl = Http4sDsl[IO]
       import http4sDsl._
@@ -36,7 +46,7 @@ class UriTemplateClassifierTest extends FunSuite {
           "/users/{userId}"
       }
     }
-    def check(uri: Uri, expected: Option[String]): Unit =
+    def check(uri: Uri, expected: Option[String])(implicit loc: Location): Unit =
       assertEquals(classifier.classify(uri), expected)
 
     check(uri"/users", None)
@@ -52,7 +62,7 @@ class UriTemplateClassifierTest extends FunSuite {
     check(uri"/users/not-a-uuid/profile", None)
   }
 
-  test("orElse") {
+  test("#orElse") {
     val a = locally {
       val http4sDsl = Http4sDsl[IO]
       import http4sDsl._
@@ -64,11 +74,16 @@ class UriTemplateClassifierTest extends FunSuite {
       UriTemplateClassifier.matchingPathAndQuery { case (Root / "b", _) => "/b" }
     }
     val classifier = a.orElse(b)
-    def check(uri: Uri, expected: Option[String]): Unit =
+    def check(uri: Uri, expected: Option[String])(implicit loc: Location): Unit =
       assertEquals(classifier.classify(uri), expected)
 
     check(uri"https://example.com/a", Some("/a"))
     check(uri"https://example.com/b", Some("/b"))
     check(uri"https://example.com/c", None)
+
+    assert(a.orElse(UriTemplateClassifier.indeterminate) eq a)
+    assert(UriTemplateClassifier.indeterminate.orElse(a) eq a)
+    assert(classifier.orElse(UriTemplateClassifier.indeterminate) eq classifier)
+    assert(UriTemplateClassifier.indeterminate.orElse(classifier) eq classifier)
   }
 }

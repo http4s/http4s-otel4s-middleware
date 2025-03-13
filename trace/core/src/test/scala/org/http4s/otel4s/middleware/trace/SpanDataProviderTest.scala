@@ -25,33 +25,55 @@ import org.typelevel.otel4s.Attributes
 class SpanDataProviderTest extends FunSuite {
   import SpanDataProviderTest._
 
-  private[this] def check(
-      output: Attributes,
-      keys: Seq[String],
-      last: String,
-  )(implicit loc: Location): Unit =
-    assertEquals(
-      output,
-      keys.map(k => Attribute(s"test.key.$k", 1L)).to(Attributes) + Attribute("test.last", last),
-    )
+  test("{Attribute,SpanData}Provider#and") {
+    def check(
+        provider: AttributeProvider,
+        keys: Seq[String],
+        last: String,
+    )(implicit loc: Location): Unit = {
+      val expected =
+        keys.map(k => Attribute(s"test.key.$k", 1L)).to(Attributes) +
+          Attribute("test.last", last)
 
-  test("and") {
+      assertEquals(provider.requestAttributes(null), expected, "requestAttributes")
+      assertEquals(provider.responseAttributes(null), expected, "responseAttributes")
+      assertEquals(provider.exceptionAttributes(null), expected, "exceptionAttributes")
+    }
+
     val a = new SimpleAttributeProvider("a")
     val b = new SimpleAttributeProvider("b")
-    val c = new SimpleSpanDataProvider("c")
-    val d = new SimpleSpanDataProvider("d")
+    val c = new SimpleAttributeProvider("c")
+    val d = new SimpleAttributeProvider("d")
 
-    val cabd = c.and(a.and(b).and(d))
-    assertEquals(cabd.spanName(null, null.asInstanceOf[cabd.Shared]), "c")
-    check(cabd.requestAttributes(null), Seq("a", "b", "c", "d"), "d")
-    check(cabd.responseAttributes(null), Seq("a", "b", "c", "d"), "d")
-    check(cabd.exceptionAttributes(null), Seq("a", "b", "c", "d"), "d")
+    check(a.and(b).and(c).and(d), Seq("a", "b", "c", "d"), "d")
+    check(a.and(b).and(c.and(d)), Seq("a", "b", "c", "d"), "d")
+    check(a.and(b.and(c).and(d)), Seq("a", "b", "c", "d"), "d")
+    check(a.and(b.and(c.and(d))), Seq("a", "b", "c", "d"), "d")
 
-    val db = d.and(b)
-    assertEquals(db.spanName(null, null.asInstanceOf[db.Shared]), "d")
-    check(db.requestAttributes(null), Seq("b", "d"), "b")
-    check(db.responseAttributes(null), Seq("b", "d"), "b")
-    check(db.exceptionAttributes(null), Seq("b", "d"), "b")
+    def checkSpan(
+        provider: SpanDataProvider,
+        name: String,
+        keys: Seq[String],
+        last: String,
+    )(implicit loc: Location): Unit = {
+      assertEquals(provider.spanName(null, null.asInstanceOf[provider.Shared]), name, "spanName")
+      check(provider, keys, last)
+    }
+
+    val e = new SimpleSpanDataProvider("e")
+    val f = new SimpleSpanDataProvider("f")
+    val g = new SimpleSpanDataProvider("g")
+    val h = new SimpleSpanDataProvider("h")
+
+    checkSpan(e.and(f).and(g).and(h), "e", Seq("e", "f", "g", "h"), "h")
+    checkSpan(e.and(f).and(g.and(h)), "e", Seq("e", "f", "g", "h"), "h")
+    checkSpan(e.and(f.and(g).and(h)), "e", Seq("e", "f", "g", "h"), "h")
+    checkSpan(e.and(f.and(g.and(h))), "e", Seq("e", "f", "g", "h"), "h")
+
+    checkSpan(e.and(a).and(f).and(b), "e", Seq("a", "b", "e", "f"), "b")
+    checkSpan(e.and(a).and(f.and(b)), "e", Seq("a", "b", "e", "f"), "b")
+    checkSpan(e.and(a.and(f).and(b)), "e", Seq("a", "b", "e", "f"), "b")
+    checkSpan(e.and(a.and(f.and(b))), "e", Seq("a", "b", "e", "f"), "b")
   }
 }
 
