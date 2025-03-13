@@ -27,9 +27,11 @@ import cats.syntax.applicative._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import fs2.Stream
+import org.http4s.server.websocket.WebSocketBuilder2
 import org.typelevel.otel4s.KindTransformer
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
+import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
 
 /** Middleware builder for wrapping an http4s `Server` to add tracing.
@@ -56,29 +58,26 @@ class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
   ): ServerMiddlewareBuilder[F] =
     copy(perRequestTracingFilter = perRequestTracingFilter)
 
-  /** Returns a middleware in a way that abstracts over
-    * [[org.http4s.HttpApp `HttpApp`]] and
-    * [[org.http4s.HttpRoutes `HttpRoutes`]]. In most cases, it is preferable
-    * to use the methods that directly build the specific desired type.
-    *
-    * @see [[buildHttpApp]]
-    * @see [[buildHttpRoutes]]
-    */
-  def buildGenericTracedHttp[G[_]: MonadCancelThrow](
-      f: Http[G, F]
-  )(implicit kt: KindTransformer[F, G]): F[Http[G, F]] =
+  private[this] def buildFromTracer[A](f: Tracer[F] => A): F[A] =
     for {
-      tracerF <- TracerProvider[F]
+      tracer <- TracerProvider[F]
         .tracer("org.http4s.otel4s.middleware.server")
         .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
         .withSchemaUrl("https://opentelemetry.io/schemas/1.30.0")
         .get
-    } yield Kleisli { (req: Request[F]) =>
+    } yield f(tracer)
+
+  // middleware implementation
+  private[this] def wrapTraced[G[_]: MonadCancelThrow](
+      tracerF: Tracer[F],
+      http: Http[G, F],
+  )(implicit kt: KindTransformer[F, G]): Http[G, F] =
+    Kleisli { (req: Request[F]) =>
       if (
         !perRequestTracingFilter(req.requestPrelude).isEnabled ||
         !tracerF.meta.isEnabled
       ) {
-        f(req)
+        http(req)
       } else {
         val reqNoBody = req.withBodyStream(Stream.empty)
         val shared = spanDataProvider.processSharedData(reqNoBody)
@@ -93,7 +92,7 @@ class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
               .addAttributes(reqAttributes)
               .build
               .use { span =>
-                poll(f.run(req))
+                poll(http(req))
                   .guaranteeCase {
                     case Outcome.Succeeded(fa) =>
                       fa.flatMap { resp =>
@@ -114,13 +113,36 @@ class ServerMiddlewareBuilder[F[_]: TracerProvider: MonadCancelThrow] private (
       }
     }
 
+  /** Returns a middleware in a way that abstracts over
+    * [[org.http4s.HttpApp `HttpApp`]] and
+    * [[org.http4s.HttpRoutes `HttpRoutes`]]. In most cases, it is preferable
+    * to use the methods that directly build the specific desired type.
+    *
+    * @see [[buildHttpApp]]
+    * @see [[buildHttpRoutes]]
+    */
+  def buildGenericTracedHttp[G[_]: MonadCancelThrow](
+      http: Http[G, F]
+  )(implicit kt: KindTransformer[F, G]): F[Http[G, F]] =
+    buildFromTracer(wrapTraced[G](_, http))
+
   /** @return a configured middleware for `HttpApp` */
-  def buildHttpApp(f: HttpApp[F]): F[HttpApp[F]] =
-    buildGenericTracedHttp(f)
+  def buildHttpApp(httpApp: HttpApp[F]): F[HttpApp[F]] =
+    buildGenericTracedHttp(httpApp)
 
   /** @return a configured middleware for `HttpRoutes` */
-  def buildHttpRoutes(f: HttpRoutes[F]): F[HttpRoutes[F]] =
-    buildGenericTracedHttp(f)
+  def buildHttpRoutes(httpRoutes: HttpRoutes[F]): F[HttpRoutes[F]] =
+    buildGenericTracedHttp(httpRoutes)
+
+  /** @return a configured middleware for a WebSocket app
+    *         (`WebSocketBuilder2[F] => HttpApp[F]`)
+    */
+  def buildHttpWebSocketApp(
+      f: WebSocketBuilder2[F] => HttpApp[F]
+  ): F[WebSocketBuilder2[F] => HttpApp[F]] =
+    buildFromTracer { tracer => (builder: WebSocketBuilder2[F]) =>
+      wrapTraced[F](tracer, f(builder))
+    }
 }
 
 object ServerMiddlewareBuilder {
