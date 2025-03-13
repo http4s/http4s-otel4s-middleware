@@ -41,6 +41,7 @@ trait UriTemplateClassifier {
     *         returns `None`
     */
   def orElse(that: UriTemplateClassifier): UriTemplateClassifier = that match {
+    case UriTemplateClassifier.Indeterminate => this
     case UriTemplateClassifier.Multi(classifiers) =>
       UriTemplateClassifier.Multi(this +: classifiers)
     case _ => UriTemplateClassifier.Multi(ArraySeq(this, that))
@@ -48,6 +49,11 @@ trait UriTemplateClassifier {
 }
 
 object UriTemplateClassifier {
+
+  private object Indeterminate extends UriTemplateClassifier {
+    def classify(url: Uri): Option[String] = None
+    override def orElse(that: UriTemplateClassifier): UriTemplateClassifier = that
+  }
 
   private final case class Multi(classifiers: Seq[UriTemplateClassifier])
       extends UriTemplateClassifier {
@@ -58,13 +64,14 @@ object UriTemplateClassifier {
         .flatten
 
     override def orElse(that: UriTemplateClassifier): UriTemplateClassifier = that match {
+      case Indeterminate => this
       case Multi(cs) => Multi(classifiers ++ cs)
       case _ => Multi(classifiers :+ that)
     }
   }
 
   /** A classifier that does not classify any URI templates. */
-  val indeterminate: UriTemplateClassifier = _ => None
+  def indeterminate: UriTemplateClassifier = Indeterminate
 
   /** Somewhat similar to `HttpRoutes.of` for use with `Http4sDsl`.
     *
