@@ -19,7 +19,6 @@ package otel4s.middleware
 package trace
 package client
 
-import cats.effect.Concurrent
 import cats.effect.MonadCancelThrow
 import cats.effect.Outcome
 import cats.effect.Resource
@@ -30,41 +29,29 @@ import fs2.Stream
 import org.http4s.client.Client
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
+import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
 
-/** Middleware builder for wrapping an http4s `Client` to add tracing.
+/** Middleware for wrapping [[org.http4s.client.Client HTTP `Client`s]] to add
+  * tracing.
   *
   * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client]]
   */
-class ClientMiddlewareBuilder[F[_]: TracerProvider: Concurrent] private (
-    spanDataProvider: SpanDataProvider,
-    perRequestTracingFilter: PerRequestTracingFilter,
-) {
-  private[this] def copy(
-      perRequestTracingFilter: PerRequestTracingFilter
-  ): ClientMiddlewareBuilder[F] =
-    new ClientMiddlewareBuilder[F](
-      this.spanDataProvider,
-      perRequestTracingFilter,
-    )
+sealed trait ClientMiddleware[F[_]] {
 
-  /** Sets a filter that determines whether each request and its response
-    * should be traced.
+  /** @return a traced wrapper around the given
+    *         [[org.http4s.client.Client `Client`]]
     */
-  def withPerRequestTracingFilter(
-      perRequestTracingFilter: PerRequestTracingFilter
-  ): ClientMiddlewareBuilder[F] =
-    copy(perRequestTracingFilter = perRequestTracingFilter)
+  def wrap(client: Client[F]): Client[F]
+}
 
-  /** @return the configured middleware */
-  def build: F[Client[F] => Client[F]] =
-    for {
-      tracer <- TracerProvider[F]
-        .tracer("org.http4s.otel4s.middleware.client")
-        .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
-        .withSchemaUrl("https://opentelemetry.io/schemas/1.30.0")
-        .get
-    } yield (client: Client[F]) =>
+object ClientMiddleware {
+  private[this] class Impl[F[_]: MonadCancelThrow](
+      tracer: Tracer[F],
+      spanDataProvider: SpanDataProvider,
+      perRequestTracingFilter: PerRequestTracingFilter,
+  ) extends ClientMiddleware[F] {
+    def wrap(client: Client[F]): Client[F] =
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
         if (
           !perRequestTracingFilter(req.requestPrelude).isEnabled ||
@@ -112,15 +99,48 @@ class ClientMiddlewareBuilder[F[_]: TracerProvider: Concurrent] private (
           }
         }
       }
-}
+  }
 
-object ClientMiddlewareBuilder {
+  /** A builder for [[`ClientMiddleware`]]s. */
+  final class Builder[F[_]: MonadCancelThrow] private[ClientMiddleware] (
+      spanDataProvider: SpanDataProvider,
+      perRequestTracingFilter: PerRequestTracingFilter,
+  )(implicit tracerProvider: TracerProvider[F]) {
+    // in case the builder ever gets more parameters
+    private[this] def copy(
+        perRequestTracingFilter: PerRequestTracingFilter
+    ): Builder[F] =
+      new Builder(
+        this.spanDataProvider,
+        perRequestTracingFilter,
+      )
 
-  /** @return a client middleware builder that uses the given [[`SpanDataProvider`]]
-    * @see [[ClientSpanDataProvider]] for creating an OpenTelemetry-compliant provider
+    /** Sets a filter that determines whether each request and its response
+      * should be traced.
+      */
+    def withPerRequestTracingFilter(
+        perRequestTracingFilter: PerRequestTracingFilter
+    ): Builder[F] =
+      copy(perRequestTracingFilter = perRequestTracingFilter)
+
+    /** @return a middleware that can wrap
+      *         [[org.http4s.client.Client `Client`s]] to add tracing
+      */
+    def build: F[ClientMiddleware[F]] =
+      for {
+        tracer <- tracerProvider
+          .tracer("org.http4s.otel4s.middleware.client")
+          .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
+          .withSchemaUrl("https://opentelemetry.io/schemas/1.30.0")
+          .get
+      } yield new Impl(tracer, spanDataProvider, perRequestTracingFilter)
+  }
+
+  /** @return a [[`Builder`]] that uses the given [[`SpanDataProvider`]]
+    * @see [[`ClientSpanDataProvider`]] for creating an OpenTelemetry-compliant provider
     */
-  def apply[F[_]: TracerProvider: Concurrent](
+  def builder[F[_]: MonadCancelThrow: TracerProvider](
       spanDataProvider: SpanDataProvider
-  ): ClientMiddlewareBuilder[F] =
-    new ClientMiddlewareBuilder[F](spanDataProvider, PerRequestTracingFilter.default)
+  ): Builder[F] =
+    new Builder(spanDataProvider, PerRequestTracingFilter.alwaysTrace)
 }

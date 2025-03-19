@@ -48,40 +48,42 @@ class ClientMiddlewareTest extends CatsEffectSuite {
 
   private val spanLimits = SpanLimits.default
 
-  test("ClientMiddleware") {
+  test("success with tracing enabled") {
     TracesTestkit
       .inMemory[IO]()
       .use { testkit =>
         for {
           clientMiddleware <- {
             implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-            ClientMiddlewareBuilder(
-              ClientSpanDataProvider
-                .openTelemetry(MinimalRedactor)
-                .optIntoHttpRequestHeaders(
-                  HeaderRedactor(Set(ci"foo"), HeaderRedactor.Behavior.Elide)
-                )
-                .optIntoHttpResponseHeaders(
-                  HeaderRedactor(Set(ci"baz"), HeaderRedactor.Behavior.Elide)
-                )
-                .optIntoUrlScheme
-                .optIntoUserAgentOriginal
-                .and(AttributeProvider.middlewareVersion)
-            ).build
+            ClientMiddleware
+              .builder[IO] {
+                ClientSpanDataProvider
+                  .openTelemetry(MinimalRedactor)
+                  .optIntoHttpRequestHeaders(
+                    HeaderRedactor(Set(ci"foo"), HeaderRedactor.Behavior.Elide)
+                  )
+                  .optIntoHttpResponseHeaders(
+                    HeaderRedactor(Set(ci"baz"), HeaderRedactor.Behavior.Elide)
+                  )
+                  .optIntoUrlScheme
+                  .optIntoUserAgentOriginal
+                  .and(AttributeProvider.middlewareVersion)
+              }
+              .build
           }
           _ <- {
             val headers =
               Headers(Header.Raw(ci"foo", "bar"), Header.Raw(ci"baz", "qux"))
             val response = Response[IO](Status.Ok).withHeaders(headers)
-            val fakeClient =
+            val client = clientMiddleware.wrap {
               Client.fromHttpApp[IO] {
                 HttpApp[IO](_.body.compile.drain.as(response))
               }
-            val tracedClient = clientMiddleware(fakeClient)
+            }
             val request =
               Request[IO](Method.GET, uri"http://localhost/?#")
                 .withHeaders(headers)
-            tracedClient.run(request).use(_.body.compile.drain)
+            client.run(request).use(_.body.compile.drain)
           }
           spans <- testkit.finishedSpans
         } yield {
@@ -115,21 +117,23 @@ class ClientMiddlewareTest extends CatsEffectSuite {
       }
   }
 
-  test("ClientMiddleware allows manipulating spans from inner clients") {
+  test("allows manipulating spans from inner clients") {
     TracesTestkit
       .inMemory[IO]()
       .use { testkit =>
         for {
           clientMiddleware <- {
             implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-            ClientMiddlewareBuilder(
-              ClientSpanDataProvider
-                .openTelemetry(MinimalRedactor)
-                .optIntoHttpRequestHeaders(HeaderRedactor.default)
-                .optIntoHttpResponseHeaders(HeaderRedactor.default)
-                .optIntoUrlScheme
-                .optIntoUserAgentOriginal
-            ).build
+            ClientMiddleware
+              .builder[IO](
+                ClientSpanDataProvider
+                  .openTelemetry(MinimalRedactor)
+                  .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                  .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                  .optIntoUrlScheme
+                  .optIntoUserAgentOriginal
+              )
+              .build
           }
           tracerIO <- testkit.tracerProvider.get("tracer")
           _ <- {
@@ -144,7 +148,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
                 .run(req)
                 .evalTap(_ => Tracer[IO].currentSpanOrThrow.flatMap(_.updateName("NEW SPAN NAME")))
             }
-            val tracedClient = clientMiddleware(traceManipulatingClient)
+            val tracedClient = clientMiddleware.wrap(traceManipulatingClient)
             val request = Request[IO](Method.GET, uri"http://localhost/?#")
             tracedClient.run(request).use(_.body.compile.drain)
           }
@@ -157,7 +161,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
       }
   }
 
-  test("ClientMiddleware allows overriding span name") {
+  test("allows overriding span name") {
     val provider: SpanDataProvider = new SpanDataProvider {
       type Shared = Null
       def processSharedData[F[_]](request: Request[F]): Null = null
@@ -178,26 +182,28 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         for {
           clientMiddleware <- {
             implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-            ClientMiddlewareBuilder(
-              provider.and(
-                ClientSpanDataProvider
-                  .openTelemetry(MinimalRedactor)
-                  .optIntoHttpRequestHeaders(HeaderRedactor.default)
-                  .optIntoHttpResponseHeaders(HeaderRedactor.default)
-                  .optIntoUrlScheme
-                  .optIntoUserAgentOriginal
-              )
-            ).build
+            ClientMiddleware
+              .builder[IO] {
+                provider.and(
+                  ClientSpanDataProvider
+                    .openTelemetry(MinimalRedactor)
+                    .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                    .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                    .optIntoUrlScheme
+                    .optIntoUserAgentOriginal
+                )
+              }
+              .build
           }
           _ <- {
             val response = Response[IO](Status.Ok)
-            val fakeClient =
+            val client = clientMiddleware.wrap {
               Client.fromHttpApp[IO] {
                 HttpApp[IO](_.body.compile.drain.as(response))
               }
-            val tracedClient = clientMiddleware(fakeClient)
+            }
             val request = Request[IO](Method.GET, uri"http://localhost/?#")
-            tracedClient.run(request).use(_.body.compile.drain)
+            client.run(request).use(_.body.compile.drain)
           }
           spans <- testkit.finishedSpans
         } yield {
@@ -208,28 +214,29 @@ class ClientMiddlewareTest extends CatsEffectSuite {
       }
   }
 
-  test("record thrown exception from the client") {
+  test("records thrown exception from the client") {
     TestControl.executeEmbed {
       TracesTestkit
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ClientMiddlewareBuilder(
-            ClientSpanDataProvider
-              .openTelemetry(MinimalRedactor)
-              .optIntoHttpRequestHeaders(HeaderRedactor.default)
-              .optIntoHttpResponseHeaders(HeaderRedactor.default)
-              .optIntoUrlScheme
-              .optIntoUserAgentOriginal
-          ).build
+          ClientMiddleware
+            .builder[IO] {
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            }
+            .build
             .flatMap { clientMiddleware =>
               val error = new RuntimeException("oops") with NoStackTrace {}
-
-              val fakeClient = Client { (_: Request[IO]) =>
-                Resource.raiseError[IO, Response[IO], Throwable](error)
+              val client = clientMiddleware.wrap {
+                Client { (_: Request[IO]) =>
+                  Resource.raiseError[IO, Response[IO], Throwable](error)
+                }
               }
-
-              val tracedClient = clientMiddleware(fakeClient)
               val request = Request[IO](Method.GET, uri"http://localhost/")
 
               val events = Vector(
@@ -258,7 +265,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               )
 
               for {
-                _ <- tracedClient.run(request).use_.attempt
+                _ <- client.run(request).use_.attempt
                 spans <- testkit.finishedSpans
               } yield {
                 assertEquals(spans.map(_.attributes.elements), List(attributes))
@@ -270,32 +277,33 @@ class ClientMiddlewareTest extends CatsEffectSuite {
     }
   }
 
-  test("record cancelation from the client") {
+  test("records cancelation from the client") {
     TestControl.executeEmbed {
       TracesTestkit
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ClientMiddlewareBuilder(
-            ClientSpanDataProvider
-              .openTelemetry(MinimalRedactor)
-              .optIntoHttpRequestHeaders(HeaderRedactor.default)
-              .optIntoHttpResponseHeaders(HeaderRedactor.default)
-              .optIntoUrlScheme
-              .optIntoUserAgentOriginal
-          ).build
+          ClientMiddleware
+            .builder[IO] {
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            }
+            .build
             .flatMap { clientMiddleware =>
-              val fakeClient = Client { (_: Request[IO]) =>
-                Resource.canceled[IO] >> Resource.never[IO, Response[IO]]
+              val client = clientMiddleware.wrap {
+                Client { (_: Request[IO]) =>
+                  Resource.canceled[IO] >> Resource.never[IO, Response[IO]]
+                }
               }
-
-              val tracedClient = clientMiddleware(fakeClient)
               val request = Request[IO](Method.GET, uri"http://localhost/?#")
-
               val status = StatusData(StatusCode.Error, "canceled")
 
               for {
-                f <- tracedClient.run(request).use_.start
+                f <- client.run(request).use_.start
                 _ <- f.joinWithUnit
                 spans <- testkit.finishedSpans
               } yield {
@@ -307,29 +315,29 @@ class ClientMiddlewareTest extends CatsEffectSuite {
     }
   }
 
-  test("record thrown exception from the request processing") {
+  test("records thrown exception from the request processing") {
     TestControl.executeEmbed {
       TracesTestkit
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ClientMiddlewareBuilder(
-            ClientSpanDataProvider
-              .openTelemetry(MinimalRedactor)
-              .optIntoHttpRequestHeaders(HeaderRedactor.default)
-              .optIntoHttpResponseHeaders(HeaderRedactor.default)
-              .optIntoUrlScheme
-              .optIntoUserAgentOriginal
-          ).build
+          ClientMiddleware
+            .builder[IO] {
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            }
+            .build
             .flatMap { clientMiddleware =>
               val error = new RuntimeException("oops") with NoStackTrace {}
-
-              val fakeClient =
+              val client = clientMiddleware.wrap {
                 Client.fromHttpApp[IO] {
                   HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
                 }
-
-              val tracedClient = clientMiddleware(fakeClient)
+              }
               val request = Request[IO](Method.GET, uri"http://localhost/")
 
               val events = Vector(
@@ -358,7 +366,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               )
 
               for {
-                _ <- tracedClient.run(request).surround(IO.raiseError(error)).attempt
+                _ <- client.run(request).surround(IO.raiseError(error)).attempt
                 spans <- testkit.finishedSpans
               } yield {
                 assertEquals(spans.map(_.attributes.elements), List(attributes))
@@ -370,33 +378,33 @@ class ClientMiddlewareTest extends CatsEffectSuite {
     }
   }
 
-  test("record cancelation from the request processing") {
+  test("records cancelation from the request processing") {
     TestControl.executeEmbed {
       TracesTestkit
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ClientMiddlewareBuilder(
-            ClientSpanDataProvider
-              .openTelemetry(MinimalRedactor)
-              .optIntoHttpRequestHeaders(HeaderRedactor.default)
-              .optIntoHttpResponseHeaders(HeaderRedactor.default)
-              .optIntoUrlScheme
-              .optIntoUserAgentOriginal
-          ).build
+          ClientMiddleware
+            .builder[IO] {
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            }
+            .build
             .flatMap { clientMiddleware =>
-              val fakeClient =
+              val client = clientMiddleware.wrap {
                 Client.fromHttpApp[IO] {
                   HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
                 }
-
-              val tracedClient = clientMiddleware(fakeClient)
+              }
               val request = Request[IO](Method.GET, uri"http://localhost/?#")
-
               val status = StatusData(StatusCode.Error, "canceled")
 
               for {
-                f <- tracedClient.run(request).surround(IO.canceled).start
+                f <- client.run(request).surround(IO.canceled).start
                 _ <- f.joinWithUnit
                 spans <- testkit.finishedSpans
               } yield {
@@ -408,29 +416,29 @@ class ClientMiddlewareTest extends CatsEffectSuite {
     }
   }
 
-  test("record error.type on error response (400-500)") {
+  test("records error.type on error response (400-500)") {
     TestControl.executeEmbed {
       TracesTestkit
         .inMemory[IO]()
         .use { testkit =>
           implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-          ClientMiddlewareBuilder(
-            ClientSpanDataProvider
-              .openTelemetry(MinimalRedactor)
-              .optIntoHttpRequestHeaders(HeaderRedactor.default)
-              .optIntoHttpResponseHeaders(HeaderRedactor.default)
-              .optIntoUrlScheme
-              .optIntoUserAgentOriginal
-          ).build
+          ClientMiddleware
+            .builder[IO] {
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            }
+            .build
             .flatMap { clientMiddleware =>
-              val fakeClient =
+              val client = clientMiddleware.wrap {
                 Client.fromHttpApp[IO] {
                   HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.InternalServerError)))
                 }
-
-              val tracedClient = clientMiddleware(fakeClient)
+              }
               val request = Request[IO](Method.GET, uri"http://localhost/")
-
               val status = StatusData(StatusCode.Error)
 
               val attributes = Attributes(
@@ -445,7 +453,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               )
 
               for {
-                _ <- tracedClient.run(request).use_
+                _ <- client.run(request).use_
                 spans <- testkit.finishedSpans
               } yield {
                 assertEquals(spans.map(_.attributes.elements), List(attributes))
@@ -457,33 +465,33 @@ class ClientMiddlewareTest extends CatsEffectSuite {
     }
   }
 
-  test("don't trace when PerRequestTracingFilter returns Disabled") {
+  test("doesn't trace when PerRequestTracingFilter returns Disabled") {
     TracesTestkit
       .inMemory[IO]()
       .use { testkit =>
         for {
           clientMiddleware <- {
             implicit val TP: TracerProvider[IO] = testkit.tracerProvider
-            ClientMiddlewareBuilder(
-              ClientSpanDataProvider
-                .openTelemetry(MinimalRedactor)
-                .optIntoHttpRequestHeaders(HeaderRedactor.default)
-                .optIntoHttpResponseHeaders(HeaderRedactor.default)
-                .optIntoUrlScheme
-                .optIntoUserAgentOriginal
-            )
+            ClientMiddleware
+              .builder[IO] {
+                ClientSpanDataProvider
+                  .openTelemetry(MinimalRedactor)
+                  .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                  .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                  .optIntoUrlScheme
+                  .optIntoUserAgentOriginal
+              }
               .withPerRequestTracingFilter(PerRequestTracingFilter.neverTrace)
               .build
           }
-          _ <- {
-            val fakeClient =
+          _ <- clientMiddleware
+            .wrap {
               Client.fromHttpApp[IO] {
                 HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
               }
-            clientMiddleware(fakeClient)
-              .run(Request[IO](Method.GET, uri"http://localhost/?#"))
-              .use(_.body.compile.drain)
-          }
+            }
+            .run(Request[IO](Method.GET, uri"http://localhost/?#"))
+            .use(_.body.compile.drain)
           spans <- testkit.finishedSpans
         } yield assertEquals(spans.length, 0)
       }
