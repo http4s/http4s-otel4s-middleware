@@ -148,7 +148,6 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                         spanLimits.maxNumberOfAttributes,
                         spanLimits.maxAttributeValueLength,
                       ),
-                    escaped = false,
                   )
                 )
 

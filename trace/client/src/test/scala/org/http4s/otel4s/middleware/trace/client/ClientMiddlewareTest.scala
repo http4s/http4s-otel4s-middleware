@@ -248,7 +248,6 @@ class ClientMiddlewareTest extends CatsEffectSuite {
                       spanLimits.maxNumberOfAttributes,
                       spanLimits.maxAttributeValueLength,
                     ),
-                  escaped = false,
                 )
               )
 
@@ -349,7 +348,6 @@ class ClientMiddlewareTest extends CatsEffectSuite {
                       spanLimits.maxNumberOfAttributes,
                       spanLimits.maxAttributeValueLength,
                     ),
-                  escaped = false,
                 )
               )
 
