@@ -7,4 +7,4 @@ addSbtPlugin("org.portable-scala" % "sbt-scala-native-crossproject" % "1.3.2")
 
 addSbtPlugin("org.scalameta" % "sbt-mdoc" % "2.7.1")
 
-addSbtPlugin("com.armanbilge" % "sbt-scala-native-config-brew" % "0.3.0")
+addSbtPlugin("com.armanbilge" % "sbt-scala-native-config-brew" % "0.4.0")
