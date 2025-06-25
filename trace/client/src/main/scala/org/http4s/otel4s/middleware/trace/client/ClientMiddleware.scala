@@ -22,6 +22,7 @@ package client
 import cats.effect.MonadCancelThrow
 import cats.effect.Outcome
 import cats.effect.Resource
+import cats.effect.syntax.resource._
 import cats.syntax.applicative._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
@@ -53,49 +54,51 @@ object ClientMiddleware {
   ) extends ClientMiddleware[F] {
     def wrap(client: Client[F]): Client[F] =
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
-        if (
-          !perRequestTracingFilter(req.requestPrelude).isEnabled ||
-          !tracer.meta.isEnabled
-        ) {
-          client.run(req)
-        } else {
-          val reqNoBody = req.withBodyStream(Stream.empty)
-          val shared = spanDataProvider.processSharedData(reqNoBody)
-          val spanName = spanDataProvider.spanName(reqNoBody, shared)
-          val reqAttributes = spanDataProvider.requestAttributes(reqNoBody, shared)
+        tracer.meta.isEnabled.toResource.flatMap { traceEnabled =>
+          if (
+            !perRequestTracingFilter(req.requestPrelude).isEnabled ||
+            !traceEnabled
+          ) {
+            client.run(req)
+          } else {
+            val reqNoBody = req.withBodyStream(Stream.empty)
+            val shared = spanDataProvider.processSharedData(reqNoBody)
+            val spanName = spanDataProvider.spanName(reqNoBody, shared)
+            val reqAttributes = spanDataProvider.requestAttributes(reqNoBody, shared)
 
-          MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
-            for {
-              res <- tracer
-                .spanBuilder(spanName)
-                .withSpanKind(SpanKind.Client)
-                .addAttributes(reqAttributes)
-                .build
-                .resource
-              span = res.span
-              trace = res.trace
-              traceHeaders <- Resource.eval(tracer.propagate(Headers.empty)).mapK(trace)
-              newReq = req.withHeaders(traceHeaders ++ req.headers)
+            MonadCancelThrow[Resource[F, *]].uncancelable { poll =>
+              for {
+                res <- tracer
+                  .spanBuilder(spanName)
+                  .withSpanKind(SpanKind.Client)
+                  .addAttributes(reqAttributes)
+                  .build
+                  .resource
+                span = res.span
+                trace = res.trace
+                traceHeaders <- Resource.eval(tracer.propagate(Headers.empty)).mapK(trace)
+                newReq = req.withHeaders(traceHeaders ++ req.headers)
 
-              resp <- poll(client.run(newReq).mapK(trace)).guaranteeCase {
-                case Outcome.Succeeded(fa) =>
-                  fa.evalMap { resp =>
-                    val respAttributes =
-                      spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
-                    span.addAttributes(respAttributes) >> span
-                      .setStatus(StatusCode.Error)
-                      .unlessA(resp.status.isSuccess)
-                  }
+                resp <- poll(client.run(newReq).mapK(trace)).guaranteeCase {
+                  case Outcome.Succeeded(fa) =>
+                    fa.evalMap { resp =>
+                      val respAttributes =
+                        spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
+                      span.addAttributes(respAttributes) >> span
+                        .setStatus(StatusCode.Error)
+                        .unlessA(resp.status.isSuccess)
+                    }
 
-                case Outcome.Errored(e) =>
-                  Resource.eval {
-                    span.addAttributes(spanDataProvider.exceptionAttributes(e))
-                  }
+                  case Outcome.Errored(e) =>
+                    Resource.eval {
+                      span.addAttributes(spanDataProvider.exceptionAttributes(e))
+                    }
 
-                case Outcome.Canceled() =>
-                  Resource.unit
-              }
-            } yield resp
+                  case Outcome.Canceled() =>
+                    Resource.unit
+                }
+              } yield resp
+            }
           }
         }
       }

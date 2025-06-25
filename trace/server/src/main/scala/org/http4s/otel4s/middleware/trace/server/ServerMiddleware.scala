@@ -74,41 +74,43 @@ object ServerMiddleware {
     def wrapGenericHttp[G[_]: MonadCancelThrow](f: Http[G, F])(implicit
         kt: KindTransformer[F, G]
     ): Http[G, F] = Kleisli { (req: Request[F]) =>
-      if (
-        !perRequestTracingFilter(req.requestPrelude).isEnabled ||
-        !tracerF.meta.isEnabled
-      ) {
-        f(req)
-      } else {
-        val reqNoBody = req.withBodyStream(Stream.empty)
-        val shared = spanDataProvider.processSharedData(reqNoBody)
-        val spanName = spanDataProvider.spanName(reqNoBody, shared)
-        val reqAttributes = spanDataProvider.requestAttributes(reqNoBody, shared)
-        MonadCancelThrow[G].uncancelable { poll =>
-          val tracerG = tracerF.mapK[G]
-          tracerG.joinOrRoot(req.headers) {
-            tracerG
-              .spanBuilder(spanName)
-              .withSpanKind(SpanKind.Server)
-              .addAttributes(reqAttributes)
-              .build
-              .use { span =>
-                poll(f.run(req))
-                  .guaranteeCase {
-                    case Outcome.Succeeded(fa) =>
-                      fa.flatMap { resp =>
-                        val respAttributes =
-                          spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
-                        span.addAttributes(respAttributes) >> span
-                          .setStatus(StatusCode.Error)
-                          .unlessA(resp.status.isSuccess)
-                      }
-                    case Outcome.Errored(e) =>
-                      span.addAttributes(spanDataProvider.exceptionAttributes(e))
-                    case Outcome.Canceled() =>
-                      MonadCancelThrow[G].unit
-                  }
-              }
+      tracerF.mapK[G].meta.isEnabled.flatMap { traceEnabled =>
+        if (
+          !perRequestTracingFilter(req.requestPrelude).isEnabled ||
+          !traceEnabled
+        ) {
+          f(req)
+        } else {
+          val reqNoBody = req.withBodyStream(Stream.empty)
+          val shared = spanDataProvider.processSharedData(reqNoBody)
+          val spanName = spanDataProvider.spanName(reqNoBody, shared)
+          val reqAttributes = spanDataProvider.requestAttributes(reqNoBody, shared)
+          MonadCancelThrow[G].uncancelable { poll =>
+            val tracerG = tracerF.mapK[G]
+            tracerG.joinOrRoot(req.headers) {
+              tracerG
+                .spanBuilder(spanName)
+                .withSpanKind(SpanKind.Server)
+                .addAttributes(reqAttributes)
+                .build
+                .use { span =>
+                  poll(f.run(req))
+                    .guaranteeCase {
+                      case Outcome.Succeeded(fa) =>
+                        fa.flatMap { resp =>
+                          val respAttributes =
+                            spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
+                          span.addAttributes(respAttributes) >> span
+                            .setStatus(StatusCode.Error)
+                            .unlessA(resp.status.isSuccess)
+                        }
+                      case Outcome.Errored(e) =>
+                        span.addAttributes(spanDataProvider.exceptionAttributes(e))
+                      case Outcome.Canceled() =>
+                        MonadCancelThrow[G].unit
+                    }
+                }
+            }
           }
         }
       }

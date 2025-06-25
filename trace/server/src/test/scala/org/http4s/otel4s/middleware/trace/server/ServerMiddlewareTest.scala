@@ -30,10 +30,10 @@ import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.sdk.data.LimitedData
 import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
 import org.typelevel.otel4s.sdk.trace.SpanLimits
 import org.typelevel.otel4s.sdk.trace.data.EventData
-import org.typelevel.otel4s.sdk.trace.data.LimitedData
 import org.typelevel.otel4s.sdk.trace.data.StatusData
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
