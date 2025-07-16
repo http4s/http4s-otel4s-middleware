@@ -16,32 +16,32 @@
 
 package org.http4s.otel4s.middleware.trace
 
-/** Whether to trace a request and its response. */
-sealed trait PerRequestTracingConfig {
+/** Whether a feature is enabled for a given request and its response. */
+sealed trait PerRequestConfig {
 
-  /** Whether tracing is enabled for a request and its response. */
+  /** Whether the feature is enabled for a given request and its response. */
   def isEnabled: Boolean
 
   /** `Enabled` if both `this` and `that` are `Enabled`. */
-  def and(that: PerRequestTracingConfig): PerRequestTracingConfig
+  def and(that: PerRequestConfig): PerRequestConfig
 
   /** `Enabled` if either `this` or `that` are `Enabled`. */
-  def or(that: PerRequestTracingConfig): PerRequestTracingConfig
+  def or(that: PerRequestConfig): PerRequestConfig
 }
 
-object PerRequestTracingConfig {
+object PerRequestConfig {
 
-  /** Tracing is enabled for a request and its response. */
-  case object Enabled extends PerRequestTracingConfig {
+  /** A feature is enabled for a given request and its response. */
+  case object Enabled extends PerRequestConfig {
     def isEnabled: Boolean = true
-    def and(that: PerRequestTracingConfig): PerRequestTracingConfig = that
-    def or(that: PerRequestTracingConfig): PerRequestTracingConfig = this
+    def and(that: PerRequestConfig): PerRequestConfig = that
+    def or(that: PerRequestConfig): PerRequestConfig = this
   }
 
-  /** Tracing is disabled for a request and its response. */
-  case object Disabled extends PerRequestTracingConfig {
+  /** A feature is disabled for a given request and its response. */
+  case object Disabled extends PerRequestConfig {
     def isEnabled: Boolean = false
-    def and(that: PerRequestTracingConfig): PerRequestTracingConfig = this
-    def or(that: PerRequestTracingConfig): PerRequestTracingConfig = that
+    def and(that: PerRequestConfig): PerRequestConfig = this
+    def or(that: PerRequestConfig): PerRequestConfig = that
   }
 }
