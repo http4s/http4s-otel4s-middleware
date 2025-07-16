@@ -167,7 +167,6 @@ object HeaderRedactor {
     "Trailer",
     "Transfer-Encoding",
     "Upgrade",
-    "User-Agent",
     "Vary",
     "Via",
     "Viewport-Width",
