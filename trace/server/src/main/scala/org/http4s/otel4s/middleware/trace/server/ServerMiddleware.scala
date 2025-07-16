@@ -69,15 +69,15 @@ object ServerMiddleware {
   private[this] final class Impl[F[_]: MonadCancelThrow](
       tracerF: Tracer[F],
       spanDataProvider: SpanDataProvider,
-      perRequestTracingFilter: PerRequestTracingFilter,
+      perRequestTracingFilter: PerRequestFilter,
   ) extends ServerMiddleware[F] {
     def wrapGenericHttp[G[_]: MonadCancelThrow](f: Http[G, F])(implicit
         kt: KindTransformer[F, G]
     ): Http[G, F] = Kleisli { (req: Request[F]) =>
-      tracerF.mapK[G].meta.isEnabled.flatMap { traceEnabled =>
+      tracerF.mapK[G].meta.isEnabled.flatMap { tracerEnabled =>
         if (
-          !perRequestTracingFilter(req.requestPrelude).isEnabled ||
-          !traceEnabled
+          !tracerEnabled ||
+          !perRequestTracingFilter(req.requestPrelude).isEnabled
         ) {
           f(req)
         } else {
@@ -124,11 +124,11 @@ object ServerMiddleware {
   /** A builder for [[`ServerMiddleware`]]s. */
   final class Builder[F[_]: MonadCancelThrow] private[ServerMiddleware] (
       spanDataProvider: SpanDataProvider,
-      perRequestTracingFilter: PerRequestTracingFilter,
+      perRequestTracingFilter: PerRequestFilter,
   )(implicit tracerProvider: TracerProvider[F]) {
     // in case the builder ever gets more parameters
     private[this] def copy(
-        perRequestTracingFilter: PerRequestTracingFilter
+        perRequestTracingFilter: PerRequestFilter
     ): Builder[F] =
       new Builder(
         this.spanDataProvider,
@@ -139,7 +139,7 @@ object ServerMiddleware {
       * should be traced.
       */
     def withPerRequestTracingFilter(
-        perRequestTracingFilter: PerRequestTracingFilter
+        perRequestTracingFilter: PerRequestFilter
     ): Builder[F] =
       copy(perRequestTracingFilter = perRequestTracingFilter)
 
@@ -163,5 +163,5 @@ object ServerMiddleware {
   def builder[F[_]: MonadCancelThrow: TracerProvider](
       spanDataProvider: SpanDataProvider
   ): Builder[F] =
-    new Builder[F](spanDataProvider, PerRequestTracingFilter.alwaysTrace)
+    new Builder[F](spanDataProvider, PerRequestFilter.alwaysEnabled)
 }

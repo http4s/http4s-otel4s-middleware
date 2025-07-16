@@ -18,24 +18,24 @@ package org.http4s.otel4s.middleware.trace
 
 import munit.FunSuite
 
-class PerRequestTracingConfigTest extends FunSuite {
-  import PerRequestTracingConfigTest._
+class PerRequestConfigTest extends FunSuite {
+  import PerRequestConfigTest._
 
   test("and") {
-    assertEquals(PRTC.Enabled.and(PRTC.Enabled), PRTC.Enabled)
-    assertEquals(PRTC.Enabled.and(PRTC.Disabled), PRTC.Disabled)
-    assertEquals(PRTC.Disabled.and(PRTC.Enabled), PRTC.Disabled)
-    assertEquals(PRTC.Disabled.and(PRTC.Disabled), PRTC.Disabled)
+    assertEquals(PRC.Enabled.and(PRC.Enabled), PRC.Enabled)
+    assertEquals(PRC.Enabled.and(PRC.Disabled), PRC.Disabled)
+    assertEquals(PRC.Disabled.and(PRC.Enabled), PRC.Disabled)
+    assertEquals(PRC.Disabled.and(PRC.Disabled), PRC.Disabled)
   }
 
   test("or") {
-    assertEquals(PRTC.Enabled.or(PRTC.Enabled), PRTC.Enabled)
-    assertEquals(PRTC.Enabled.or(PRTC.Disabled), PRTC.Enabled)
-    assertEquals(PRTC.Disabled.or(PRTC.Enabled), PRTC.Enabled)
-    assertEquals(PRTC.Disabled.or(PRTC.Disabled), PRTC.Disabled)
+    assertEquals(PRC.Enabled.or(PRC.Enabled), PRC.Enabled)
+    assertEquals(PRC.Enabled.or(PRC.Disabled), PRC.Enabled)
+    assertEquals(PRC.Disabled.or(PRC.Enabled), PRC.Enabled)
+    assertEquals(PRC.Disabled.or(PRC.Disabled), PRC.Disabled)
   }
 }
 
-object PerRequestTracingConfigTest {
-  val PRTC: PerRequestTracingConfig.type = PerRequestTracingConfig
+object PerRequestConfigTest {
+  val PRC: PerRequestConfig.type = PerRequestConfig
 }

@@ -50,14 +50,16 @@ object ClientMiddleware {
   private[this] class Impl[F[_]: MonadCancelThrow](
       tracer: Tracer[F],
       spanDataProvider: SpanDataProvider,
-      perRequestTracingFilter: PerRequestTracingFilter,
+      perRequestPropagationFilter: PerRequestFilter,
+      perRequestTracingFilter: PerRequestFilter,
   ) extends ClientMiddleware[F] {
     def wrap(client: Client[F]): Client[F] =
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
-        tracer.meta.isEnabled.toResource.flatMap { traceEnabled =>
+        tracer.meta.isEnabled.toResource.flatMap { tracerEnabled =>
+          val reqPrelude = req.requestPrelude
           if (
-            !perRequestTracingFilter(req.requestPrelude).isEnabled ||
-            !traceEnabled
+            !tracerEnabled ||
+            !perRequestTracingFilter(reqPrelude).isEnabled
           ) {
             client.run(req)
           } else {
@@ -76,8 +78,14 @@ object ClientMiddleware {
                   .resource
                 span = res.span
                 trace = res.trace
-                traceHeaders <- Resource.eval(tracer.propagate(Headers.empty)).mapK(trace)
-                newReq = req.withHeaders(traceHeaders ++ req.headers)
+                traceHeaders <-
+                  if (perRequestPropagationFilter(reqPrelude).isEnabled) {
+                    // propagate onto empty headers because propagators can
+                    // theoretically erase all the headers, even though they
+                    // really shouldn't
+                    Resource.eval(tracer.propagate(Headers.empty)).mapK(trace)
+                  } else Resource.pure[F, Headers](Headers.empty)
+                newReq = req.withHeaders(req.headers ++ traceHeaders)
 
                 resp <- poll(client.run(newReq).mapK(trace)).guaranteeCase {
                   case Outcome.Succeeded(fa) =>
@@ -107,22 +115,32 @@ object ClientMiddleware {
   /** A builder for [[`ClientMiddleware`]]s. */
   final class Builder[F[_]: MonadCancelThrow] private[ClientMiddleware] (
       spanDataProvider: SpanDataProvider,
-      perRequestTracingFilter: PerRequestTracingFilter,
+      perRequestPropagationFilter: PerRequestFilter,
+      perRequestTracingFilter: PerRequestFilter,
   )(implicit tracerProvider: TracerProvider[F]) {
-    // in case the builder ever gets more parameters
     private[this] def copy(
-        perRequestTracingFilter: PerRequestTracingFilter
+        perRequestPropagationFilter: PerRequestFilter = this.perRequestPropagationFilter,
+        perRequestTracingFilter: PerRequestFilter = this.perRequestTracingFilter,
     ): Builder[F] =
       new Builder(
-        this.spanDataProvider,
-        perRequestTracingFilter,
+        spanDataProvider = this.spanDataProvider,
+        perRequestPropagationFilter = perRequestPropagationFilter,
+        perRequestTracingFilter = perRequestTracingFilter,
       )
+
+    /** Sets a filter that determines whether each request should propagate
+      * tracing and other context information to the server.
+      */
+    def withPerRequestPropagationFilter(
+        perRequestPropagationFilter: PerRequestFilter
+    ): Builder[F] =
+      copy(perRequestPropagationFilter = perRequestPropagationFilter)
 
     /** Sets a filter that determines whether each request and its response
       * should be traced.
       */
     def withPerRequestTracingFilter(
-        perRequestTracingFilter: PerRequestTracingFilter
+        perRequestTracingFilter: PerRequestFilter
     ): Builder[F] =
       copy(perRequestTracingFilter = perRequestTracingFilter)
 
@@ -136,7 +154,12 @@ object ClientMiddleware {
           .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
           .withSchemaUrl("https://opentelemetry.io/schemas/1.30.0")
           .get
-      } yield new Impl(tracer, spanDataProvider, perRequestTracingFilter)
+      } yield new Impl(
+        tracer = tracer,
+        spanDataProvider = spanDataProvider,
+        perRequestPropagationFilter = perRequestPropagationFilter,
+        perRequestTracingFilter = perRequestTracingFilter,
+      )
   }
 
   /** @return a [[`Builder`]] that uses the given [[`SpanDataProvider`]]
@@ -145,5 +168,9 @@ object ClientMiddleware {
   def builder[F[_]: MonadCancelThrow: TracerProvider](
       spanDataProvider: SpanDataProvider
   ): Builder[F] =
-    new Builder(spanDataProvider, PerRequestTracingFilter.alwaysTrace)
+    new Builder(
+      spanDataProvider = spanDataProvider,
+      perRequestPropagationFilter = PerRequestFilter.alwaysEnabled,
+      perRequestTracingFilter = PerRequestFilter.alwaysEnabled,
+    )
 }

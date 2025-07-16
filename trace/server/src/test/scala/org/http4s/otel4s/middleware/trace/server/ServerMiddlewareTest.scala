@@ -277,7 +277,7 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                     .optIntoHttpRequestHeaders(HeaderRedactor.default)
                     .optIntoHttpResponseHeaders(HeaderRedactor.default)
                 }
-                .withPerRequestTracingFilter(PerRequestTracingFilter.neverTrace)
+                .withPerRequestTracingFilter(PerRequestFilter.neverEnabled)
                 .build
             }
             _ <- wrap(serverMiddleware) {

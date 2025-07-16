@@ -33,6 +33,7 @@ import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.data.LimitedData
 import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
 import org.typelevel.otel4s.sdk.trace.SpanLimits
+import org.typelevel.otel4s.sdk.trace.context.propagation.W3CTraceContextPropagator
 import org.typelevel.otel4s.sdk.trace.data.EventData
 import org.typelevel.otel4s.sdk.trace.data.StatusData
 import org.typelevel.otel4s.trace.SpanKind
@@ -463,7 +464,90 @@ class ClientMiddlewareTest extends CatsEffectSuite {
     }
   }
 
-  test("doesn't trace when PerRequestTracingFilter returns Disabled") {
+  test("propagates trace data into headers by default") {
+    TracesTestkit
+      .inMemory[IO](_.addTextMapPropagators(W3CTraceContextPropagator.default))
+      .use { testkit =>
+        for {
+          clientMiddleware <- {
+            implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+            ClientMiddleware
+              .builder[IO] {
+                ClientSpanDataProvider
+                  .openTelemetry(MinimalRedactor)
+                  .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                  .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                  .optIntoUrlScheme
+                  .optIntoUserAgentOriginal
+              }
+              .build
+          }
+          headers <- clientMiddleware
+            .wrap {
+              Client.fromHttpApp[IO] {
+                HttpApp[IO] { request =>
+                  request.body.compile.drain
+                    .as(Response[IO](Status.Ok, headers = request.headers))
+                }
+              }
+            }
+            .run(Request[IO](Method.GET, uri"http://localhost/?#"))
+            .use { response =>
+              response.body.compile.drain.as(response.headers)
+            }
+          spans <- testkit.finishedSpans
+        } yield {
+          assertEquals(spans.length, 1)
+          val spanCtx = spans.head.spanContext
+          val traceparentHeader = headers.get(ci"traceparent")
+          assert(traceparentHeader.isDefined)
+          assertEquals(traceparentHeader.get.length, 1)
+          assertEquals(
+            traceparentHeader.get.head.value,
+            s"00-${spanCtx.traceIdHex}-${spanCtx.spanIdHex}-${spanCtx.traceFlags.toHex}",
+          )
+        }
+      }
+  }
+
+  test("doesn't propagate when perRequestPropagationFilter returns Disabled") {
+    TracesTestkit
+      .inMemory[IO](_.addTextMapPropagators(W3CTraceContextPropagator.default))
+      .use { testkit =>
+        for {
+          clientMiddleware <- {
+            implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+            ClientMiddleware
+              .builder[IO] {
+                ClientSpanDataProvider
+                  .openTelemetry(MinimalRedactor)
+                  .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                  .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                  .optIntoUrlScheme
+                  .optIntoUserAgentOriginal
+              }
+              .withPerRequestPropagationFilter(PerRequestFilter.neverEnabled)
+              .build
+          }
+          headers <- clientMiddleware
+            .wrap {
+              Client.fromHttpApp[IO] {
+                HttpApp[IO] { request =>
+                  request.body.compile.drain
+                    .as(Response[IO](Status.Ok, headers = request.headers))
+                }
+              }
+            }
+            .run(Request[IO](Method.GET, uri"http://localhost/?#"))
+            .use { response =>
+              response.body.compile.drain.as(response.headers)
+            }
+          _ <- testkit.finishedSpans
+        } yield assert(headers.get(ci"traceparent").isEmpty)
+      }
+  }
+
+  test("doesn't trace when perRequestTracingFilter returns Disabled") {
     TracesTestkit
       .inMemory[IO]()
       .use { testkit =>
@@ -479,7 +563,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
                   .optIntoUrlScheme
                   .optIntoUserAgentOriginal
               }
-              .withPerRequestTracingFilter(PerRequestTracingFilter.neverTrace)
+              .withPerRequestTracingFilter(PerRequestFilter.neverEnabled)
               .build
           }
           _ <- clientMiddleware
