@@ -20,6 +20,7 @@ package server
 
 import cats.data.OptionT
 import cats.effect.IO
+import cats.effect.MonadCancelThrow
 import cats.effect.testkit.TestControl
 import munit.CatsEffectSuite
 import org.http4s.otel4s.middleware.trace.redact.HeaderRedactor
@@ -30,6 +31,7 @@ import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.KindTransformer
 import org.typelevel.otel4s.sdk.data.LimitedData
 import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
 import org.typelevel.otel4s.sdk.trace.SpanLimits
@@ -37,6 +39,7 @@ import org.typelevel.otel4s.sdk.trace.data.EventData
 import org.typelevel.otel4s.sdk.trace.data.StatusData
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
+import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
 
 import scala.concurrent.duration.Duration
@@ -52,6 +55,46 @@ class ServerMiddlewareTest extends CatsEffectSuite {
   )(wrapApp: (ServerMiddleware[IO], HttpApp[IO]) => HttpApp[IO]): Unit = {
     def wrap(serverMiddleware: ServerMiddleware[IO])(httpApp: HttpApp[IO]): HttpApp[IO] =
       wrapApp(serverMiddleware, httpApp)
+
+    test(s"$methodName: composes middlewares") {
+      def middleware(name: String)(implicit tracer: Tracer[IO]): ServerMiddleware[IO] =
+        new ServerMiddleware[IO] {
+          implicit def monadCancelThrow: MonadCancelThrow[IO] = IO.asyncForIO
+          def wrapGenericHttp[G[_]: MonadCancelThrow](http: Http[G, IO])(implicit
+              kt: KindTransformer[IO, G]
+          ): Http[G, IO] = Http[G, IO] { request =>
+            tracer.mapK[G].span(name).surround(http.run(request))
+          }
+        }
+
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          for {
+            tracer <- testkit.tracerProvider.get("test")
+            _ <- {
+              implicit val T: Tracer[IO] = tracer
+              val serverMiddleware =
+                middleware("outer").wrapMiddleware(middleware("inner"))
+              val app = wrap(serverMiddleware) {
+                HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
+              }
+              app.run(Request[IO](Method.GET, uri"http://localhost/"))
+            }
+            spans <- testkit.finishedSpans
+          } yield {
+            assertEquals(spans.length, 2)
+            val spansByName = spans.groupMapReduce(_.name)(identity)((a, _) => a)
+            // also checks that still size 2 and previous line didn't drop elements
+            assertEquals(spansByName.keySet, Set("outer", "inner"))
+            assertEquals(spansByName("outer").parentSpanContext, None)
+            assertEquals(
+              spansByName("inner").parentSpanContext,
+              Some(spansByName("outer").spanContext),
+            )
+          }
+        }
+    }
 
     test(s"$methodName: success with tracing enabled") {
       TracesTestkit
@@ -291,9 +334,14 @@ class ServerMiddlewareTest extends CatsEffectSuite {
   }
 
   suite("wrapGenericHttp")(_.wrapGenericHttp(_))
+  suite("asGenericHttpMiddleware")(_.asGenericHttpMiddleware[IO].apply(_))
   suite("wrapHttpApp")(_.wrapHttpApp(_))
+  suite("asHttpAppMiddleware")(_.asHttpAppMiddleware(_))
   suite("wrapHttpRoutes") { (sm, app) =>
     sm.wrapHttpRoutes(app.mapK(OptionT.liftK)).orNotFound
+  }
+  suite("asHttpRoutesMiddleware") { (sm, app) =>
+    sm.asHttpRoutesMiddleware(app.mapK(OptionT.liftK)).orNotFound
   }
 }
 

@@ -19,7 +19,6 @@ package otel4s.middleware
 package trace
 package server
 
-import cats.data.Kleisli
 import cats.effect.kernel.MonadCancelThrow
 import cats.effect.kernel.Outcome
 import cats.effect.syntax.monadCancel._
@@ -27,59 +26,118 @@ import cats.syntax.applicative._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import fs2.Stream
+import org.http4s.server.HttpMiddleware
+import org.http4s.server.Middleware
 import org.typelevel.otel4s.KindTransformer
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
 
-/** Middleware for wrapping [[org.http4s.HttpApp `HttpApp`]],
+/** A middleware for wrapping [[org.http4s.HttpApp `HttpApp`]],
   * [[org.http4s.HttpRoutes `HttpRoutes`]], and arbitrary
-  * [[org.http4s.Http `Http`]] instances to add tracing.
+  * [[org.http4s.Http `Http`]] instances.
   *
-  * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server]]
+  * Middlewares built with [[ServerMiddleware.builder]] add tracing.
+  *
+  * @note This API requires
+  *       [[cats.effect.kernel.MonadCancelThrow `MonadCancelThrow`]] in order
+  *       to support tracing, and may be overly constraining for some
+  *       middlewares. Consequently, it should not be considered a
+  *       general-purpose interface for middlewares, and should be reserved for
+  *       middlewares that need to compose with one that adds tracing.
   */
-sealed trait ServerMiddleware[F[_]] {
+trait ServerMiddleware[F[_]] { self =>
 
-  /** Wraps an [[org.http4s.Http `Http`]] to add tracing in a way that
-    * abstracts over [[org.http4s.HttpApp `HttpApp`]] and
+  implicit def monadCancelThrow: MonadCancelThrow[F]
+
+  /** Wraps an [[org.http4s.Http `Http`]] in a way that abstracts over
+    * [[org.http4s.HttpApp `HttpApp`]] and
     * [[org.http4s.HttpRoutes `HttpRoutes`]]. In most cases, it is preferable
-    * to use the methods that directly wrap the specific desired type.
+    * to use the method that directly wraps the specific desired type.
     *
-    * @return a traced wrapper around the given `Http`
+    * @return the given `Http` modified with this middleware's functionality
     * @see [[wrapHttpApp]]
     * @see [[wrapHttpRoutes]]
     */
   def wrapGenericHttp[G[_]: MonadCancelThrow](
-      f: Http[G, F]
+      http: Http[G, F]
   )(implicit kt: KindTransformer[F, G]): Http[G, F]
 
-  /** @return a traced wrapper around the given
-    *         [[org.http4s.HttpApp `HttpApp`]]
+  /** The wrapping of [[org.http4s.Http `Http`]] in a way that abstracts over
+    * [[org.http4s.HttpApp `HttpApp`]] and
+    * [[org.http4s.HttpRoutes `HttpRoutes`]], expressed as a
+    * [[org.http4s.server.Middleware `Middleware`]]. In most cases, it is preferable
+    * to use the `Middleware` that directly wraps the specific desired type.
+    *
+    * @see [[wrapGenericHttp]]
+    * @see [[asHttpAppMiddleware]]
+    * @see [[asHttpRoutesMiddleware]]
     */
-  def wrapHttpApp(httpApp: HttpApp[F]): HttpApp[F]
+  final def asGenericHttpMiddleware[G[_]: MonadCancelThrow](implicit
+      kt: KindTransformer[F, G]
+  ): Middleware[G, Request[F], Response[F], Request[F], Response[F]] =
+    wrapGenericHttp(_)
 
-  /** @return a traced wrapper around the given
-    *         [[org.http4s.HttpRoutes `HttpRoutes`]]
+  /** @return the given [[org.http4s.HttpApp `HttpApp`]] modified with this
+    *         middleware's functionality
     */
-  def wrapHttpRoutes(httpRoutes: HttpRoutes[F]): HttpRoutes[F]
+  final def wrapHttpApp(httpApp: HttpApp[F]): HttpApp[F] =
+    wrapGenericHttp(httpApp)
+
+  /** The wrapping of [[org.http4s.HttpApp `HttpApp`s]] expressed as a
+    * [[org.http4s.server.Middleware `Middleware`]].
+    *
+    * @see [[wrapHttpApp]]
+    */
+  final def asHttpAppMiddleware: Middleware[F, Request[F], Response[F], Request[F], Response[F]] =
+    wrapHttpApp
+
+  /** @return the given [[org.http4s.HttpRoutes `HttpRoutes`]] modified with
+    *         this middleware's functionality
+    */
+  final def wrapHttpRoutes(httpRoutes: HttpRoutes[F]): HttpRoutes[F] =
+    wrapGenericHttp(httpRoutes)
+
+  /** The wrapping of [[org.http4s.HttpRoutes `HttpRoutes`]] expressed as an
+    * [[org.http4s.server.HttpMiddleware `HttpMiddleware`]].
+    *
+    * @see [[wrapHttpRoutes]]
+    */
+  final def asHttpRoutesMiddleware: HttpMiddleware[F] =
+    wrapHttpRoutes
+
+  /** @return a middleware that modifies [[org.http4s.HttpApp `HttpApp`]],
+    *         [[org.http4s.HttpRoutes `HttpRoutes`]], and arbitrary
+    *         [[org.http4s.Http `Http`]] instances using `that` middleware,
+    *         and the resulting instance using this middleware
+    */
+  final def wrapMiddleware(that: ServerMiddleware[F]): ServerMiddleware[F] =
+    new ServerMiddleware[F] {
+      implicit def monadCancelThrow: MonadCancelThrow[F] =
+        self.monadCancelThrow
+      def wrapGenericHttp[G[_]: MonadCancelThrow](http: Http[G, F])(implicit
+          kt: KindTransformer[F, G]
+      ): Http[G, F] = self.wrapGenericHttp(that.wrapGenericHttp(http))
+    }
 }
 
 object ServerMiddleware {
-  private[this] final class Impl[F[_]: MonadCancelThrow](
+  private[this] final class Impl[F[_]](
       tracerF: Tracer[F],
       spanDataProvider: SpanDataProvider,
       perRequestTracingFilter: PerRequestFilter,
-  ) extends ServerMiddleware[F] {
-    def wrapGenericHttp[G[_]: MonadCancelThrow](f: Http[G, F])(implicit
+  )(implicit val monadCancelThrow: MonadCancelThrow[F])
+      extends ServerMiddleware[F] {
+    def wrapGenericHttp[G[_]: MonadCancelThrow](http: Http[G, F])(implicit
         kt: KindTransformer[F, G]
-    ): Http[G, F] = Kleisli { (req: Request[F]) =>
+    ): Http[G, F] = Http[G, F] { req =>
       tracerF.mapK[G].meta.isEnabled.flatMap { tracerEnabled =>
         if (
           !tracerEnabled ||
           !perRequestTracingFilter(req.requestPrelude).isEnabled
         ) {
-          f(req)
+          http(req)
         } else {
           val reqNoBody = req.withBodyStream(Stream.empty)
           val shared = spanDataProvider.processSharedData(reqNoBody)
@@ -94,7 +152,7 @@ object ServerMiddleware {
                 .addAttributes(reqAttributes)
                 .build
                 .use { span =>
-                  poll(f.run(req))
+                  poll(http.run(req))
                     .guaranteeCase {
                       case Outcome.Succeeded(fa) =>
                         fa.flatMap { resp =>
@@ -115,13 +173,9 @@ object ServerMiddleware {
         }
       }
     }
-    def wrapHttpApp(httpApp: HttpApp[F]): HttpApp[F] =
-      wrapGenericHttp(httpApp)
-    def wrapHttpRoutes(httpRoutes: HttpRoutes[F]): HttpRoutes[F] =
-      wrapGenericHttp(httpRoutes)
   }
 
-  /** A builder for [[`ServerMiddleware`]]s. */
+  /** A builder for [[`ServerMiddleware`]]s that add tracing. */
   final class Builder[F[_]: MonadCancelThrow] private[ServerMiddleware] (
       spanDataProvider: SpanDataProvider,
       perRequestTracingFilter: PerRequestFilter,
@@ -158,7 +212,8 @@ object ServerMiddleware {
   }
 
   /** @return a [[`Builder`]] that uses the given [[`SpanDataProvider`]]
-    * @see [[`ServerSpanDataProvider`]] for creating an OpenTelemetry-compliant provider
+    * @see [[ServerSpanDataProvider.openTelemetry]] for creating OpenTelemetry-
+    *      compliant providers
     */
   def builder[F[_]: MonadCancelThrow: TracerProvider](
       spanDataProvider: SpanDataProvider

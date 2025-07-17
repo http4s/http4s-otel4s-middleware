@@ -28,22 +28,37 @@ import cats.syntax.flatMap._
 import cats.syntax.functor._
 import fs2.Stream
 import org.http4s.client.Client
+import org.http4s.client.Middleware
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
 
-/** Middleware for wrapping [[org.http4s.client.Client HTTP `Client`s]] to add
-  * tracing.
+/** A middleware for wrapping [[org.http4s.client.Client HTTP `Client`s]].
   *
-  * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client]]
+  * Middlewares built with [[ClientMiddleware.builder]] add tracing.
   */
-sealed trait ClientMiddleware[F[_]] {
+trait ClientMiddleware[F[_]] extends Middleware[F] {
 
-  /** @return a traced wrapper around the given
-    *         [[org.http4s.client.Client `Client`]]
+  @deprecated("use `wrapClient` instead", since = "http4s-otel4s-middleware 0.14.0")
+  final def wrap(client: Client[F]): Client[F] = wrapClient(client)
+
+  /** @return the given [[org.http4s.client.Client `Client`]] modified with
+    *         this middleware's functionality
     */
-  def wrap(client: Client[F]): Client[F]
+  def wrapClient(client: Client[F]): Client[F]
+
+  /** @return the given [[org.http4s.client.Client `Client`]] modified with
+    *         this middleware's functionality
+    */
+  final def apply(client: Client[F]): Client[F] = wrapClient(client)
+
+  /** @return a middleware that modifies [[org.http4s.client.Client `Client`s]]
+    *         using `that` middleware, and the resulting `Client` using this
+    *         middleware
+    */
+  final def wrapMiddleware(that: Middleware[F]): ClientMiddleware[F] =
+    client => wrapClient(that(client))
 }
 
 object ClientMiddleware {
@@ -53,7 +68,7 @@ object ClientMiddleware {
       perRequestPropagationFilter: PerRequestFilter,
       perRequestTracingFilter: PerRequestFilter,
   ) extends ClientMiddleware[F] {
-    def wrap(client: Client[F]): Client[F] =
+    def wrapClient(client: Client[F]): Client[F] =
       Client[F] { (req: Request[F]) => // Resource[F, Response[F]]
         tracer.meta.isEnabled.toResource.flatMap { tracerEnabled =>
           val reqPrelude = req.requestPrelude
@@ -112,7 +127,7 @@ object ClientMiddleware {
       }
   }
 
-  /** A builder for [[`ClientMiddleware`]]s. */
+  /** A builder for [[`ClientMiddleware`]]s that add tracing. */
   final class Builder[F[_]: MonadCancelThrow] private[ClientMiddleware] (
       spanDataProvider: SpanDataProvider,
       perRequestPropagationFilter: PerRequestFilter,
@@ -163,7 +178,8 @@ object ClientMiddleware {
   }
 
   /** @return a [[`Builder`]] that uses the given [[`SpanDataProvider`]]
-    * @see [[`ClientSpanDataProvider`]] for creating an OpenTelemetry-compliant provider
+    * @see [[ClientSpanDataProvider.openTelemetry]] for creating OpenTelemetry-
+    *      compliant providers
     */
   def builder[F[_]: MonadCancelThrow: TracerProvider](
       spanDataProvider: SpanDataProvider
