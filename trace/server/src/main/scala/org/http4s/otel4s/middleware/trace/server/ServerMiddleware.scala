@@ -126,24 +126,27 @@ object ServerMiddleware {
   private[this] final class Impl[F[_]](
       tracerF: Tracer[F],
       spanDataProvider: SpanDataProvider,
+      perRequestReversePropagationFilter: PerRequestFilter,
       perRequestTracingFilter: PerRequestFilter,
   )(implicit val monadCancelThrow: MonadCancelThrow[F])
       extends ServerMiddleware[F] {
-    def wrapGenericHttp[G[_]: MonadCancelThrow](http: Http[G, F])(implicit
-        kt: KindTransformer[F, G]
+    def wrapGenericHttp[G[_]](http: Http[G, F])(implicit
+        G: MonadCancelThrow[G],
+        kt: KindTransformer[F, G],
     ): Http[G, F] = Http[G, F] { req =>
       tracerF.mapK[G].meta.isEnabled.flatMap { tracerEnabled =>
+        val reqPrelude = req.requestPrelude
         if (
           !tracerEnabled ||
-          !perRequestTracingFilter(req.requestPrelude).isEnabled
+          !perRequestTracingFilter(reqPrelude).isEnabled
         ) {
-          http(req)
+          http.run(req)
         } else {
           val reqNoBody = req.withBodyStream(Stream.empty)
           val shared = spanDataProvider.processSharedData(reqNoBody)
           val spanName = spanDataProvider.spanName(reqNoBody, shared)
           val reqAttributes = spanDataProvider.requestAttributes(reqNoBody, shared)
-          MonadCancelThrow[G].uncancelable { poll =>
+          G.uncancelable { poll =>
             val tracerG = tracerF.mapK[G]
             tracerG.joinOrRoot(req.headers) {
               tracerG
@@ -152,21 +155,27 @@ object ServerMiddleware {
                 .addAttributes(reqAttributes)
                 .build
                 .use { span =>
-                  poll(http.run(req))
-                    .guaranteeCase {
-                      case Outcome.Succeeded(fa) =>
-                        fa.flatMap { resp =>
-                          val respAttributes =
-                            spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
-                          span.addAttributes(respAttributes) >> span
-                            .setStatus(StatusCode.Error)
-                            .unlessA(resp.status.isSuccess)
-                        }
-                      case Outcome.Errored(e) =>
-                        span.addAttributes(spanDataProvider.exceptionAttributes(e))
-                      case Outcome.Canceled() =>
-                        MonadCancelThrow[G].unit
+                  poll {
+                    http.run(req).flatMap { resp =>
+                      if (perRequestReversePropagationFilter(reqPrelude).isEnabled) {
+                        for (traceHeaders <- tracerG.propagate(Headers.empty))
+                          yield resp.withHeaders(resp.headers ++ traceHeaders)
+                      } else G.pure(resp)
                     }
+                  }.guaranteeCase {
+                    case Outcome.Succeeded(fa) =>
+                      fa.flatMap { resp =>
+                        val respAttributes =
+                          spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
+                        span.addAttributes(respAttributes) >> span
+                          .setStatus(StatusCode.Error)
+                          .unlessA(resp.status.isSuccess)
+                      }
+                    case Outcome.Errored(e) =>
+                      span.addAttributes(spanDataProvider.exceptionAttributes(e))
+                    case Outcome.Canceled() =>
+                      G.unit
+                  }
                 }
             }
           }
@@ -178,19 +187,31 @@ object ServerMiddleware {
   /** A builder for [[`ServerMiddleware`]]s that add tracing. */
   final class Builder[F[_]: MonadCancelThrow] private[ServerMiddleware] (
       spanDataProvider: SpanDataProvider,
+      perRequestReversePropagationFilter: PerRequestFilter,
       perRequestTracingFilter: PerRequestFilter,
   )(implicit tracerProvider: TracerProvider[F]) {
-    // in case the builder ever gets more parameters
     private[this] def copy(
-        perRequestTracingFilter: PerRequestFilter
+        perRequestReversePropagationFilter: PerRequestFilter =
+          this.perRequestReversePropagationFilter,
+        perRequestTracingFilter: PerRequestFilter = this.perRequestTracingFilter,
     ): Builder[F] =
       new Builder(
-        this.spanDataProvider,
-        perRequestTracingFilter,
+        spanDataProvider = this.spanDataProvider,
+        perRequestReversePropagationFilter = perRequestReversePropagationFilter,
+        perRequestTracingFilter = perRequestTracingFilter,
       )
 
+    /** Sets a filter that determines whether each request should propagate
+      * tracing and other context information back to the requesting client in
+      * the response headers, primarily for debugging (default: never enabled).
+      */
+    def withPerRequestReversePropagationFilter(
+        perRequestReversePropagationFilter: PerRequestFilter
+    ): Builder[F] =
+      copy(perRequestReversePropagationFilter = perRequestReversePropagationFilter)
+
     /** Sets a filter that determines whether each request and its response
-      * should be traced.
+      * should be traced (default: always enabled).
       */
     def withPerRequestTracingFilter(
         perRequestTracingFilter: PerRequestFilter
@@ -208,7 +229,12 @@ object ServerMiddleware {
           .withVersion(org.http4s.otel4s.middleware.BuildInfo.version)
           .withSchemaUrl("https://opentelemetry.io/schemas/1.30.0")
           .get
-      } yield new Impl(tracer, spanDataProvider, perRequestTracingFilter)
+      } yield new Impl(
+        tracerF = tracer,
+        spanDataProvider = spanDataProvider,
+        perRequestReversePropagationFilter = perRequestReversePropagationFilter,
+        perRequestTracingFilter = perRequestTracingFilter,
+      )
   }
 
   /** @return a [[`Builder`]] that uses the given [[`SpanDataProvider`]]
@@ -218,5 +244,9 @@ object ServerMiddleware {
   def builder[F[_]: MonadCancelThrow: TracerProvider](
       spanDataProvider: SpanDataProvider
   ): Builder[F] =
-    new Builder[F](spanDataProvider, PerRequestFilter.alwaysEnabled)
+    new Builder[F](
+      spanDataProvider = spanDataProvider,
+      perRequestReversePropagationFilter = PerRequestFilter.neverEnabled,
+      perRequestTracingFilter = PerRequestFilter.alwaysEnabled,
+    )
 }

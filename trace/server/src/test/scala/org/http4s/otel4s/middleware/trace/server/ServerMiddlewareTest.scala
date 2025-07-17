@@ -35,6 +35,7 @@ import org.typelevel.otel4s.KindTransformer
 import org.typelevel.otel4s.sdk.data.LimitedData
 import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
 import org.typelevel.otel4s.sdk.trace.SpanLimits
+import org.typelevel.otel4s.sdk.trace.context.propagation.W3CTraceContextPropagator
 import org.typelevel.otel4s.sdk.trace.data.EventData
 import org.typelevel.otel4s.sdk.trace.data.StatusData
 import org.typelevel.otel4s.trace.SpanKind
@@ -329,6 +330,73 @@ class ServerMiddlewareTest extends CatsEffectSuite {
               .run(Request[IO](Method.GET, uri"http://localhost/?#"))
             spans <- testkit.finishedSpans
           } yield assertEquals(spans.length, 0)
+        }
+    }
+
+    test(s"$methodName: doesn't propagate trace data to requesting client by default") {
+      TracesTestkit
+        .inMemory[IO](_.addTextMapPropagators(W3CTraceContextPropagator.default))
+        .use { testkit =>
+          for {
+            serverMiddleware <- {
+              implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+              ServerMiddleware
+                .builder[IO] {
+                  ServerSpanDataProvider
+                    .openTelemetry(NoopRedactor)
+                    .optIntoClientPort
+                    .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                    .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                }
+                .build
+            }
+            headers <- wrap(serverMiddleware) {
+              HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
+            }
+              .run(Request[IO](Method.GET, uri"http://localhost/"))
+              .map(_.headers)
+            _ <- testkit.finishedSpans
+          } yield assert(headers.get(ci"traceparent").isEmpty)
+        }
+    }
+
+    test(
+      s"$methodName: propagates trace data to requesting client when perRequestReversePropagationFilter returns Enabled"
+    ) {
+      TracesTestkit
+        .inMemory[IO](_.addTextMapPropagators(W3CTraceContextPropagator.default))
+        .use { testkit =>
+          for {
+            serverMiddleware <- {
+              implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+              ServerMiddleware
+                .builder[IO] {
+                  ServerSpanDataProvider
+                    .openTelemetry(NoopRedactor)
+                    .optIntoClientPort
+                    .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                    .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                }
+                .withPerRequestReversePropagationFilter(PerRequestFilter.alwaysEnabled)
+                .build
+            }
+            headers <- wrap(serverMiddleware) {
+              HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
+            }
+              .run(Request[IO](Method.GET, uri"http://localhost/"))
+              .map(_.headers)
+            spans <- testkit.finishedSpans
+          } yield {
+            assertEquals(spans.length, 1)
+            val spanCtx = spans.head.spanContext
+            val traceparentHeader = headers.get(ci"traceparent")
+            assert(traceparentHeader.isDefined)
+            assertEquals(traceparentHeader.get.length, 1)
+            assertEquals(
+              traceparentHeader.get.head.value,
+              s"00-${spanCtx.traceIdHex}-${spanCtx.spanIdHex}-${spanCtx.traceFlags.toHex}",
+            )
+          }
         }
     }
   }
