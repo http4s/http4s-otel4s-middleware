@@ -197,6 +197,7 @@ object ClientSpanDataProvider {
     *                    before using them as values for `Attribute`s.
     * @return a configurable [[`SpanDataProvider`]] following OpenTelemetry
     *         semantic conventions
+    * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client]]
     */
   def openTelemetry(urlRedactor: UriRedactor): SpanDataProvider with OpenTelemetryBuilder =
     new OtelProvider(urlRedactor, UriTemplateClassifier.indeterminate, OptIn())
