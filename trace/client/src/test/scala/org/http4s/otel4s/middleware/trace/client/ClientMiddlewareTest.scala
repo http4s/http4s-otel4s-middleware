@@ -49,6 +49,49 @@ class ClientMiddlewareTest extends CatsEffectSuite {
 
   private val spanLimits = SpanLimits.default
 
+  test("composes middlewares") {
+    def middleware(name: String)(implicit tracer: Tracer[IO]): ClientMiddleware[IO] =
+      client =>
+        Client[IO] { request =>
+          for {
+            spanOps <- tracer.span(name).resource
+            response <- client.run(request).mapK(spanOps.trace)
+          } yield response
+        }
+
+    TracesTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        for {
+          tracer <- testkit.tracerProvider.get("test")
+          _ <- {
+            implicit val T: Tracer[IO] = tracer
+            val clientMiddleware =
+              middleware("outer").wrapMiddleware(middleware("inner"))
+            val client = clientMiddleware.wrapClient {
+              Client.fromHttpApp[IO] {
+                HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
+              }
+            }
+            client
+              .run(Request[IO](Method.GET, uri"http://localhost/"))
+              .use(_.body.compile.drain)
+          }
+          spans <- testkit.finishedSpans
+        } yield {
+          assertEquals(spans.length, 2)
+          val spansByName = spans.groupMapReduce(_.name)(identity)((a, _) => a)
+          // also checks that still size 2 and previous line didn't drop elements
+          assertEquals(spansByName.keySet, Set("outer", "inner"))
+          assertEquals(spansByName("outer").parentSpanContext, None)
+          assertEquals(
+            spansByName("inner").parentSpanContext,
+            Some(spansByName("outer").spanContext),
+          )
+        }
+      }
+  }
+
   test("success with tracing enabled") {
     TracesTestkit
       .inMemory[IO]()
@@ -76,7 +119,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
             val headers =
               Headers(Header.Raw(ci"foo", "bar"), Header.Raw(ci"baz", "qux"))
             val response = Response[IO](Status.Ok).withHeaders(headers)
-            val client = clientMiddleware.wrap {
+            val client = clientMiddleware.wrapClient {
               Client.fromHttpApp[IO] {
                 HttpApp[IO](_.body.compile.drain.as(response))
               }
@@ -149,7 +192,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
                 .run(req)
                 .evalTap(_ => Tracer[IO].currentSpanOrThrow.flatMap(_.updateName("NEW SPAN NAME")))
             }
-            val tracedClient = clientMiddleware.wrap(traceManipulatingClient)
+            val tracedClient = clientMiddleware.wrapClient(traceManipulatingClient)
             val request = Request[IO](Method.GET, uri"http://localhost/?#")
             tracedClient.run(request).use(_.body.compile.drain)
           }
@@ -198,7 +241,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
           }
           _ <- {
             val response = Response[IO](Status.Ok)
-            val client = clientMiddleware.wrap {
+            val client = clientMiddleware.wrapClient {
               Client.fromHttpApp[IO] {
                 HttpApp[IO](_.body.compile.drain.as(response))
               }
@@ -233,7 +276,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
             .build
             .flatMap { clientMiddleware =>
               val error = new RuntimeException("oops") with NoStackTrace {}
-              val client = clientMiddleware.wrap {
+              val client = clientMiddleware.wrapClient {
                 Client { (_: Request[IO]) =>
                   Resource.raiseError[IO, Response[IO], Throwable](error)
                 }
@@ -294,7 +337,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
             }
             .build
             .flatMap { clientMiddleware =>
-              val client = clientMiddleware.wrap {
+              val client = clientMiddleware.wrapClient {
                 Client { (_: Request[IO]) =>
                   Resource.canceled[IO] >> Resource.never[IO, Response[IO]]
                 }
@@ -333,7 +376,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
             .build
             .flatMap { clientMiddleware =>
               val error = new RuntimeException("oops") with NoStackTrace {}
-              val client = clientMiddleware.wrap {
+              val client = clientMiddleware.wrapClient {
                 Client.fromHttpApp[IO] {
                   HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
                 }
@@ -394,7 +437,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
             }
             .build
             .flatMap { clientMiddleware =>
-              val client = clientMiddleware.wrap {
+              val client = clientMiddleware.wrapClient {
                 Client.fromHttpApp[IO] {
                   HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
                 }
@@ -432,7 +475,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
             }
             .build
             .flatMap { clientMiddleware =>
-              val client = clientMiddleware.wrap {
+              val client = clientMiddleware.wrapClient {
                 Client.fromHttpApp[IO] {
                   HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.InternalServerError)))
                 }
@@ -483,7 +526,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               .build
           }
           headers <- clientMiddleware
-            .wrap {
+            .wrapClient {
               Client.fromHttpApp[IO] {
                 HttpApp[IO] { request =>
                   request.body.compile.drain
@@ -530,7 +573,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               .build
           }
           headers <- clientMiddleware
-            .wrap {
+            .wrapClient {
               Client.fromHttpApp[IO] {
                 HttpApp[IO] { request =>
                   request.body.compile.drain
@@ -567,7 +610,7 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               .build
           }
           _ <- clientMiddleware
-            .wrap {
+            .wrapClient {
               Client.fromHttpApp[IO] {
                 HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
               }
