@@ -144,7 +144,8 @@ object ClientMiddleware {
       )
 
     /** Sets a filter that determines whether each request should propagate
-      * tracing and other context information to the server.
+      * tracing and other context information to the server (default: always
+      * enabled).
       */
     def withPerRequestPropagationFilter(
         perRequestPropagationFilter: PerRequestFilter
@@ -152,7 +153,7 @@ object ClientMiddleware {
       copy(perRequestPropagationFilter = perRequestPropagationFilter)
 
     /** Sets a filter that determines whether each request and its response
-      * should be traced.
+      * should be traced (default: always enabled).
       */
     def withPerRequestTracingFilter(
         perRequestTracingFilter: PerRequestFilter
