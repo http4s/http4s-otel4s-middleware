@@ -185,6 +185,7 @@ object ServerSpanDataProvider {
     *                 query before using them as values for `Attribute`s.
     * @return a configurable [[`SpanDataProvider`]] following OpenTelemetry
     *         semantic conventions
+    * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server]]
     */
   def openTelemetry(redactor: PathAndQueryRedactor): SpanDataProvider with OpenTelemetryBuilder =
     new OtelProvider(redactor, RouteClassifier.indeterminate, OptIn())

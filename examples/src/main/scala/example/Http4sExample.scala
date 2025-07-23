@@ -96,7 +96,7 @@ object Http4sExample extends IOApp with Common {
       client <- EmberClientBuilder
         .default[F]
         .build
-        .map(clientMiddleware.wrap)
+        .map(clientMiddleware.wrapClient)
       metricsOps <- OtelMetrics.serverMetricsOps[F]().toResource
       serverMiddleware <- ServerMiddleware
         .builder[F] {

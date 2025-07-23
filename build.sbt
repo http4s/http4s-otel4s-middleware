@@ -133,6 +133,7 @@ lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     name := s"$baseName-trace-server",
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "cats-effect" % catsEffectV,
+      "org.http4s" %%% "http4s-server" % http4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
     ),
   )
