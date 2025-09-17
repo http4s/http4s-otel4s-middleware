@@ -209,6 +209,10 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                   _ <- app.run(request).attempt
                   spans <- testkit.finishedSpans
                 } yield {
+                  assertEquals(spans.length, 1)
+                  val span = spans.head
+                  assertEquals(span.status, StatusData.Error(None))
+
                   assertEquals(spans.map(_.attributes.elements), List(attributes))
                   assertEquals(spans.map(_.events.elements), List(events))
                   assertEquals(spans.map(_.status), List(status))

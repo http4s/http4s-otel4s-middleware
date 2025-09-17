@@ -169,7 +169,7 @@ object ServerMiddleware {
                           spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
                         span.addAttributes(respAttributes) >> span
                           .setStatus(StatusCode.Error)
-                          .unlessA(resp.status.isSuccess)
+                          .whenA(resp.status.responseClass == Status.ServerError)
                       }
                     case Outcome.Errored(e) =>
                       span.addAttributes(spanDataProvider.exceptionAttributes(e))
