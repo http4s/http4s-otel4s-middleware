@@ -217,6 +217,48 @@ class ServerMiddlewareTest extends CatsEffectSuite {
           }
       }
     }
+    test(s"$methodName: does not set error status on a client error response") {
+      TestControl.executeEmbed {
+        TracesTestkit
+          .inMemory[IO]()
+          .use { testkit =>
+            implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+            ServerMiddleware
+              .builder[IO] {
+                ServerSpanDataProvider
+                  .openTelemetry(NoopRedactor)
+                  .optIntoClientPort
+                  .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                  .optIntoHttpResponseHeaders(HeaderRedactor.default)
+              }
+              .build
+              .flatMap { serverMiddleware =>
+                val app = wrap(serverMiddleware) {
+                  HttpApp[IO](_ => IO.pure(Response[IO](Status.BadRequest)))
+                }
+                val request = Request[IO](Method.GET, uri"http://localhost/")
+                val status = StatusData(StatusCode.Unset)
+
+                val attributes = Attributes(
+                  Attribute("http.response.status_code", Status.BadRequest.code.longValue),
+                  Attribute("http.request.method", "GET"),
+                  Attribute("network.protocol.version", "1.1"),
+                  Attribute("url.path", "/"),
+                  Attribute("url.scheme", "http"),
+                )
+
+                for {
+                  _ <- app.run(request).attempt
+                  spans <- testkit.finishedSpans
+                } yield {
+                  assertEquals(spans.map(_.attributes.elements), List(attributes))
+                  assertEquals(spans.map(_.events.elements), List(Vector.empty))
+                  assertEquals(spans.map(_.status), List(status))
+                }
+              }
+          }
+      }
+    }
 
     test(s"$methodName: records error.type on error response 5xx") {
       TestControl.executeEmbed {
