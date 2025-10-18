@@ -134,7 +134,7 @@ object ServerMiddleware {
         G: MonadCancelThrow[G],
         kt: KindTransformer[F, G],
     ): Http[G, F] = Http[G, F] { req =>
-      tracerF.mapK[G].meta.isEnabled.flatMap { tracerEnabled =>
+      tracerF.liftTo[G].meta.isEnabled.flatMap { tracerEnabled =>
         val reqPrelude = req.requestPrelude
         if (
           !tracerEnabled ||
@@ -147,7 +147,7 @@ object ServerMiddleware {
           val spanName = spanDataProvider.spanName(reqNoBody, shared)
           val reqAttributes = spanDataProvider.requestAttributes(reqNoBody, shared)
           G.uncancelable { poll =>
-            val tracerG = tracerF.mapK[G]
+            val tracerG = tracerF.liftTo[G]
             tracerG.joinOrRoot(req.headers) {
               tracerG
                 .spanBuilder(spanName)

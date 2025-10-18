@@ -64,7 +64,7 @@ class ServerMiddlewareTest extends CatsEffectSuite {
           def wrapGenericHttp[G[_]: MonadCancelThrow](http: Http[G, IO])(implicit
               kt: KindTransformer[IO, G]
           ): Http[G, IO] = Http[G, IO] { request =>
-            tracer.mapK[G].span(name).surround(http.run(request))
+            tracer.liftTo[G].span(name).surround(http.run(request))
           }
         }
 

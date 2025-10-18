@@ -21,7 +21,7 @@ val http4sV = "0.23.32"
 val munitV = "1.0.0"
 val munitCatsEffectV = "2.1.0"
 val openTelemetryV = "1.54.1"
-val otel4sV = "0.13.1"
+val otel4sV = "0.14.0"
 val slf4jV = "1.7.36"
 
 val baseName = "http4s-otel4s-middleware"
