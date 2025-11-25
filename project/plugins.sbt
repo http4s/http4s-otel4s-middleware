@@ -1,4 +1,4 @@
-addSbtPlugin("org.http4s" % "sbt-http4s-org" % "2.0.2")
+addSbtPlugin("org.http4s" % "sbt-http4s-org" % "2.0.3")
 addSbtPlugin("com.eed3si9n" % "sbt-buildinfo" % "0.13.1")
 addSbtPlugin("org.scala-js" % "sbt-scalajs" % "1.20.1")
 addSbtPlugin("org.portable-scala" % "sbt-scalajs-crossproject" % "1.3.2")
