@@ -509,7 +509,9 @@ class ClientMiddlewareTest extends CatsEffectSuite {
 
   test("propagates trace data into headers by default") {
     TracesTestkit
-      .inMemory[IO](_.addTextMapPropagators(W3CTraceContextPropagator.default))
+      .builder[IO]
+      .addTracerProviderCustomizer(_.addTextMapPropagators(W3CTraceContextPropagator.default))
+      .build
       .use { testkit =>
         for {
           clientMiddleware <- {
@@ -555,7 +557,9 @@ class ClientMiddlewareTest extends CatsEffectSuite {
 
   test("doesn't propagate when perRequestPropagationFilter returns Disabled") {
     TracesTestkit
-      .inMemory[IO](_.addTextMapPropagators(W3CTraceContextPropagator.default))
+      .builder[IO]
+      .addTracerProviderCustomizer(_.addTextMapPropagators(W3CTraceContextPropagator.default))
+      .build
       .use { testkit =>
         for {
           clientMiddleware <- {

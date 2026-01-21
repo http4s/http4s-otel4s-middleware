@@ -377,7 +377,9 @@ class ServerMiddlewareTest extends CatsEffectSuite {
 
     test(s"$methodName: doesn't propagate trace data to requesting client by default") {
       TracesTestkit
-        .inMemory[IO](_.addTextMapPropagators(W3CTraceContextPropagator.default))
+        .builder[IO]
+        .addTracerProviderCustomizer(_.addTextMapPropagators(W3CTraceContextPropagator.default))
+        .build
         .use { testkit =>
           for {
             serverMiddleware <- {
@@ -406,7 +408,9 @@ class ServerMiddlewareTest extends CatsEffectSuite {
       s"$methodName: propagates trace data to requesting client when perRequestReversePropagationFilter returns Enabled"
     ) {
       TracesTestkit
-        .inMemory[IO](_.addTextMapPropagators(W3CTraceContextPropagator.default))
+        .builder[IO]
+        .addTracerProviderCustomizer(_.addTextMapPropagators(W3CTraceContextPropagator.default))
+        .build
         .use { testkit =>
           for {
             serverMiddleware <- {
