@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.15" // your current series x.y
+ThisBuild / tlBaseVersion := "0.16" // your current series x.y
 
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
@@ -21,7 +21,8 @@ val http4sV = "0.23.33"
 val munitV = "1.0.0"
 val munitCatsEffectV = "2.1.0"
 val openTelemetryV = "1.58.0"
-val otel4sV = "0.14.0"
+val otel4sV = "0.15.0"
+val otel4sSdkV = "0.16.0"
 val slf4jV = "1.7.36"
 
 val baseName = "http4s-otel4s-middleware"
@@ -34,7 +35,7 @@ val sharedSettings = Seq(
     "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
     "org.scalameta" %%% "munit" % munitV % Test,
     "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
-    "org.typelevel" %%% "otel4s-sdk-testkit" % otel4sV % Test,
+    "org.typelevel" %%% "otel4s-sdk-testkit" % otel4sSdkV % Test,
   )
 )
 
