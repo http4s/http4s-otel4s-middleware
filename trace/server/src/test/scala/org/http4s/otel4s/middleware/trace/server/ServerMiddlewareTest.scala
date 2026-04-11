@@ -22,6 +22,7 @@ import cats.data.OptionT
 import cats.effect.IO
 import cats.effect.MonadCancelThrow
 import cats.effect.testkit.TestControl
+import cats.mtl.LiftKind
 import munit.CatsEffectSuite
 import org.http4s.otel4s.middleware.trace.redact.HeaderRedactor
 import org.http4s.otel4s.middleware.trace.redact.PathRedactor
@@ -31,7 +32,6 @@ import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
-import org.typelevel.otel4s.KindTransformer
 import org.typelevel.otel4s.sdk.data.LimitedData
 import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
 import org.typelevel.otel4s.sdk.trace.SpanLimits
@@ -62,7 +62,7 @@ class ServerMiddlewareTest extends CatsEffectSuite {
         new ServerMiddleware[IO] {
           implicit def monadCancelThrow: MonadCancelThrow[IO] = IO.asyncForIO
           def wrapGenericHttp[G[_]: MonadCancelThrow](http: Http[G, IO])(implicit
-              kt: KindTransformer[IO, G]
+              kt: LiftKind[IO, G]
           ): Http[G, IO] = Http[G, IO] { request =>
             tracer.liftTo[G].span(name).surround(http.run(request))
           }
