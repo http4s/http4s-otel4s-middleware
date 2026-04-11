@@ -22,13 +22,13 @@ package server
 import cats.effect.kernel.MonadCancelThrow
 import cats.effect.kernel.Outcome
 import cats.effect.syntax.monadCancel._
+import cats.mtl.LiftKind
 import cats.syntax.applicative._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import fs2.Stream
 import org.http4s.server.HttpMiddleware
 import org.http4s.server.Middleware
-import org.typelevel.otel4s.KindTransformer
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
@@ -62,7 +62,7 @@ trait ServerMiddleware[F[_]] { self =>
     */
   def wrapGenericHttp[G[_]: MonadCancelThrow](
       http: Http[G, F]
-  )(implicit kt: KindTransformer[F, G]): Http[G, F]
+  )(implicit kt: LiftKind[F, G]): Http[G, F]
 
   /** The wrapping of [[org.http4s.Http `Http`]] in a way that abstracts over
     * [[org.http4s.HttpApp `HttpApp`]] and
@@ -75,7 +75,7 @@ trait ServerMiddleware[F[_]] { self =>
     * @see [[asHttpRoutesMiddleware]]
     */
   final def asGenericHttpMiddleware[G[_]: MonadCancelThrow](implicit
-      kt: KindTransformer[F, G]
+      kt: LiftKind[F, G]
   ): Middleware[G, Request[F], Response[F], Request[F], Response[F]] =
     wrapGenericHttp(_)
 
@@ -117,7 +117,7 @@ trait ServerMiddleware[F[_]] { self =>
       implicit def monadCancelThrow: MonadCancelThrow[F] =
         self.monadCancelThrow
       def wrapGenericHttp[G[_]: MonadCancelThrow](http: Http[G, F])(implicit
-          kt: KindTransformer[F, G]
+          kt: LiftKind[F, G]
       ): Http[G, F] = self.wrapGenericHttp(that.wrapGenericHttp(http))
     }
 }
@@ -132,7 +132,7 @@ object ServerMiddleware {
       extends ServerMiddleware[F] {
     def wrapGenericHttp[G[_]](http: Http[G, F])(implicit
         G: MonadCancelThrow[G],
-        kt: KindTransformer[F, G],
+        kt: LiftKind[F, G],
     ): Http[G, F] = Http[G, F] { req =>
       tracerF.liftTo[G].meta.isEnabled.flatMap { tracerEnabled =>
         val reqPrelude = req.requestPrelude
