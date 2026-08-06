@@ -19,12 +19,14 @@ package otel4s.middleware
 package trace
 package server
 
+import cats.Applicative
 import cats.data.Kleisli
 import cats.effect.kernel.MonadCancelThrow
 import cats.effect.kernel.Outcome
-import cats.effect.syntax.monadCancel._
-import cats.syntax.applicative._
-import cats.syntax.flatMap._
+import cats.effect.kernel.Resource
+import cats.effect.syntax.all._
+import cats.syntax.all._
+import cats.~>
 import org.http4s.Status.ServerError
 import org.http4s.headers.Host
 import org.http4s.headers.`User-Agent`
@@ -180,34 +182,67 @@ object ServerMiddleware {
               urlRedactor,
             ) ++ additionalRequestAttributes(reqPrelude)
           MonadCancelThrow[G].uncancelable { poll =>
-            val tracerG = Tracer[F].mapK[G]
-            tracerG.joinOrRoot(req.headers) {
-              tracerG
-                .spanBuilder(serverSpanName(reqPrelude))
-                .withSpanKind(SpanKind.Server)
-                .addAttributes(init)
-                .build
-                .use { span =>
-                  poll(f.run(req))
-                    .guaranteeCase {
-                      case Outcome.Succeeded(fa) =>
-                        fa.flatMap { resp =>
-                          val out =
-                            response(
-                              resp,
-                              allowedResponseHeaders,
-                            ) ++ additionalResponseAttributes(resp.responsePrelude)
-
-                          span.addAttributes(out) >> span
-                            .setStatus(StatusCode.Error)
-                            .unlessA(resp.status.isSuccess)
-                        }
-                      case Outcome.Errored(e) =>
-                        span.addAttributes(TypedAttributes.errorType(e))
-                      case Outcome.Canceled() =>
-                        MonadCancelThrow[G].unit
+            kt.liftK(
+              Tracer[F].joinOrRoot(req.headers) {
+                Tracer[F]
+                  .spanBuilder(serverSpanName(reqPrelude))
+                  .withSpanKind(SpanKind.Server)
+                  .addAttributes(init)
+                  .build
+                  .resource
+                  .allocated
+              }
+            ).flatMap { case (res, release) =>
+              val span = res.span
+              Tracer[F].mapK[G].childScope(span.context) {
+                poll(f.run(req))
+                  .map { resp =>
+                    val out =
+                      response(
+                        resp,
+                        allowedResponseHeaders,
+                      ) ++ additionalResponseAttributes(resp.responsePrelude)
+                    val propagateScope = new (F ~> F) {
+                      def apply[A](fa: F[A]): F[A] =
+                        Tracer[F].childScope(span.context)(fa)
                     }
-                }
+                    resp.pipeBodyThrough {
+                      _.translate(propagateScope)
+                        .onFinalizeCaseWeak {
+                          case Resource.ExitCase.Succeeded =>
+                            span.addAttributes(out) >>
+                              span.setStatus(StatusCode.Error).unlessA(resp.status.isSuccess) >>
+                              release
+                          case Resource.ExitCase.Errored(e) =>
+                            span.addAttributes(out) >>
+                              span.recordException(e) >>
+                              span.addAttributes(TypedAttributes.errorType(e)) >>
+                              span.setStatus(StatusCode.Error) >>
+                              release
+                          case Resource.ExitCase.Canceled =>
+                            span.addAttributes(out) >>
+                              span.setStatus(StatusCode.Error, "canceled") >>
+                              release
+                        }
+                    }
+                  }
+                  .guaranteeCase {
+                    case Outcome.Succeeded(_) =>
+                      Applicative[G].unit
+                    case Outcome.Errored(e) =>
+                      kt.liftK(
+                        span.recordException(e) >>
+                          span.addAttributes(TypedAttributes.errorType(e)) >>
+                          span.setStatus(StatusCode.Error) >>
+                          release
+                      )
+                    case Outcome.Canceled() =>
+                      kt.liftK(
+                        span.setStatus(StatusCode.Error, "canceled") >>
+                          release
+                      )
+                  }
+              }
             }
           }
         }
