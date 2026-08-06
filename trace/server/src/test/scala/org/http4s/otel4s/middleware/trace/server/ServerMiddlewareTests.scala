@@ -34,7 +34,7 @@ import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration._
 import scala.util.control.NoStackTrace
 
 class ServerMiddlewareTests extends CatsEffectSuite {
@@ -62,7 +62,7 @@ class ServerMiddlewareTests extends CatsEffectSuite {
             val request =
               Request[IO](Method.GET, uri"http://localhost/?#")
                 .withHeaders(headers)
-            tracedServer.run(request)
+            tracedServer.run(request).flatMap(_.body.compile.drain)
           }
           spans <- testkit.finishedSpans
         } yield {
@@ -129,7 +129,7 @@ class ServerMiddlewareTests extends CatsEffectSuite {
             )
 
             for {
-              _ <- tracedServer.run(request).attempt
+              _ <- tracedServer.run(request).flatMap(_.body.compile.drain).attempt
               spans <- testkit.finishedSpans
             } yield {
               assertEquals(spans.map(_.attributes.elements), List(attributes))
@@ -165,7 +165,7 @@ class ServerMiddlewareTests extends CatsEffectSuite {
             )
 
             for {
-              _ <- tracedServer.run(request).attempt
+              _ <- tracedServer.run(request).flatMap(_.body.compile.drain).attempt
               spans <- testkit.finishedSpans
             } yield {
               assertEquals(spans.map(_.attributes.elements), List(attributes))
@@ -199,7 +199,7 @@ class ServerMiddlewareTests extends CatsEffectSuite {
             )
 
             for {
-              f <- tracedServer.run(request).void.start
+              f <- tracedServer.run(request).flatMap(_.body.compile.drain).start
               _ <- f.joinWithUnit
               spans <- testkit.finishedSpans
             } yield {
@@ -212,4 +212,131 @@ class ServerMiddlewareTests extends CatsEffectSuite {
     }
   }
 
+  test("propagate span context to response body streaming") {
+    TracesTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
+          val body = fs2.Stream.eval(
+            Tracer[IO].span("body-span").use(_ => IO.pure('.'.toByte))
+          )
+
+          val tracedServer = ServerMiddleware
+            .default[IO]
+            .buildHttpApp(HttpApp[IO](_ => IO.pure(Response[IO](Status.Ok).withBodyStream(body))))
+
+          val request = Request[IO](Method.GET, uri"http://localhost/")
+
+          for {
+            res <- tracedServer.run(request)
+            _ <- res.body.compile.drain
+            spans <- testkit.finishedSpans
+          } yield {
+            assertEquals(spans.length, 2)
+            val serverSpan = spans.find(_.name == "Http Server - GET")
+            val bodySpan = spans.find(_.name == "body-span")
+
+            assert(serverSpan.isDefined, "server span not found")
+            assert(bodySpan.isDefined, "body span not found")
+
+            assertEquals(
+              bodySpan.get.parentSpanContext.map(_.spanId),
+              Some(serverSpan.get.spanContext.spanId),
+            )
+          }
+        }
+      }
+  }
+
+  test("record an exception thrown during response body streaming") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
+            val error = new RuntimeException("stream crash") with NoStackTrace {}
+            val body = fs2.Stream.raiseError[IO](error)
+
+            val tracedServer = ServerMiddleware
+              .default[IO]
+              .buildHttpApp(HttpApp[IO](_ => IO.pure(Response[IO](Status.Ok).withBodyStream(body))))
+
+            val request = Request[IO](Method.GET, uri"http://localhost/")
+
+            val events = Vector(
+              EventData.fromException(
+                Duration.Zero,
+                error,
+                LimitedData
+                  .attributes(spanLimits.maxNumberOfAttributes, spanLimits.maxAttributeValueLength),
+                escaped = false,
+              )
+            )
+
+            val status = StatusData(StatusCode.Error)
+
+            val attributes = Attributes(
+              Attribute("http.request.method", "GET"),
+              Attribute("url.path", "/"),
+              Attribute("url.full", "http://localhost/"),
+              Attribute("url.scheme", "http"),
+              Attribute("server.address", "localhost"),
+              Attribute("http.response.status_code", 200L),
+              Attribute("error.type", error.getClass.getName),
+            )
+
+            for {
+              res <- tracedServer.run(request)
+              _ <- res.body.compile.drain.attempt
+              spans <- testkit.finishedSpans
+            } yield {
+              assertEquals(spans.map(_.attributes.elements), List(attributes))
+              assertEquals(spans.map(_.events.elements), List(events))
+              assertEquals(spans.map(_.status), List(status))
+            }
+          }
+        }
+    }
+  }
+
+  test("record cancellation during response body streaming") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          testkit.tracerProvider.get("tracer").flatMap { implicit tracer =>
+            val body = fs2.Stream.eval(IO.never[Byte])
+
+            val tracedServer = ServerMiddleware
+              .default[IO]
+              .buildHttpApp(HttpApp[IO](_ => IO.pure(Response[IO](Status.Ok).withBodyStream(body))))
+
+            val request = Request[IO](Method.GET, uri"http://localhost/")
+
+            val status = StatusData(StatusCode.Error, "canceled")
+
+            val attributes = Attributes(
+              Attribute("http.request.method", "GET"),
+              Attribute("url.path", "/"),
+              Attribute("url.full", "http://localhost/"),
+              Attribute("url.scheme", "http"),
+              Attribute("server.address", "localhost"),
+              Attribute("http.response.status_code", 200L),
+            )
+
+            for {
+              res <- tracedServer.run(request)
+              f <- res.body.compile.drain.start
+              _ <- IO.sleep(10.millis)
+              _ <- f.cancel
+              spans <- testkit.finishedSpans
+            } yield {
+              assertEquals(spans.map(_.attributes.elements), List(attributes))
+              assertEquals(spans.flatMap(_.events.elements), Nil)
+              assertEquals(spans.map(_.status), List(status))
+            }
+          }
+        }
+    }
+  }
 }
