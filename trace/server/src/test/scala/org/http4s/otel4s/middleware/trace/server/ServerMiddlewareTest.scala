@@ -457,6 +457,284 @@ class ServerMiddlewareTest extends CatsEffectSuite {
   suite("asHttpRoutesMiddleware") { (sm, app) =>
     sm.asHttpRoutesMiddleware(app.mapK(OptionT.liftK)).orNotFound
   }
+
+  test("treats 500 as an error by default") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ServerMiddleware
+            .builder[IO] {
+              ServerSpanDataProvider
+                .openTelemetry(NoopRedactor)
+                .optIntoClientPort
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+            }
+            .build
+            .flatMap { serverMiddleware =>
+              val app = serverMiddleware.wrapHttpApp {
+                HttpApp[IO](_ => IO.pure(Response[IO](Status.InternalServerError)))
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+              val status = StatusData(StatusCode.Error)
+
+              val attributes = Attributes(
+                Attribute("error.type", "500"),
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 500L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("url.path", "/"),
+                Attribute("url.scheme", "http"),
+              )
+
+              for {
+                _ <- app.run(request).attempt
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(status))
+              }
+            }
+        }
+    }
+  }
+
+  test("does not treat a status excluded by the error classifier as an error") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ServerMiddleware
+            .builder[IO] {
+              ServerSpanDataProvider
+                .openTelemetry(NoopRedactor)
+                .optIntoClientPort
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+            }
+            .withErrorClassifier(ErrorClassifier.serverError.excluding(Status.InternalServerError))
+            .build
+            .flatMap { serverMiddleware =>
+              val app = serverMiddleware.wrapHttpApp {
+                HttpApp[IO](_ => IO.pure(Response[IO](Status.InternalServerError)))
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+
+              val attributes = Attributes(
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 500L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("url.path", "/"),
+                Attribute("url.scheme", "http"),
+              )
+
+              for {
+                _ <- app.run(request).attempt
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(StatusData.Unset))
+              }
+            }
+        }
+    }
+  }
+
+  test("still treats other error statuses as errors when on is excluded") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ServerMiddleware
+            .builder[IO] {
+              ServerSpanDataProvider
+                .openTelemetry(NoopRedactor)
+                .optIntoClientPort
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+            }
+            .withErrorClassifier(ErrorClassifier.serverError.excluding(Status.InternalServerError))
+            .build
+            .flatMap { serverMiddleware =>
+              val app = serverMiddleware.wrapHttpApp {
+                HttpApp[IO](_ => IO.pure(Response[IO](Status.ServiceUnavailable)))
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+              val status = StatusData(StatusCode.Error)
+
+              val attributes = Attributes(
+                Attribute("error.type", "503"),
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 503L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("url.path", "/"),
+                Attribute("url.scheme", "http"),
+              )
+
+              for {
+                _ <- app.run(request).attempt
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(status))
+              }
+            }
+        }
+    }
+  }
+
+  test("records error.type for a status the error classifier add") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ServerMiddleware
+            .builder[IO] {
+              ServerSpanDataProvider
+                .openTelemetry(NoopRedactor)
+                .optIntoClientPort
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+            }
+            .withErrorClassifier(ErrorClassifier.never.included(Status.Ok))
+            .build
+            .flatMap { serverMiddleware =>
+              val app = serverMiddleware.wrapHttpApp {
+                HttpApp[IO](_ => IO.pure(Response[IO](Status.Ok)))
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+              val status = StatusData(StatusCode.Error)
+
+              val attributes = Attributes(
+                Attribute("error.type", "200"),
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 200L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("url.path", "/"),
+                Attribute("url.scheme", "http"),
+              )
+
+              for {
+                _ <- app.run(request).attempt
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(status))
+              }
+            }
+        }
+    }
+  }
+
+  test("never reports response statuses as errros with ErrorClassifier.never") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ServerMiddleware
+            .builder[IO] {
+              ServerSpanDataProvider
+                .openTelemetry(NoopRedactor)
+                .optIntoClientPort
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+            }
+            .withErrorClassifier(ErrorClassifier.never)
+            .build
+            .flatMap { serverMiddleware =>
+              val app = serverMiddleware.wrapHttpApp {
+                HttpApp[IO](_ => IO.pure(Response[IO](Status.InternalServerError)))
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+
+              val attributes = Attributes(
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 500L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("url.path", "/"),
+                Attribute("url.scheme", "http"),
+              )
+
+              for {
+                _ <- app.run(request).attempt
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(StatusData.Unset))
+              }
+            }
+        }
+    }
+  }
+
+  test("uses errorAttributes from the SpanDataProvider only for errors") {
+    val customErrorAttr = Attribute("custom.error.attribute", "error-value")
+    val provider: SpanDataProvider = new SpanDataProvider {
+      type Shared = Null
+      def processSharedData[F[_]](request: Request[F]): Null = null
+      def spanName[F[_]](request: Request[F], sharedProcessedData: Null): String =
+        "test-span"
+      def requestAttributes[F[_]](request: Request[F], sharedProcessedData: Null): Attributes =
+        Attributes.empty
+      def responseAttributes[F[_]](response: Response[F]): Attributes =
+        Attributes.empty
+      def exceptionAttributes(cause: Throwable): Attributes =
+        Attributes.empty
+      def errorAttributes(status: Status): Attributes =
+        Attributes(customErrorAttr)
+    }
+
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ServerMiddleware
+            .builder[IO](provider)
+            .build
+            .flatMap { serverMiddleware =>
+              val errorApp = serverMiddleware.wrapHttpApp {
+                HttpApp[IO](_ => IO.pure(Response[IO](Status.InternalServerError)))
+              }
+              val okApp = serverMiddleware.wrapHttpApp {
+                HttpApp[IO](_ => IO.pure(Response[IO](Status.Ok)))
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+
+              for {
+                _ <- errorApp.run(request).attempt
+                _ <- okApp.run(request).attempt
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.length, 2)
+                val errorSpan = spans.find(_.status == StatusData(StatusCode.Error)).get
+                val okSpan = spans.find(_.status == StatusData.Unset).get
+                // Error span has the custom error attribute
+                assertEquals(
+                  errorSpan.attributes.elements.get[String]("custom.error.attribute").map(_.value),
+                  Some("error-value"),
+                )
+                // Ok span does NOT have the custom error attribute
+                assertEquals(
+                  okSpan.attributes.elements.get[String]("custom.error.attribute").map(_.value),
+                  None,
+                )
+              }
+            }
+        }
+    }
+  }
 }
 
 object ServerMiddlewareTest {

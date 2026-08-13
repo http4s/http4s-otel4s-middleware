@@ -25,6 +25,7 @@ class AttributeProviderTest extends FunSuite {
     val p = AttributeProvider.const(Attribute("key", "value"))
     assertEquals(p.requestAttributes(null), Attributes(Attribute("key", "value")))
     assert(p.responseAttributes(null).isEmpty)
+    assert(p.errorAttributes(null).isEmpty)
     assert(p.exceptionAttributes(null).isEmpty)
   }
 
@@ -33,6 +34,7 @@ class AttributeProviderTest extends FunSuite {
     val p = AttributeProvider.const(attributes)
     assert(p.requestAttributes(null) eq attributes)
     assert(p.responseAttributes(null).isEmpty)
+    assert(p.errorAttributes(null).isEmpty)
     assert(p.exceptionAttributes(null).isEmpty)
   }
 
@@ -45,6 +47,7 @@ class AttributeProviderTest extends FunSuite {
       Attributes(Attribute("foo", "bar"), Attribute("baz", "qux")),
     )
     assert(p.responseAttributes(null).isEmpty)
+    assert(p.errorAttributes(null).isEmpty)
     assert(p.exceptionAttributes(null).isEmpty)
     assert(p.requestAttributes(null) eq p.requestAttributes(null))
 
@@ -65,6 +68,7 @@ class AttributeProviderTest extends FunSuite {
       ),
     )
     assert(p.responseAttributes(null).isEmpty)
+    assert(p.errorAttributes(null).isEmpty)
     assert(p.exceptionAttributes(null).isEmpty)
   }
 }

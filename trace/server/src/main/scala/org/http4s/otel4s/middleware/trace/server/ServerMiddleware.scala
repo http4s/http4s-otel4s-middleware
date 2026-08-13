@@ -33,6 +33,7 @@ import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
+import org.typelevel.otel4s.Attributes
 
 /** A middleware for wrapping [[org.http4s.HttpApp `HttpApp`]],
   * [[org.http4s.HttpRoutes `HttpRoutes`]], and arbitrary
@@ -126,6 +127,7 @@ object ServerMiddleware {
   private[this] final class Impl[F[_]](
       tracerF: Tracer[F],
       spanDataProvider: SpanDataProvider,
+      errorClassifier: ErrorClassifier,
       perRequestReversePropagationFilter: PerRequestFilter,
       perRequestTracingFilter: PerRequestFilter,
   )(implicit val monadCancelThrow: MonadCancelThrow[F])
@@ -167,9 +169,13 @@ object ServerMiddleware {
                       fa.flatMap { resp =>
                         val respAttributes =
                           spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
-                        span.addAttributes(respAttributes) >> span
+                        val isError = errorClassifier.isError(resp.status)
+                        val errorAttributes =
+                          if (isError) spanDataProvider.errorAttributes(resp.status)
+                          else Attributes.empty
+                        span.addAttributes(respAttributes ++ errorAttributes) >> span
                           .setStatus(StatusCode.Error)
-                          .whenA(resp.status.responseClass == Status.ServerError)
+                          .whenA(isError)
                       }
                     case Outcome.Errored(e) =>
                       span.addAttributes(spanDataProvider.exceptionAttributes(e))
@@ -187,19 +193,28 @@ object ServerMiddleware {
   /** A builder for [[`ServerMiddleware`]]s that add tracing. */
   final class Builder[F[_]: MonadCancelThrow] private[ServerMiddleware] (
       spanDataProvider: SpanDataProvider,
+      errorClassifier: ErrorClassifier,
       perRequestReversePropagationFilter: PerRequestFilter,
       perRequestTracingFilter: PerRequestFilter,
   )(implicit tracerProvider: TracerProvider[F]) {
     private[this] def copy(
+        errorClassifier: ErrorClassifier = this.errorClassifier,
         perRequestReversePropagationFilter: PerRequestFilter =
           this.perRequestReversePropagationFilter,
         perRequestTracingFilter: PerRequestFilter = this.perRequestTracingFilter,
     ): Builder[F] =
       new Builder(
         spanDataProvider = this.spanDataProvider,
+        errorClassifier = errorClassifier,
         perRequestReversePropagationFilter = perRequestReversePropagationFilter,
         perRequestTracingFilter = perRequestTracingFilter,
       )
+
+    /** Sets how to determine whether the status of a response represents an
+      * error (default: [[`ErrorClassifier.serverError`]]).
+      */
+    def withErrorClassifier(errorClassifier: ErrorClassifier): Builder[F] =
+      copy(errorClassifier = errorClassifier)
 
     /** Sets a filter that determines whether each request should propagate
       * tracing and other context information back to the requesting client in
@@ -232,6 +247,7 @@ object ServerMiddleware {
       } yield new Impl(
         tracerF = tracer,
         spanDataProvider = spanDataProvider,
+        errorClassifier = errorClassifier,
         perRequestReversePropagationFilter = perRequestReversePropagationFilter,
         perRequestTracingFilter = perRequestTracingFilter,
       )
@@ -246,6 +262,7 @@ object ServerMiddleware {
   ): Builder[F] =
     new Builder[F](
       spanDataProvider = spanDataProvider,
+      errorClassifier = ErrorClassifier.serverError,
       perRequestReversePropagationFilter = PerRequestFilter.neverEnabled,
       perRequestTracingFilter = PerRequestFilter.alwaysEnabled,
     )
