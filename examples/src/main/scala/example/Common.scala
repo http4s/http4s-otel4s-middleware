@@ -17,7 +17,7 @@
 package example
 
 import cats._
-import cats.effect.{Trace => _, _}
+import cats.effect._
 import cats.syntax.all._
 import org.http4s._
 import org.http4s.client.Client
