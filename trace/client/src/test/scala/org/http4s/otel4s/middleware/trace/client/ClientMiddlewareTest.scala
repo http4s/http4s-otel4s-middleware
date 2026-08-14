@@ -217,6 +217,8 @@ class ClientMiddlewareTest extends CatsEffectSuite {
         Attributes.empty
       def exceptionAttributes(cause: Throwable): Attributes =
         Attributes.empty
+      def errorAttributes(status: Status): Attributes =
+        Attributes.empty
     }
 
     val spanName = "Overridden span name"
@@ -624,6 +626,315 @@ class ClientMiddlewareTest extends CatsEffectSuite {
           spans <- testkit.finishedSpans
         } yield assertEquals(spans.length, 0)
       }
+  }
+
+  test("treats 404 as an error by default") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ClientMiddleware
+            .builder[IO] {
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            }
+            .build
+            .flatMap { clientMiddleware =>
+              val client = clientMiddleware.wrapClient {
+                Client.fromHttpApp[IO] {
+                  HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.NotFound)))
+                }
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+              val status = StatusData(StatusCode.Error)
+
+              val attributes = Attributes(
+                Attribute("error.type", "404"),
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 404L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("server.address", "localhost"),
+                Attribute("server.port", 80L),
+                Attribute("url.full", "http://localhost/"),
+                Attribute("url.scheme", "http"),
+              )
+
+              for {
+                _ <- client.run(request).use_
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(status))
+              }
+            }
+        }
+    }
+  }
+
+  test("does not treat a status excluded by the error classifier as an error") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ClientMiddleware
+            .builder[IO] {
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            }
+            .withErrorClassifier(ErrorClassifier.default.excluding(Status.NotFound))
+            .build
+            .flatMap { clientMiddleware =>
+              val client = clientMiddleware.wrapClient {
+                Client.fromHttpApp[IO] {
+                  HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.NotFound)))
+                }
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+
+              val attributes = Attributes(
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 404L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("server.address", "localhost"),
+                Attribute("server.port", 80L),
+                Attribute("url.full", "http://localhost/"),
+                Attribute("url.scheme", "http"),
+              )
+
+              for {
+                _ <- client.run(request).use_
+                spans <- testkit.finishedSpans
+              } yield {
+                // No error.type attribute and status is Unset, not Error
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(StatusData.Unset))
+              }
+            }
+        }
+    }
+  }
+
+  test("still treats other error statuses as errors when on is excluded") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ClientMiddleware
+            .builder[IO] {
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            }
+            .withErrorClassifier(ErrorClassifier.default.excluding(Status.NotFound))
+            .build
+            .flatMap { clientMiddleware =>
+              val client = clientMiddleware.wrapClient {
+                Client.fromHttpApp[IO] {
+                  HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.InternalServerError)))
+                }
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+              val status = StatusData(StatusCode.Error)
+
+              val attributes = Attributes(
+                Attribute("error.type", "500"),
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 500L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("server.address", "localhost"),
+                Attribute("server.port", 80L),
+                Attribute("url.full", "http://localhost/"),
+                Attribute("url.scheme", "http"),
+              )
+
+              for {
+                _ <- client.run(request).use_
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(status))
+              }
+            }
+        }
+    }
+  }
+
+  test("records error.type for a status the error classifier add") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ClientMiddleware
+            .builder[IO] {
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            }
+            .withErrorClassifier(ErrorClassifier.never.included(Status.Ok))
+            .build
+            .flatMap { clientMiddleware =>
+              val client = clientMiddleware.wrapClient {
+                Client.fromHttpApp[IO] {
+                  HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
+                }
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+              val status = StatusData(StatusCode.Error)
+
+              val attributes = Attributes(
+                Attribute("error.type", "200"),
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 200L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("server.address", "localhost"),
+                Attribute("server.port", 80L),
+                Attribute("url.full", "http://localhost/"),
+                Attribute("url.scheme", "http"),
+              )
+
+              for {
+                _ <- client.run(request).use_
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(status))
+              }
+            }
+        }
+    }
+  }
+
+  test("never reports response statuses as errros with ErrorClassifier.never") {
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ClientMiddleware
+            .builder[IO] {
+              ClientSpanDataProvider
+                .openTelemetry(MinimalRedactor)
+                .optIntoHttpRequestHeaders(HeaderRedactor.default)
+                .optIntoHttpResponseHeaders(HeaderRedactor.default)
+                .optIntoUrlScheme
+                .optIntoUserAgentOriginal
+            }
+            .withErrorClassifier(ErrorClassifier.never)
+            .build
+            .flatMap { clientMiddleware =>
+              val client = clientMiddleware.wrapClient {
+                Client.fromHttpApp[IO] {
+                  HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.InternalServerError)))
+                }
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+
+              val attributes = Attributes(
+                Attribute("http.request.method", "GET"),
+                Attribute("http.response.status_code", 500L),
+                Attribute("network.protocol.version", "1.1"),
+                Attribute("server.address", "localhost"),
+                Attribute("server.port", 80L),
+                Attribute("url.full", "http://localhost/"),
+                Attribute("url.scheme", "http"),
+              )
+
+              for {
+                _ <- client.run(request).use_
+                spans <- testkit.finishedSpans
+              } yield {
+                // No error.type attribute and status is Unset, not Error
+                assertEquals(spans.map(_.attributes.elements), List(attributes))
+                assertEquals(spans.flatMap(_.events.elements), Nil)
+                assertEquals(spans.map(_.status), List(StatusData.Unset))
+              }
+            }
+        }
+    }
+  }
+
+  test("uses errorAttributes from the SpanDataProvider only for errors") {
+    val customErrorAttr = Attribute("custom.error.attribute", "error-value")
+    val provider: SpanDataProvider = new SpanDataProvider {
+      type Shared = Null
+      def processSharedData[F[_]](request: Request[F]): Null = null
+      def spanName[F[_]](request: Request[F], sharedProcessedData: Null): String =
+        "test-span"
+      def requestAttributes[F[_]](request: Request[F], sharedProcessedData: Null): Attributes =
+        Attributes.empty
+      def responseAttributes[F[_]](response: Response[F]): Attributes =
+        Attributes.empty
+      def exceptionAttributes(cause: Throwable): Attributes =
+        Attributes.empty
+      def errorAttributes(status: Status): Attributes =
+        Attributes(customErrorAttr)
+    }
+
+    TestControl.executeEmbed {
+      TracesTestkit
+        .inMemory[IO]()
+        .use { testkit =>
+          implicit val TP: TracerProvider[IO] = testkit.tracerProvider
+          ClientMiddleware
+            .builder[IO](provider)
+            .build
+            .flatMap { clientMiddleware =>
+              val errorClient = clientMiddleware.wrapClient {
+                Client.fromHttpApp[IO] {
+                  HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.BadRequest)))
+                }
+              }
+              val okClient = clientMiddleware.wrapClient {
+                Client.fromHttpApp[IO] {
+                  HttpApp[IO](_.body.compile.drain.as(Response[IO](Status.Ok)))
+                }
+              }
+              val request = Request[IO](Method.GET, uri"http://localhost/")
+
+              for {
+                _ <- errorClient.run(request).use_
+                _ <- okClient.run(request).use_
+                spans <- testkit.finishedSpans
+              } yield {
+                assertEquals(spans.length, 2)
+                val errorSpan = spans.find(_.status == StatusData(StatusCode.Error)).get
+                val okSpan = spans.find(_.status == StatusData.Unset).get
+                // Error span has the custom error attribute
+                assertEquals(
+                  errorSpan.attributes.elements.get[String]("custom.error.attribute").map(_.value),
+                  Some("error-value"),
+                )
+                // Ok span does NOT have the custom error attribute
+                assertEquals(
+                  okSpan.attributes.elements.get[String]("custom.error.attribute").map(_.value),
+                  None,
+                )
+              }
+            }
+        }
+    }
   }
 }
 

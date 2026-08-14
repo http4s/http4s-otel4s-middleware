@@ -38,6 +38,7 @@ class SpanDataProviderTest extends FunSuite {
       assertEquals(provider.requestAttributes(null), expected, "requestAttributes")
       assertEquals(provider.responseAttributes(null), expected, "responseAttributes")
       assertEquals(provider.exceptionAttributes(null), expected, "exceptionAttributes")
+      assertEquals(provider.errorAttributes(null), expected, "errorAttributes")
     }
 
     val a = new SimpleAttributeProvider("a")
@@ -85,6 +86,7 @@ object SpanDataProviderTest {
     def requestAttributes[F[_]](request: Request[F]): Attributes = attr(name)
     def responseAttributes[F[_]](response: Response[F]): Attributes = attr(name)
     def exceptionAttributes(cause: Throwable): Attributes = attr(name)
+    def errorAttributes(status: Status): Attributes = attr(name)
   }
 
   private final class SimpleSpanDataProvider(name: String) extends SpanDataProvider {
@@ -95,5 +97,6 @@ object SpanDataProviderTest {
       attr(name)
     def responseAttributes[F[_]](response: Response[F]): Attributes = attr(name)
     def exceptionAttributes(cause: Throwable): Attributes = attr(name)
+    def errorAttributes(status: Status): Attributes = attr(name)
   }
 }

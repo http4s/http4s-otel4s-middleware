@@ -100,6 +100,8 @@ object SpanDataProvider {
       others.foldLeft(primary.responseAttributes(response))(_ ++ _.responseAttributes(response))
     def exceptionAttributes(cause: Throwable): Attributes =
       others.foldLeft(primary.exceptionAttributes(cause))(_ ++ _.exceptionAttributes(cause))
+    def errorAttributes(status: Status): Attributes =
+      others.foldLeft(primary.errorAttributes(status))(_ ++ _.errorAttributes(status))
 
     override def and(that: AttributeProvider): SpanDataProvider = that match {
       case AttributeProvider.Empty => this

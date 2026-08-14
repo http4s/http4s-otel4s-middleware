@@ -146,10 +146,9 @@ object ServerSpanDataProvider {
     def responseAttributes[F[_]](response: Response[F]): Attributes = {
       val b = Attributes.newBuilder
 
-      if (response.status.responseClass == Status.ServerError) {
-        // `error.type` for a `Throwable` handled by `exceptionAttributes`
-        b += TypedServerTraceAttributes.errorType(response.status)
-      }
+      // `error.type` for a response status is provided by `errorAttributes`,
+      // which the caller invokes only for statuses it considers to be errors;
+      // `error.type` for a `Throwable` is provided by `exceptionAttributes`
       b += TypedServerTraceAttributes.httpResponseStatusCode(response.status)
       optIn.httpResponseHeaders.foreach { redactor =>
         TypedServerTraceAttributes
@@ -161,6 +160,9 @@ object ServerSpanDataProvider {
 
     def exceptionAttributes(cause: Throwable): Attributes =
       Attributes(TypedServerTraceAttributes.errorType(cause))
+
+    def errorAttributes(status: Status): Attributes =
+      Attributes(TypedServerTraceAttributes.errorType(status))
 
     private[this] def copy(
         routeClassifier: RouteClassifier = this.routeClassifier,
