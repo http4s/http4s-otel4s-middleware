@@ -9,7 +9,7 @@ ThisBuild / startYear := Some(2023)
 ThisBuild / tlCiReleaseBranches := Seq("main")
 
 val scala213 = "2.13.18"
-val scala3 = "3.3.7"
+val scala3 = "3.3.8"
 ThisBuild / crossScalaVersions := Seq(scala213, scala3)
 ThisBuild / scalaVersion := scala213
 
@@ -17,11 +17,11 @@ ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"))
 ThisBuild / tlJdkRelease := Some(8)
 
 val catsEffectV = "3.7.0"
-val http4sV = "0.23.34"
+val http4sV = "0.23.36"
 val munitV = "1.3.5"
 val munitCatsEffectV = "2.2.0"
 val openTelemetryV = "1.62.0"
-val otel4sV = "1.0.0"
+val otel4sV = "1.0.1"
 val otel4sSdkV = "0.19.0"
 val slf4jV = "1.7.36"
 
