@@ -169,9 +169,10 @@ object ServerMiddleware {
                       fa.flatMap { resp =>
                         val respAttributes =
                           spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
-                        val isError = errorClassifier.isError(resp.status)
+                        val isError = errorClassifier.isError(reqPrelude, resp.responsePrelude)
                         val errorAttributes =
-                          if (isError) spanDataProvider.errorAttributes(resp.status)
+                          if (isError)
+                            spanDataProvider.errorAttributes(reqPrelude, resp.responsePrelude)
                           else Attributes.empty
                         span.addAttributes(respAttributes ++ errorAttributes) >> span
                           .setStatus(StatusCode.Error)

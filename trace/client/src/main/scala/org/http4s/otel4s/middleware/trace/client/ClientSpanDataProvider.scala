@@ -167,8 +167,8 @@ object ClientSpanDataProvider {
     def exceptionAttributes(cause: Throwable): Attributes =
       Attributes(TypedClientTraceAttributes.errorType(cause))
 
-    def errorAttributes(status: Status): Attributes =
-      Attributes(TypedClientTraceAttributes.errorType(status))
+    override def errorAttributes(request: RequestPrelude, response: ResponsePrelude): Attributes =
+      Attributes(TypedClientTraceAttributes.errorType(response.status))
 
     private def copy(
         urlTemplateClassifier: UriTemplateClassifier = this.urlTemplateClassifier,

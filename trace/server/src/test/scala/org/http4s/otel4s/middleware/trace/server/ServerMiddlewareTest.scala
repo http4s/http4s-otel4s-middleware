@@ -691,7 +691,7 @@ class ServerMiddlewareTest extends CatsEffectSuite {
         Attributes.empty
       def exceptionAttributes(cause: Throwable): Attributes =
         Attributes.empty
-      def errorAttributes(status: Status): Attributes =
+      override def errorAttributes(request: RequestPrelude, response: ResponsePrelude): Attributes =
         Attributes(customErrorAttr)
     }
 

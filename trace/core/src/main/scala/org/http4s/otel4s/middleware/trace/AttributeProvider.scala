@@ -55,10 +55,11 @@ trait AttributeProvider {
   /** Provides attributes for a span based on a given exception. */
   def exceptionAttributes(cause: Throwable): Attributes
 
-  /** Provides attributes for a span based on a response status that has been
+  /** Provides attributes for a span based on a response that has been
     * determined to represent an error.
     */
-  def errorAttributes(status: Status): Attributes
+  def errorAttributes(request: RequestPrelude, response: ResponsePrelude): Attributes =
+    Attributes.empty
 
   /** @return an `AttributeProvider` that provides the attributes from this and
     *         another `AttributeProvider`
@@ -77,7 +78,8 @@ object AttributeProvider {
     def requestAttributes[F[_]](request: Request[F]): Attributes = Attributes.empty
     def responseAttributes[F[_]](response: Response[F]): Attributes = Attributes.empty
     def exceptionAttributes(cause: Throwable): Attributes = Attributes.empty
-    def errorAttributes(status: Status): Attributes = Attributes.empty
+    override def errorAttributes(request: RequestPrelude, response: ResponsePrelude): Attributes =
+      Attributes.empty
 
     override def and(that: AttributeProvider): AttributeProvider = that
   }
@@ -95,8 +97,8 @@ object AttributeProvider {
         providers.foldLeft(Attributes.empty)(_ ++ _.responseAttributes(response))
       def exceptionAttributes(cause: Throwable): Attributes =
         providers.foldLeft(Attributes.empty)(_ ++ _.exceptionAttributes(cause))
-      def errorAttributes(status: Status): Attributes =
-        providers.foldLeft(Attributes.empty)(_ ++ _.errorAttributes(status))
+      override def errorAttributes(request: RequestPrelude, response: ResponsePrelude): Attributes =
+        providers.foldLeft(Attributes.empty)(_ ++ _.errorAttributes(request, response))
 
       override def and(that: AttributeProvider): AttributeProvider = that match {
         case Empty => this
@@ -118,7 +120,7 @@ object AttributeProvider {
       Attributes.empty
     def exceptionAttributes(cause: Throwable): Attributes =
       Attributes.empty
-    def errorAttributes(status: Status): Attributes =
+    override def errorAttributes(request: RequestPrelude, response: ResponsePrelude): Attributes =
       Attributes.empty
 
     override def and(that: AttributeProvider): AttributeProvider = that match {

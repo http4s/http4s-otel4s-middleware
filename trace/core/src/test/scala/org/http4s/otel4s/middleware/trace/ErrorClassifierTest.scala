@@ -18,12 +18,27 @@ package org.http4s
 package otel4s.middleware.trace
 
 import munit.FunSuite
+import org.http4s.implicits._
 
 class ErrorClassifierTest extends FunSuite {
+  private def reqPrelude: RequestPrelude =
+    RequestPrelude(
+      headers = Headers.empty,
+      httpVersion = HttpVersion.`HTTP/1.1`,
+      method = Method.GET,
+      uri = uri"http://localhost/",
+    )
+
+  private def respPrelude(status: Status): ResponsePrelude =
+    ResponsePrelude(
+      headers = Headers.empty,
+      httpVersion = HttpVersion.`HTTP/1.1`,
+      status = status,
+    )
 
   test("default classifies 4xx and 5xx as errors") {
     def check(status: Status, expected: Boolean): Unit =
-      assertEquals(ErrorClassifier.default.isError(status), expected)
+      assertEquals(ErrorClassifier.default.isError(reqPrelude, respPrelude(status)), expected)
 
     check(Status.Ok, false)
     check(Status.Created, false)
@@ -41,7 +56,7 @@ class ErrorClassifierTest extends FunSuite {
 
   test("serverError classifies only 5xx as errors") {
     def check(status: Status, expected: Boolean): Unit =
-      assertEquals(ErrorClassifier.serverError.isError(status), expected)
+      assertEquals(ErrorClassifier.serverError.isError(reqPrelude, respPrelude(status)), expected)
 
     check(Status.Ok, false)
     check(Status.BadRequest, false)
@@ -54,7 +69,7 @@ class ErrorClassifierTest extends FunSuite {
 
   test("never classifies nothing as an error") {
     def check(status: Status): Unit =
-      assertEquals(ErrorClassifier.never.isError(status), false)
+      assertEquals(ErrorClassifier.never.isError(reqPrelude, respPrelude(status)), false)
 
     check(Status.Ok)
     check(Status.BadRequest)
@@ -65,73 +80,82 @@ class ErrorClassifierTest extends FunSuite {
     val classifier = ErrorClassifier.default.and(ErrorClassifier.serverError)
 
     // default = 4xx || 5xx, serverError = 5xx → AND = 5xx only
-    assertEquals(classifier.isError(Status.Ok), false)
-    assertEquals(classifier.isError(Status.BadRequest), false)
-    assertEquals(classifier.isError(Status.NotFound), false)
-    assertEquals(classifier.isError(Status.InternalServerError), true)
-    assertEquals(classifier.isError(Status.BadGateway), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.Ok)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.BadRequest)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.NotFound)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.InternalServerError)), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.BadGateway)), true)
   }
 
   test("or combines two classifiers with logical OR") {
     val classifier = ErrorClassifier.serverError.or(ErrorClassifier.never)
 
     // serverError = 5xx, never = none → OR = 5xx only
-    assertEquals(classifier.isError(Status.Ok), false)
-    assertEquals(classifier.isError(Status.BadRequest), false)
-    assertEquals(classifier.isError(Status.InternalServerError), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.Ok)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.BadRequest)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.InternalServerError)), true)
   }
 
   test("excluding removes specific statuses from the classifier") {
     val classifier = ErrorClassifier.default.excluding(Status.NotFound, Status.InternalServerError)
 
-    assertEquals(classifier.isError(Status.Ok), false)
-    assertEquals(classifier.isError(Status.BadRequest), true)
-    assertEquals(classifier.isError(Status.NotFound), false)
-    assertEquals(classifier.isError(Status.InternalServerError), false)
-    assertEquals(classifier.isError(Status.BadGateway), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.Ok)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.BadRequest)), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.NotFound)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.InternalServerError)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.BadGateway)), true)
   }
 
   test("included adds specific statuses to the classifier") {
     val classifier = ErrorClassifier.serverError.included(Status.Ok, Status.BadRequest)
 
-    assertEquals(classifier.isError(Status.Ok), true)
-    assertEquals(classifier.isError(Status.BadRequest), true)
-    assertEquals(classifier.isError(Status.NotFound), false)
-    assertEquals(classifier.isError(Status.InternalServerError), true)
-    assertEquals(classifier.isError(Status.BadGateway), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.Ok)), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.BadRequest)), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.NotFound)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.InternalServerError)), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.BadGateway)), true)
   }
 
   test("custom classifier created from a lambda") {
-    val onlyNotFound: ErrorClassifier = _ == Status.NotFound
+    val onlyNotFound: ErrorClassifier = (_, response) => response.status == Status.NotFound
 
-    assertEquals(onlyNotFound.isError(Status.Ok), false)
-    assertEquals(onlyNotFound.isError(Status.BadRequest), false)
-    assertEquals(onlyNotFound.isError(Status.NotFound), true)
-    assertEquals(onlyNotFound.isError(Status.InternalServerError), false)
+    assertEquals(onlyNotFound.isError(reqPrelude, respPrelude(Status.Ok)), false)
+    assertEquals(onlyNotFound.isError(reqPrelude, respPrelude(Status.BadRequest)), false)
+    assertEquals(onlyNotFound.isError(reqPrelude, respPrelude(Status.NotFound)), true)
+    assertEquals(onlyNotFound.isError(reqPrelude, respPrelude(Status.InternalServerError)), false)
   }
 
   test("excluding on never classifier has no effect") {
     val classifier = ErrorClassifier.never.excluding(Status.InternalServerError)
 
-    assertEquals(classifier.isError(Status.Ok), false)
-    assertEquals(classifier.isError(Status.InternalServerError), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.Ok)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.InternalServerError)), false)
   }
 
   test("included on never classifier adds statuses") {
     val classifier = ErrorClassifier.never.included(Status.BadRequest)
 
-    assertEquals(classifier.isError(Status.Ok), false)
-    assertEquals(classifier.isError(Status.BadRequest), true)
-    assertEquals(classifier.isError(Status.InternalServerError), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.Ok)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.BadRequest)), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.InternalServerError)), false)
   }
 
   test("excluding and included can be chained") {
     val classifier =
       ErrorClassifier.default.excluding(Status.BadRequest).included(Status.Ok)
 
-    assertEquals(classifier.isError(Status.Ok), true)
-    assertEquals(classifier.isError(Status.BadRequest), false)
-    assertEquals(classifier.isError(Status.NotFound), true)
-    assertEquals(classifier.isError(Status.InternalServerError), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.Ok)), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.BadRequest)), false)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.NotFound)), true)
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.InternalServerError)), true)
+  }
+
+  test("classification can depend on request method") {
+    val classifier: ErrorClassifier =
+      (request, response) => response.status == Status.NotFound && request.method == Method.GET
+
+    assertEquals(classifier.isError(reqPrelude, respPrelude(Status.NotFound)), true)
+    val postReq = reqPrelude.withMethod(Method.POST)
+    assertEquals(classifier.isError(postReq, respPrelude(Status.NotFound)), false)
   }
 }

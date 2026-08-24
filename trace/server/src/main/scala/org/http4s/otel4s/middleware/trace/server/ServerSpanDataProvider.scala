@@ -161,8 +161,8 @@ object ServerSpanDataProvider {
     def exceptionAttributes(cause: Throwable): Attributes =
       Attributes(TypedServerTraceAttributes.errorType(cause))
 
-    def errorAttributes(status: Status): Attributes =
-      Attributes(TypedServerTraceAttributes.errorType(status))
+    override def errorAttributes(request: RequestPrelude, response: ResponsePrelude): Attributes =
+      Attributes(TypedServerTraceAttributes.errorType(response.status))
 
     private[this] def copy(
         routeClassifier: RouteClassifier = this.routeClassifier,

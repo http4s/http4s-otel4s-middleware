@@ -19,35 +19,34 @@ package otel4s.middleware
 package trace
 
 trait ErrorClassifier {
-  def isError(status: Status): Boolean
+  def isError(request: RequestPrelude, response: ResponsePrelude): Boolean
 
   def and(that: ErrorClassifier): ErrorClassifier =
-    status => isError(status) && that.isError(status)
+    (request, response) => isError(request, response) && that.isError(request, response)
 
   def or(that: ErrorClassifier): ErrorClassifier =
-    status => isError(status) || that.isError(status)
+    (request, response) => isError(request, response) || that.isError(request, response)
 
   def excluding(statuses: Status*): ErrorClassifier = {
     val excluded = statuses.toSet
-    status => !excluded.contains(status) && isError(status)
+    (request, response) => !excluded.contains(response.status) && isError(request, response)
   }
 
   def included(statuses: Status*): ErrorClassifier = {
     val included = statuses.toSet
-    status => included.contains(status) || isError(status)
+    (request, response) => included.contains(response.status) || isError(request, response)
   }
 }
 
 object ErrorClassifier {
-  val default: ErrorClassifier = { status =>
-    status.responseClass match {
+  val default: ErrorClassifier = (_, response) =>
+    response.status.responseClass match {
       case Status.ClientError | Status.ServerError => true
       case _ => false
     }
-  }
 
   val serverError: ErrorClassifier =
-    _.responseClass == Status.ServerError
+    (_, response) => response.status.responseClass == Status.ServerError
 
-  val never: ErrorClassifier = _ => false
+  val never: ErrorClassifier = (_, _) => false
 }
