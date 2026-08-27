@@ -21,6 +21,7 @@ package trace
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 
+import scala.annotation.unused
 import scala.collection.immutable
 import scala.collection.immutable.ArraySeq
 
@@ -58,7 +59,10 @@ trait AttributeProvider {
   /** Provides attributes for a span based on a response that has been
     * determined to represent an error.
     */
-  def errorAttributes(request: RequestPrelude, response: ResponsePrelude): Attributes =
+  def errorAttributes(
+      @unused request: RequestPrelude,
+      @unused response: ResponsePrelude,
+  ): Attributes =
     Attributes.empty
 
   /** @return an `AttributeProvider` that provides the attributes from this and

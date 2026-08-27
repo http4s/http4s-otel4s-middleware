@@ -29,11 +29,11 @@ import cats.syntax.functor._
 import fs2.Stream
 import org.http4s.client.Client
 import org.http4s.client.Middleware
+import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
-import org.typelevel.otel4s.Attributes
 
 /** A middleware for wrapping [[org.http4s.client.Client HTTP `Client`s]].
   *
