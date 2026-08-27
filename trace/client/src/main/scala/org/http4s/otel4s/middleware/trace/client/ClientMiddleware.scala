@@ -155,7 +155,7 @@ object ClientMiddleware {
       )
 
     /** Sets how to determine whether the status of a response represents an
-      * error (defult: [[`ErrorClassifier.default`]]).
+      * error (default: [[ErrorClassifier.default]]).
       *
       * @example
       * {{{

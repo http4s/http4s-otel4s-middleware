@@ -212,7 +212,7 @@ object ServerMiddleware {
       )
 
     /** Sets how to determine whether the status of a response represents an
-      * error (default: [[`ErrorClassifier.serverError`]]).
+      * error (default: [[ErrorClassifier.serverError]]).
       */
     def withErrorClassifier(errorClassifier: ErrorClassifier): Builder[F] =
       copy(errorClassifier = errorClassifier)
