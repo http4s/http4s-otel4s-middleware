@@ -18,7 +18,7 @@ ThisBuild / tlJdkRelease := Some(8)
 
 val catsEffectV = "3.7.1"
 val http4sV = "0.23.36"
-val munitV = "1.3.5"
+val munitV = "1.3.6"
 val munitCatsEffectV = "2.2.0"
 val openTelemetryV = "1.65.0"
 val otel4sV = "1.1.0"
