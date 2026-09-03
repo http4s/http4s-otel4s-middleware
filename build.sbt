@@ -123,6 +123,13 @@ lazy val `trace-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.http4s" %%% "http4s-client" % http4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
     ),
+    mimaBinaryIssueFilters ++= Seq(
+      // private[this] constructor — not reachable by consumers
+      ProblemFilters
+        .exclude[DirectMissingMethodProblem](
+          "org.http4s.otel4s.middleware.trace.client.ClientMiddleware#Impl.this"
+        )
+    ),
   )
 
 lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
@@ -136,6 +143,13 @@ lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.typelevel" %%% "cats-effect" % catsEffectV,
       "org.http4s" %%% "http4s-server" % http4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
+    ),
+    mimaBinaryIssueFilters ++= Seq(
+      // private[this] constructor — not reachable by consumers
+      ProblemFilters
+        .exclude[DirectMissingMethodProblem](
+          "org.http4s.otel4s.middleware.trace.server.ServerMiddleware#Impl.this"
+        )
     ),
   )
 
