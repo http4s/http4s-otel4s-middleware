@@ -152,10 +152,9 @@ object ClientSpanDataProvider {
     def responseAttributes[F[_]](response: Response[F]): Attributes = {
       val b = Attributes.newBuilder
 
-      if (!response.status.isSuccess) {
-        // `error.type` for a `Throwable` handled by `exceptionAttributes`
-        b += TypedClientTraceAttributes.errorType(response.status)
-      }
+      // `error.type` for a response status is provided by `errorAttributes`,
+      // which the caller invokes only for statuses it considers to be errors;
+      // `error.type` for a `Throwable` is provided by `exceptionAttributes`
       b += TypedClientTraceAttributes.httpResponseStatusCode(response.status)
       optIn.httpResponseHeaders.foreach { redactor =>
         TypedClientTraceAttributes
@@ -167,6 +166,9 @@ object ClientSpanDataProvider {
 
     def exceptionAttributes(cause: Throwable): Attributes =
       Attributes(TypedClientTraceAttributes.errorType(cause))
+
+    override def errorAttributes(request: RequestPrelude, response: ResponsePrelude): Attributes =
+      Attributes(TypedClientTraceAttributes.errorType(response.status))
 
     private def copy(
         urlTemplateClassifier: UriTemplateClassifier = this.urlTemplateClassifier,
