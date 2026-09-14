@@ -20,9 +20,9 @@ package client
 
 import com.comcast.ip4s.Port
 import org.typelevel.otel4s.Attribute
+import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.semconv.attributes.ServerAttributes
 import org.typelevel.otel4s.semconv.attributes.UrlAttributes
-import org.typelevel.otel4s.semconv.experimental.attributes.UrlExperimentalAttributes
 
 import scala.annotation.unchecked.uncheckedStable
 
@@ -77,6 +77,8 @@ private[middleware] trait TypedClientAttributes extends TypedAttributes {
   */
 object TypedClientAttributes extends TypedClientAttributes {
 
+  private val UrlTemplate = AttributeKey[String]("url.template")
+
   /** Methods for creating appropriate experimental `Attribute`s from typed
     * HTTP objects within an HTTP client.
     */
@@ -84,7 +86,7 @@ object TypedClientAttributes extends TypedClientAttributes {
 
     /** @return the `url.template` `Attribute` */
     final def urlTemplate(url: Uri, classifier: UriTemplateClassifier): Option[Attribute[String]] =
-      UrlExperimentalAttributes.UrlTemplate.maybe(classifier.classify(url))
+      UrlTemplate.maybe(classifier.classify(url))
   }
 
   private object _Experimental extends Experimental
