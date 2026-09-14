@@ -20,7 +20,9 @@ package otel4s.middleware.metrics
 import cats.data.OptionT
 import cats.effect.IO
 import munit.CatsEffectSuite
-import org.http4s.server.middleware.Metrics
+import org.http4s.client.Client
+import org.http4s.client.middleware.{Metrics => ClientMetrics}
+import org.http4s.server.middleware.{Metrics => ServerMetrics}
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.metrics.data.MetricData
@@ -35,57 +37,119 @@ class OtelMetricsTests extends CatsEffectSuite {
     MetricsTestkit
       .inMemory[IO]()
       .use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+
         for {
-          metricsOps <- {
-            implicit val MP: MeterProvider[IO] = testkit.meterProvider
-            OtelMetrics.serverMetricsOps[IO]()
-          }
+          serverMetricsOps <- OtelMetrics.serverMetricsOps[IO]()
+          clientMetricsOps <- OtelMetrics.clientMetricsOps[IO]()
+
+          activeServerMetrics <- IO.deferred[List[MetricData]]
+          activeClientMetrics <- IO.deferred[List[MetricData]]
+
           _ <- {
             val fakeServer =
-              HttpRoutes[IO](e => OptionT.liftF(e.body.compile.drain.as(Response[IO](Status.Ok))))
-            val meteredServer = Metrics[IO](metricsOps)(fakeServer)
+              HttpRoutes[IO](e =>
+                OptionT.liftF(
+                  testkit.collectMetrics.flatMap(activeServerMetrics.complete) >>
+                    e.body.compile.drain.as(Response[IO](Status.Ok))
+                )
+              )
 
-            meteredServer
+            val meteredServer = ServerMetrics[IO](serverMetricsOps)(fakeServer)
+
+            val meteredClient =
+              ClientMetrics[IO](clientMetricsOps)(Client.fromHttpApp(meteredServer.orNotFound))
+
+            meteredClient
               .run(Request[IO](Method.GET))
-              .semiflatMap(_.body.compile.drain)
-              .value
+              .use { r =>
+                testkit.collectMetrics.flatMap(activeClientMetrics.complete) >>
+                  r.body.compile.drain
+              }
           }
+          activeServer <- activeServerMetrics.get
+          activeClient <- activeClientMetrics.get
           metrics <- testkit.collectMetrics
-        } yield assertMetrics(
-          metrics,
-          MetricExpectation
-            .sum[Long]("http.server.active_requests")
-            .points(
-              PointSetExpectation.exactly(
-                PointExpectation
-                  .numeric(0L)
-                  .attributesExact(Attribute("classifier", ""))
-              )
-            ),
-          MetricExpectation
-            .histogram("http.server.request.duration")
-            .points(
-              PointSetExpectation.exactly(
-                PointExpectation.histogram
-                  .count(1L)
-                  .attributesExact(
-                    Attribute("classifier", ""),
-                    Attribute("http.phase", "headers"),
-                    Attribute("http.request.method", "GET"),
-                  ),
-                PointExpectation.histogram
-                  .count(1L)
-                  .attributesExact(
-                    Attribute("classifier", ""),
-                    Attribute("http.phase", "body"),
-                    Attribute("http.request.method", "GET"),
-                    Attribute("http.response.status_code", 200L),
-                  ),
-              )
-            ),
-        )
+        } yield {
+          assertMetrics(activeServer, activeRequestsExpectation("server", 1L))
+          assertMetrics(activeClient, activeRequestsExpectation("client", 1L))
+          assertMetrics(
+            metrics,
+            MetricExpectation
+              .sum[Long]("http.server.active_requests")
+              .points(
+                PointSetExpectation.exactly(
+                  PointExpectation
+                    .numeric(0L)
+                    .attributesExact(Attribute("classifier", ""))
+                )
+              ),
+            MetricExpectation
+              .histogram("http.server.request.duration")
+              .points(
+                PointSetExpectation.exactly(
+                  PointExpectation.histogram
+                    .count(1L)
+                    .attributesExact(
+                      Attribute("classifier", ""),
+                      Attribute("http.phase", "headers"),
+                      Attribute("http.request.method", "GET"),
+                    ),
+                  PointExpectation.histogram
+                    .count(1L)
+                    .attributesExact(
+                      Attribute("classifier", ""),
+                      Attribute("http.phase", "body"),
+                      Attribute("http.request.method", "GET"),
+                      Attribute("http.response.status_code", 200L),
+                    ),
+                )
+              ),
+            MetricExpectation
+              .sum[Long]("http.client.active_requests")
+              .points(
+                PointSetExpectation.exactly(
+                  PointExpectation
+                    .numeric(0L)
+                    .attributesExact(Attribute("classifier", ""))
+                )
+              ),
+            MetricExpectation
+              .histogram("http.client.request.duration")
+              .points(
+                PointSetExpectation.exactly(
+                  PointExpectation.histogram
+                    .count(1L)
+                    .attributesExact(
+                      Attribute("classifier", ""),
+                      Attribute("http.phase", "headers"),
+                      Attribute("http.request.method", "GET"),
+                    ),
+                  PointExpectation.histogram
+                    .count(1L)
+                    .attributesExact(
+                      Attribute("classifier", ""),
+                      Attribute("http.phase", "body"),
+                      Attribute("http.request.method", "GET"),
+                      Attribute("http.response.status_code", 200L),
+                    ),
+                )
+              ),
+          )
+        }
       }
   }
+
+  private def activeRequestsExpectation(kind: String, value: Long): MetricExpectation =
+    MetricExpectation
+      .sum[Long](s"http.$kind.active_requests")
+      .points(
+        PointSetExpectation.exactly(
+          PointExpectation
+            .numeric(value)
+            .attributesExact(Attribute("classifier", ""))
+        )
+      )
 
   private def assertMetrics(metrics: List[MetricData], expectations: MetricExpectation*): Unit =
     MetricExpectations
