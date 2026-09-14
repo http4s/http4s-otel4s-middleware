@@ -30,15 +30,25 @@ import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
-import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.data.LimitedData
+import org.typelevel.otel4s.sdk.testkit.trace.EventExpectation
+import org.typelevel.otel4s.sdk.testkit.trace.EventSetExpectation
+import org.typelevel.otel4s.sdk.testkit.trace.SpanExpectation
+import org.typelevel.otel4s.sdk.testkit.trace.StatusExpectation
+import org.typelevel.otel4s.sdk.testkit.trace.TraceExpectation
+import org.typelevel.otel4s.sdk.testkit.trace.TraceExpectations
+import org.typelevel.otel4s.sdk.testkit.trace.TraceForestExpectation
 import org.typelevel.otel4s.sdk.testkit.trace.TracesTestkit
 import org.typelevel.otel4s.sdk.trace.SpanLimits
 import org.typelevel.otel4s.sdk.trace.context.propagation.W3CTraceContextPropagator
 import org.typelevel.otel4s.sdk.trace.data.EventData
+import org.typelevel.otel4s.sdk.trace.data.SpanData
 import org.typelevel.otel4s.sdk.trace.data.StatusData
-import org.typelevel.otel4s.trace.SpanKind
+import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
+import org.typelevel.otel4s.semconv.attributes.HttpAttributes
+import org.typelevel.otel4s.semconv.attributes.NetworkAttributes
+import org.typelevel.otel4s.semconv.attributes.UrlAttributes
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
@@ -83,17 +93,15 @@ class ServerMiddlewareTest extends CatsEffectSuite {
               app.run(Request[IO](Method.GET, uri"http://localhost/"))
             }
             spans <- testkit.finishedSpans
-          } yield {
-            assertEquals(spans.length, 2)
-            val spansByName = spans.groupMapReduce(_.name)(identity)((a, _) => a)
-            // also checks that still size 2 and previous line didn't drop elements
-            assertEquals(spansByName.keySet, Set("outer", "inner"))
-            assertEquals(spansByName("outer").parentSpanContext, None)
-            assertEquals(
-              spansByName("inner").parentSpanContext,
-              Some(spansByName("outer").spanContext),
-            )
-          }
+          } yield assertTrace(
+            spans,
+            TraceForestExpectation.unordered(
+              TraceExpectation.unordered(
+                SpanExpectation.name("outer").noParentSpanContext,
+                TraceExpectation.leaf(SpanExpectation.name("inner")),
+              )
+            ),
+          )
         }
     }
 
@@ -131,33 +139,26 @@ class ServerMiddlewareTest extends CatsEffectSuite {
               app.run(request)
             }
             spans <- testkit.finishedSpans
-          } yield {
-            assertEquals(spans.length, 1)
-            val span = spans.head
-            assertEquals(span.name, "GET")
-            assertEquals(span.kind, SpanKind.Server)
-            assertEquals(span.status, StatusData.Unset)
-
-            val attributes = span.attributes.elements
-            assertEquals(attributes.size, 9)
-            def getAttr[A: AttributeKey.KeySelect](name: String): Option[A] =
-              attributes.get[A](name).map(_.value)
-
-            assertEquals(getAttr[String]("http.request.method"), Some("GET"))
-            assertEquals(getAttr[Seq[String]]("http.request.header.foo"), Some(Seq("bar")))
-            assertEquals(getAttr[Seq[String]]("http.request.header.baz"), None)
-            assertEquals(getAttr[String]("network.protocol.version"), Some("1.1"))
-            assertEquals(getAttr[String]("url.scheme"), Some("http"))
-            assertEquals(getAttr[String]("url.path"), Some("/"))
-            assertEquals(getAttr[String]("url.query"), Some(""))
-            assertEquals(getAttr[Long]("http.response.status_code"), Some(200L))
-            assertEquals(getAttr[Seq[String]]("http.response.header.foo"), None)
-            assertEquals(getAttr[Seq[String]]("http.response.header.baz"), Some(Seq("qux")))
-            assertEquals(
-              getAttr[String]("org.http4s.otel4s.middleware.version"),
-              Some(org.http4s.otel4s.middleware.BuildInfo.version),
-            )
-          }
+          } yield assertSingleSpan(
+            spans,
+            SpanExpectation
+              .server("GET")
+              .status(StatusExpectation.unset)
+              .attributesExact(
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpRequestHeader.transformName(_ + ".foo")(Seq("bar")),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                UrlAttributes.UrlScheme("http"),
+                UrlAttributes.UrlPath("/"),
+                UrlAttributes.UrlQuery(""),
+                HttpAttributes.HttpResponseStatusCode(200L),
+                HttpAttributes.HttpResponseHeader.transformName(_ + ".baz")(Seq("qux")),
+                Attribute(
+                  "org.http4s.otel4s.middleware.version",
+                  org.http4s.otel4s.middleware.BuildInfo.version,
+                ),
+              ),
+          )
         }
     }
 
@@ -198,21 +199,17 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 val status = StatusData(StatusCode.Error)
 
                 val attributes = Attributes(
-                  Attribute("error.type", error.getClass.getName),
-                  Attribute("http.request.method", "GET"),
-                  Attribute("network.protocol.version", "1.1"),
-                  Attribute("url.path", "/"),
-                  Attribute("url.scheme", "http"),
+                  ErrorAttributes.ErrorType(error.getClass.getName),
+                  HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                  NetworkAttributes.NetworkProtocolVersion("1.1"),
+                  UrlAttributes.UrlPath("/"),
+                  UrlAttributes.UrlScheme("http"),
                 )
 
                 for {
                   _ <- app.run(request).attempt
                   spans <- testkit.finishedSpans
-                } yield {
-                  assertEquals(spans.map(_.attributes.elements), List(attributes))
-                  assertEquals(spans.map(_.events.elements), List(events))
-                  assertEquals(spans.map(_.status), List(status))
-                }
+                } yield assertSingleSpan(spans, spanExpectation(attributes, status, events))
               }
           }
       }
@@ -240,21 +237,17 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 val status = StatusData(StatusCode.Unset)
 
                 val attributes = Attributes(
-                  Attribute("http.response.status_code", Status.BadRequest.code.longValue),
-                  Attribute("http.request.method", "GET"),
-                  Attribute("network.protocol.version", "1.1"),
-                  Attribute("url.path", "/"),
-                  Attribute("url.scheme", "http"),
+                  HttpAttributes.HttpResponseStatusCode(Status.BadRequest.code.longValue),
+                  HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                  NetworkAttributes.NetworkProtocolVersion("1.1"),
+                  UrlAttributes.UrlPath("/"),
+                  UrlAttributes.UrlScheme("http"),
                 )
 
                 for {
                   _ <- app.run(request).attempt
                   spans <- testkit.finishedSpans
-                } yield {
-                  assertEquals(spans.map(_.attributes.elements), List(attributes))
-                  assertEquals(spans.map(_.events.elements), List(Vector.empty))
-                  assertEquals(spans.map(_.status), List(status))
-                }
+                } yield assertSingleSpan(spans, spanExpectation(attributes, status))
               }
           }
       }
@@ -283,21 +276,23 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 val status = StatusData(StatusCode.Error)
 
                 val attributes = Attributes(
-                  Attribute("error.type", "500"),
-                  Attribute("http.request.method", "GET"),
-                  Attribute("http.response.status_code", 500L),
-                  Attribute("network.protocol.version", "1.1"),
-                  Attribute("url.path", "/"),
-                  Attribute("url.scheme", "http"),
+                  ErrorAttributes.ErrorType("500"),
+                  HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                  HttpAttributes.HttpResponseStatusCode(500L),
+                  NetworkAttributes.NetworkProtocolVersion("1.1"),
+                  UrlAttributes.UrlPath("/"),
+                  UrlAttributes.UrlScheme("http"),
                 )
 
                 for {
                   _ <- app.run(request).attempt
                   spans <- testkit.finishedSpans
-                } yield {
-                  assertEquals(spans.map(_.attributes.elements), List(attributes))
-                  assertEquals(spans.map(_.status), List(status))
-                }
+                } yield assertSingleSpan(
+                  spans,
+                  SpanExpectation.any
+                    .attributesExact(attributes)
+                    .status(statusExpectation(status)),
+                )
               }
           }
       }
@@ -327,21 +322,17 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 val status = StatusData(StatusCode.Error, "canceled")
 
                 val attributes = Attributes(
-                  Attribute("http.request.method", "GET"),
-                  Attribute("network.protocol.version", "1.1"),
-                  Attribute("url.path", "/"),
-                  Attribute("url.scheme", "http"),
+                  HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                  NetworkAttributes.NetworkProtocolVersion("1.1"),
+                  UrlAttributes.UrlPath("/"),
+                  UrlAttributes.UrlScheme("http"),
                 )
 
                 for {
                   f <- app.run(request).void.start
                   _ <- f.joinWithUnit
                   spans <- testkit.finishedSpans
-                } yield {
-                  assertEquals(spans.map(_.attributes.elements), List(attributes))
-                  assertEquals(spans.flatMap(_.events.elements), Nil)
-                  assertEquals(spans.map(_.status), List(status))
-                }
+                } yield assertSingleSpan(spans, spanExpectation(attributes, status))
               }
           }
       }
@@ -371,7 +362,7 @@ class ServerMiddlewareTest extends CatsEffectSuite {
             }
               .run(Request[IO](Method.GET, uri"http://localhost/?#"))
             spans <- testkit.finishedSpans
-          } yield assertEquals(spans.length, 0)
+          } yield assertTrace(spans, TraceForestExpectation.empty)
         }
     }
 
@@ -432,17 +423,18 @@ class ServerMiddlewareTest extends CatsEffectSuite {
               .run(Request[IO](Method.GET, uri"http://localhost/"))
               .map(_.headers)
             spans <- testkit.finishedSpans
-          } yield {
-            assertEquals(spans.length, 1)
-            val spanCtx = spans.head.spanContext
-            val traceparentHeader = headers.get(ci"traceparent")
-            assert(traceparentHeader.isDefined)
-            assertEquals(traceparentHeader.get.length, 1)
-            assertEquals(
-              traceparentHeader.get.head.value,
-              s"00-${spanCtx.traceIdHex}-${spanCtx.spanIdHex}-${spanCtx.traceFlags.toHex}",
-            )
-          }
+          } yield assertSingleSpan(
+            spans,
+            SpanExpectation.any.where("traceparent header matches the server span") { span =>
+              headers
+                .get(ci"traceparent")
+                .exists(
+                  _.map(_.value).toList == List(
+                    s"00-${span.spanContext.traceIdHex}-${span.spanContext.spanIdHex}-${span.spanContext.traceFlags.toHex}"
+                  )
+                )
+            },
+          )
         }
     }
   }
@@ -481,22 +473,18 @@ class ServerMiddlewareTest extends CatsEffectSuite {
               val status = StatusData(StatusCode.Error)
 
               val attributes = Attributes(
-                Attribute("error.type", "500"),
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 500L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("url.path", "/"),
-                Attribute("url.scheme", "http"),
+                ErrorAttributes.ErrorType("500"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(500L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                UrlAttributes.UrlPath("/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
                 _ <- app.run(request).attempt
                 spans <- testkit.finishedSpans
-              } yield {
-                assertEquals(spans.map(_.attributes.elements), List(attributes))
-                assertEquals(spans.flatMap(_.events.elements), Nil)
-                assertEquals(spans.map(_.status), List(status))
-              }
+              } yield assertSingleSpan(spans, spanExpectation(attributes, status))
             }
         }
     }
@@ -525,21 +513,20 @@ class ServerMiddlewareTest extends CatsEffectSuite {
               val request = Request[IO](Method.GET, uri"http://localhost/")
 
               val attributes = Attributes(
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 500L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("url.path", "/"),
-                Attribute("url.scheme", "http"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(500L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                UrlAttributes.UrlPath("/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
                 _ <- app.run(request).attempt
                 spans <- testkit.finishedSpans
-              } yield {
-                assertEquals(spans.map(_.attributes.elements), List(attributes))
-                assertEquals(spans.flatMap(_.events.elements), Nil)
-                assertEquals(spans.map(_.status), List(StatusData.Unset))
-              }
+              } yield assertSingleSpan(
+                spans,
+                spanExpectation(attributes, StatusData.Unset),
+              )
             }
         }
     }
@@ -569,22 +556,18 @@ class ServerMiddlewareTest extends CatsEffectSuite {
               val status = StatusData(StatusCode.Error)
 
               val attributes = Attributes(
-                Attribute("error.type", "503"),
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 503L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("url.path", "/"),
-                Attribute("url.scheme", "http"),
+                ErrorAttributes.ErrorType("503"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(503L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                UrlAttributes.UrlPath("/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
                 _ <- app.run(request).attempt
                 spans <- testkit.finishedSpans
-              } yield {
-                assertEquals(spans.map(_.attributes.elements), List(attributes))
-                assertEquals(spans.flatMap(_.events.elements), Nil)
-                assertEquals(spans.map(_.status), List(status))
-              }
+              } yield assertSingleSpan(spans, spanExpectation(attributes, status))
             }
         }
     }
@@ -614,22 +597,18 @@ class ServerMiddlewareTest extends CatsEffectSuite {
               val status = StatusData(StatusCode.Error)
 
               val attributes = Attributes(
-                Attribute("error.type", "200"),
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 200L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("url.path", "/"),
-                Attribute("url.scheme", "http"),
+                ErrorAttributes.ErrorType("200"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(200L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                UrlAttributes.UrlPath("/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
                 _ <- app.run(request).attempt
                 spans <- testkit.finishedSpans
-              } yield {
-                assertEquals(spans.map(_.attributes.elements), List(attributes))
-                assertEquals(spans.flatMap(_.events.elements), Nil)
-                assertEquals(spans.map(_.status), List(status))
-              }
+              } yield assertSingleSpan(spans, spanExpectation(attributes, status))
             }
         }
     }
@@ -658,21 +637,20 @@ class ServerMiddlewareTest extends CatsEffectSuite {
               val request = Request[IO](Method.GET, uri"http://localhost/")
 
               val attributes = Attributes(
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 500L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("url.path", "/"),
-                Attribute("url.scheme", "http"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(500L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                UrlAttributes.UrlPath("/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
                 _ <- app.run(request).attempt
                 spans <- testkit.finishedSpans
-              } yield {
-                assertEquals(spans.map(_.attributes.elements), List(attributes))
-                assertEquals(spans.flatMap(_.events.elements), Nil)
-                assertEquals(spans.map(_.status), List(StatusData.Unset))
-              }
+              } yield assertSingleSpan(
+                spans,
+                spanExpectation(attributes, StatusData.Unset),
+              )
             }
         }
     }
@@ -716,25 +694,65 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 _ <- errorApp.run(request).attempt
                 _ <- okApp.run(request).attempt
                 spans <- testkit.finishedSpans
-              } yield {
-                assertEquals(spans.length, 2)
-                val errorSpan = spans.find(_.status == StatusData(StatusCode.Error)).get
-                val okSpan = spans.find(_.status == StatusData.Unset).get
-                // Error span has the custom error attribute
-                assertEquals(
-                  errorSpan.attributes.elements.get[String]("custom.error.attribute").map(_.value),
-                  Some("error-value"),
-                )
-                // Ok span does NOT have the custom error attribute
-                assertEquals(
-                  okSpan.attributes.elements.get[String]("custom.error.attribute").map(_.value),
-                  None,
-                )
-              }
+              } yield assertTrace(
+                spans,
+                TraceForestExpectation.unordered(
+                  TraceExpectation.leaf(
+                    SpanExpectation
+                      .name("test-span")
+                      .status(StatusExpectation.error)
+                      .attributesSubset(customErrorAttr)
+                  ),
+                  TraceExpectation.leaf(
+                    SpanExpectation
+                      .name("test-span")
+                      .status(StatusExpectation.unset)
+                      .attributesEmpty
+                  ),
+                ),
+              )
             }
         }
     }
   }
+
+  private def eventExpectation(event: EventData): EventExpectation =
+    EventExpectation
+      .name(event.name)
+      .timestamp(event.timestamp)
+      .attributesExact(event.attributes.elements)
+
+  private def eventsExpectation(events: Vector[EventData]): EventSetExpectation =
+    events.headOption.fold(EventSetExpectation.count(0))(head =>
+      EventSetExpectation.exactly(eventExpectation(head), events.tail.map(eventExpectation): _*)
+    )
+
+  private def statusExpectation(status: StatusData): StatusExpectation =
+    StatusExpectation.code(status.status).description(status.description)
+
+  private def spanExpectation(
+      attributes: Attributes,
+      status: StatusData,
+      events: Vector[EventData] = Vector.empty,
+  ): SpanExpectation =
+    SpanExpectation.any
+      .attributesExact(attributes)
+      .status(statusExpectation(status))
+      .events(eventsExpectation(events))
+
+  private def assertTrace(spans: List[SpanData], expectation: TraceForestExpectation): Unit =
+    TraceExpectations
+      .check(spans, expectation)
+      .fold(
+        mismatches => fail(TraceExpectations.format(mismatches)),
+        identity,
+      )
+
+  private def assertSingleSpan(spans: List[SpanData], expectation: SpanExpectation): Unit =
+    assertTrace(
+      spans,
+      TraceForestExpectation.unordered(TraceExpectation.leaf(expectation)),
+    )
 }
 
 object ServerMiddlewareTest {
