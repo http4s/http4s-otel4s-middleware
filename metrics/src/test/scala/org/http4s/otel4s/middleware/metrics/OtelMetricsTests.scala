@@ -21,11 +21,14 @@ import cats.data.OptionT
 import cats.effect.IO
 import munit.CatsEffectSuite
 import org.http4s.server.middleware.Metrics
-import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.metrics.MeterProvider
-import org.typelevel.otel4s.sdk.metrics.data.MetricPoints
-import org.typelevel.otel4s.sdk.metrics.data.PointData
+import org.typelevel.otel4s.sdk.metrics.data.MetricData
+import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectation
+import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectations
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricsTestkit
+import org.typelevel.otel4s.sdk.testkit.metrics.PointExpectation
+import org.typelevel.otel4s.sdk.testkit.metrics.PointSetExpectation
 
 class OtelMetricsTests extends CatsEffectSuite {
   test("OtelMetrics") {
@@ -48,56 +51,47 @@ class OtelMetricsTests extends CatsEffectSuite {
               .value
           }
           metrics <- testkit.collectMetrics
-        } yield {
-          def attributes(attrs: Attributes): Map[String, String] =
-            attrs.map(a => a.key.name -> a.value.toString).toMap
-
-          val activeRequestsDataPoints: Map[Map[String, String], Long] =
-            metrics
-              .find(_.name == "http.server.active_requests")
-              .map(_.data)
-              .collect { case sum: MetricPoints.Sum =>
-                sum.points.toVector.collect { case long: PointData.LongNumber =>
-                  attributes(long.attributes) -> long.value
-                }.toMap
-              }
-              .getOrElse(Map.empty)
-
-          val requestDurationDataPoints: Map[Map[String, String], Long] =
-            metrics
-              .find(_.name == "http.server.request.duration")
-              .map(_.data)
-              .collect { case histogram: MetricPoints.Histogram =>
-                histogram.points.toVector
-                  .map(e => attributes(e.attributes) -> e.stats.map(_.count).getOrElse(0L))
-                  .toMap
-              }
-              .getOrElse(Map.empty)
-
-          assertEquals(
-            activeRequestsDataPoints,
-            Map(
-              Map("classifier" -> "") -> 0L
+        } yield assertMetrics(
+          metrics,
+          MetricExpectation
+            .sum[Long]("http.server.active_requests")
+            .points(
+              PointSetExpectation.exactly(
+                PointExpectation
+                  .numeric(0L)
+                  .attributesExact(Attribute("classifier", ""))
+              )
             ),
-          )
-
-          assertEquals(
-            requestDurationDataPoints,
-            Map(
-              Map(
-                "classifier" -> "",
-                "http.phase" -> "headers",
-                "http.request.method" -> "GET",
-              ) -> 1L,
-              Map(
-                "classifier" -> "",
-                "http.phase" -> "body",
-                "http.request.method" -> "GET",
-                "http.response.status_code" -> "200",
-              ) -> 1L,
+          MetricExpectation
+            .histogram("http.server.request.duration")
+            .points(
+              PointSetExpectation.exactly(
+                PointExpectation.histogram
+                  .count(1L)
+                  .attributesExact(
+                    Attribute("classifier", ""),
+                    Attribute("http.phase", "headers"),
+                    Attribute("http.request.method", "GET"),
+                  ),
+                PointExpectation.histogram
+                  .count(1L)
+                  .attributesExact(
+                    Attribute("classifier", ""),
+                    Attribute("http.phase", "body"),
+                    Attribute("http.request.method", "GET"),
+                    Attribute("http.response.status_code", 200L),
+                  ),
+              )
             ),
-          )
-        }
+        )
       }
   }
+
+  private def assertMetrics(metrics: List[MetricData], expectations: MetricExpectation*): Unit =
+    MetricExpectations
+      .checkAllDistinct(metrics, expectations: _*)
+      .fold(
+        mismatches => fail(MetricExpectations.format(mismatches)),
+        identity,
+      )
 }
