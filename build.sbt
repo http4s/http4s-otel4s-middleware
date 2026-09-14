@@ -32,6 +32,7 @@ val sharedSettings = Seq(
     "org.http4s" %%% "http4s-core" % http4sV,
     "org.typelevel" %%% "otel4s-core-common" % otel4sV,
     "org.typelevel" %%% "otel4s-semconv" % otel4sV,
+    "org.typelevel" %%% "otel4s-semconv-experimental" % otel4sV % Test,
     "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
     "org.scalameta" %%% "munit" % munitV % Test,
     "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,

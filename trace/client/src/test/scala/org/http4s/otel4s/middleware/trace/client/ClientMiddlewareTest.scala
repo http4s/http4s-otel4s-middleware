@@ -43,6 +43,11 @@ import org.typelevel.otel4s.sdk.trace.context.propagation.W3CTraceContextPropaga
 import org.typelevel.otel4s.sdk.trace.data.EventData
 import org.typelevel.otel4s.sdk.trace.data.SpanData
 import org.typelevel.otel4s.sdk.trace.data.StatusData
+import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
+import org.typelevel.otel4s.semconv.attributes.HttpAttributes
+import org.typelevel.otel4s.semconv.attributes.NetworkAttributes
+import org.typelevel.otel4s.semconv.attributes.ServerAttributes
+import org.typelevel.otel4s.semconv.attributes.UrlAttributes
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
@@ -140,15 +145,15 @@ class ClientMiddlewareTest extends CatsEffectSuite {
             .client("GET")
             .status(StatusExpectation.unset)
             .attributesExact(
-              Attribute("http.request.method", "GET"),
-              Attribute("http.request.header.foo", Seq("bar")),
-              Attribute("network.protocol.version", "1.1"),
-              Attribute("server.address", "localhost"),
-              Attribute("server.port", 80L),
-              Attribute("url.full", "http://localhost/?#"),
-              Attribute("url.scheme", "http"),
-              Attribute("http.response.status_code", 200L),
-              Attribute("http.response.header.baz", Seq("qux")),
+              HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+              HttpAttributes.HttpRequestHeader.transformName(_ + ".foo")(Seq("bar")),
+              NetworkAttributes.NetworkProtocolVersion("1.1"),
+              ServerAttributes.ServerAddress("localhost"),
+              ServerAttributes.ServerPort(80L),
+              UrlAttributes.UrlFull("http://localhost/?#"),
+              UrlAttributes.UrlScheme("http"),
+              HttpAttributes.HttpResponseStatusCode(200L),
+              HttpAttributes.HttpResponseHeader.transformName(_ + ".baz")(Seq("qux")),
               Attribute(
                 "org.http4s.otel4s.middleware.version",
                 org.http4s.otel4s.middleware.BuildInfo.version,
@@ -289,13 +294,13 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               val status = StatusData(StatusCode.Error)
 
               val attributes = Attributes(
-                Attribute("error.type", error.getClass.getName),
-                Attribute("http.request.method", "GET"),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("server.address", "localhost"),
-                Attribute("server.port", 80L),
-                Attribute("url.full", "http://localhost/"),
-                Attribute("url.scheme", "http"),
+                ErrorAttributes.ErrorType(error.getClass.getName),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                ServerAttributes.ServerAddress("localhost"),
+                ServerAttributes.ServerPort(80L),
+                UrlAttributes.UrlFull("http://localhost/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
@@ -385,13 +390,13 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               val status = StatusData(StatusCode.Error)
 
               val attributes = Attributes(
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 200L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("server.address", "localhost"),
-                Attribute("server.port", 80L),
-                Attribute("url.full", "http://localhost/"),
-                Attribute("url.scheme", "http"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(200L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                ServerAttributes.ServerAddress("localhost"),
+                ServerAttributes.ServerPort(80L),
+                UrlAttributes.UrlFull("http://localhost/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
@@ -467,14 +472,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               val status = StatusData(StatusCode.Error)
 
               val attributes = Attributes(
-                Attribute("error.type", "500"),
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 500L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("server.address", "localhost"),
-                Attribute("server.port", 80L),
-                Attribute("url.full", "http://localhost/"),
-                Attribute("url.scheme", "http"),
+                ErrorAttributes.ErrorType("500"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(500L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                ServerAttributes.ServerAddress("localhost"),
+                ServerAttributes.ServerPort(80L),
+                UrlAttributes.UrlFull("http://localhost/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
@@ -632,14 +637,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               val status = StatusData(StatusCode.Error)
 
               val attributes = Attributes(
-                Attribute("error.type", "404"),
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 404L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("server.address", "localhost"),
-                Attribute("server.port", 80L),
-                Attribute("url.full", "http://localhost/"),
-                Attribute("url.scheme", "http"),
+                ErrorAttributes.ErrorType("404"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(404L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                ServerAttributes.ServerAddress("localhost"),
+                ServerAttributes.ServerPort(80L),
+                UrlAttributes.UrlFull("http://localhost/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
@@ -677,13 +682,13 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               val request = Request[IO](Method.GET, uri"http://localhost/")
 
               val attributes = Attributes(
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 404L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("server.address", "localhost"),
-                Attribute("server.port", 80L),
-                Attribute("url.full", "http://localhost/"),
-                Attribute("url.scheme", "http"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(404L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                ServerAttributes.ServerAddress("localhost"),
+                ServerAttributes.ServerPort(80L),
+                UrlAttributes.UrlFull("http://localhost/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
@@ -725,14 +730,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               val status = StatusData(StatusCode.Error)
 
               val attributes = Attributes(
-                Attribute("error.type", "500"),
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 500L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("server.address", "localhost"),
-                Attribute("server.port", 80L),
-                Attribute("url.full", "http://localhost/"),
-                Attribute("url.scheme", "http"),
+                ErrorAttributes.ErrorType("500"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(500L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                ServerAttributes.ServerAddress("localhost"),
+                ServerAttributes.ServerPort(80L),
+                UrlAttributes.UrlFull("http://localhost/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
@@ -771,14 +776,14 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               val status = StatusData(StatusCode.Error)
 
               val attributes = Attributes(
-                Attribute("error.type", "200"),
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 200L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("server.address", "localhost"),
-                Attribute("server.port", 80L),
-                Attribute("url.full", "http://localhost/"),
-                Attribute("url.scheme", "http"),
+                ErrorAttributes.ErrorType("200"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(200L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                ServerAttributes.ServerAddress("localhost"),
+                ServerAttributes.ServerPort(80L),
+                UrlAttributes.UrlFull("http://localhost/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {
@@ -816,13 +821,13 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               val request = Request[IO](Method.GET, uri"http://localhost/")
 
               val attributes = Attributes(
-                Attribute("http.request.method", "GET"),
-                Attribute("http.response.status_code", 500L),
-                Attribute("network.protocol.version", "1.1"),
-                Attribute("server.address", "localhost"),
-                Attribute("server.port", 80L),
-                Attribute("url.full", "http://localhost/"),
-                Attribute("url.scheme", "http"),
+                HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                HttpAttributes.HttpResponseStatusCode(500L),
+                NetworkAttributes.NetworkProtocolVersion("1.1"),
+                ServerAttributes.ServerAddress("localhost"),
+                ServerAttributes.ServerPort(80L),
+                UrlAttributes.UrlFull("http://localhost/"),
+                UrlAttributes.UrlScheme("http"),
               )
 
               for {

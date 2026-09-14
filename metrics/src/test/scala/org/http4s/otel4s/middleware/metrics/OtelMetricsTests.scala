@@ -31,6 +31,7 @@ import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectations
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricsTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.PointExpectation
 import org.typelevel.otel4s.sdk.testkit.metrics.PointSetExpectation
+import org.typelevel.otel4s.semconv.attributes.HttpAttributes
 
 class OtelMetricsTests extends CatsEffectSuite {
   test("OtelMetrics") {
@@ -93,15 +94,15 @@ class OtelMetricsTests extends CatsEffectSuite {
                     .attributesExact(
                       Attribute("classifier", ""),
                       Attribute("http.phase", "headers"),
-                      Attribute("http.request.method", "GET"),
+                      HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
                     ),
                   PointExpectation.histogram
                     .count(1L)
                     .attributesExact(
                       Attribute("classifier", ""),
                       Attribute("http.phase", "body"),
-                      Attribute("http.request.method", "GET"),
-                      Attribute("http.response.status_code", 200L),
+                      HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                      HttpAttributes.HttpResponseStatusCode(200L),
                     ),
                 )
               ),
@@ -123,15 +124,15 @@ class OtelMetricsTests extends CatsEffectSuite {
                     .attributesExact(
                       Attribute("classifier", ""),
                       Attribute("http.phase", "headers"),
-                      Attribute("http.request.method", "GET"),
+                      HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
                     ),
                   PointExpectation.histogram
                     .count(1L)
                     .attributesExact(
                       Attribute("classifier", ""),
                       Attribute("http.phase", "body"),
-                      Attribute("http.request.method", "GET"),
-                      Attribute("http.response.status_code", 200L),
+                      HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                      HttpAttributes.HttpResponseStatusCode(200L),
                     ),
                 )
               ),
