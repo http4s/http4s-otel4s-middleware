@@ -52,7 +52,7 @@ class OtelMetricsTests extends CatsEffectSuite {
               HttpRoutes[IO](e =>
                 OptionT.liftF(
                   testkit.collectMetrics.flatMap(activeServerMetrics.complete) >>
-                    e.body.compile.drain.as(Response[IO](Status.Ok))
+                    e.body.compile.drain.as(Response[IO](Status.Ok).withBodyStream(fs2.Stream(1, 2, 3)))
                 )
               )
 
@@ -70,7 +70,7 @@ class OtelMetricsTests extends CatsEffectSuite {
           }
           activeServer <- activeServerMetrics.get
           activeClient <- activeClientMetrics.get
-          metrics <- testkit.collectMetrics
+          metrics <- testkit.collectMetrics.debug("")
         } yield {
           assertMetrics(activeServer, activeRequestsExpectation("server", 1L))
           assertMetrics(activeClient, activeRequestsExpectation("client", 1L))

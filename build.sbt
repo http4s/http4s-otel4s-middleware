@@ -29,7 +29,7 @@ val baseName = "http4s-otel4s-middleware"
 
 val sharedSettings = Seq(
   libraryDependencies ++= Seq(
-    "org.http4s" %%% "http4s-core" % http4sV,
+    "org.http4s" %%% "http4s-core" % "0.23.37-9-02f8e29-20260914T100738Z-SNAPSHOT",
     "org.typelevel" %%% "otel4s-core-common" % otel4sV,
     "org.typelevel" %%% "otel4s-semconv" % otel4sV,
     "org.typelevel" %%% "otel4s-semconv-experimental" % otel4sV % Test,
@@ -98,7 +98,8 @@ lazy val metrics = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     name := s"$baseName-metrics",
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
-      "org.http4s" %%% "http4s-server" % http4sV % Test,
+      "org.http4s" %%% "http4s-server" % "0.23.37-9-02f8e29-20260914T100738Z-SNAPSHOT" % Test,
+      "org.http4s" %%% "http4s-client" % "0.23.37-9-02f8e29-20260914T100738Z-SNAPSHOT" % Test,
       "org.http4s" %%% "http4s-client" % http4sV % Test,
     ),
   )

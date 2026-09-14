@@ -49,6 +49,9 @@ private[middleware] trait TypedAttributes {
   final def httpResponseStatusCode(status: Status): Attribute[Long] =
     HttpAttributes.HttpResponseStatusCode(status.code.toLong)
 
+  final def httpResponseStatusCode(status: Option[Status]): Option[Attribute[Long]] =
+    HttpAttributes.HttpResponseStatusCode.maybe(status.map(_.code.toLong))
+
   /** @return the `network.peer.address` `Attribute` */
   final def networkPeerAddress(ip: IpAddress): Attribute[String] =
     NetworkAttributes.NetworkPeerAddress(ip.toString)

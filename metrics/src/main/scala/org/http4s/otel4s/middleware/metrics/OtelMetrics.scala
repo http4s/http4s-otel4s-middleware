@@ -18,15 +18,19 @@ package org.http4s
 package otel4s.middleware
 package metrics
 
-import cats.Monad
+import java.util.concurrent.TimeUnit
+
+import cats.{Applicative, Monad}
 import cats.syntax.all._
-import org.http4s.metrics.MetricsOps
+import org.http4s.metrics.MetricsOps2
 import org.http4s.metrics.TerminationType
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics._
 import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
+
+import scala.concurrent.duration.FiniteDuration
 
 /** [[http4s.metrics.MetricsOps]] algebra capable of recording OpenTelemetry metrics
   */
@@ -50,10 +54,10 @@ object OtelMetrics {
   def clientMetricsOps[F[_]: Monad: MeterProvider](
       attributes: Attributes = Attributes.empty,
       responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
-  ): F[MetricsOps[F]] =
+  ): F[MetricsOps2[F]] =
     metricsOps(
       "client",
-      attributes,
+      _ => Monad[F].pure(attributes),
       responseDurationSecondsHistogramBuckets,
     )
 
@@ -75,18 +79,18 @@ object OtelMetrics {
   def serverMetricsOps[F[_]: Monad: MeterProvider](
       attributes: Attributes = Attributes.empty,
       responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
-  ): F[MetricsOps[F]] =
+  ): F[MetricsOps2[F]] =
     metricsOps(
       "server",
-      attributes,
+      _ => Monad[F].pure(attributes),
       responseDurationSecondsHistogramBuckets,
     )
 
   private def metricsOps[F[_]: Monad: MeterProvider](
       kind: String,
-      attributes: Attributes,
+      attributes: RequestPrelude => F[Attributes],
       responseDurationSecondsHistogramBuckets: BucketBoundaries,
-  ): F[MetricsOps[F]] =
+  ): F[MetricsOps2[F]] =
     for {
       meter <- MeterProvider[F]
         .meter(s"org.http4s.otel4s.middleware.$kind")
@@ -104,70 +108,84 @@ object OtelMetrics {
       attributes,
     )
 
-  private def createMetricsOps[F[_]](
+  private def createMetricsOps[F[_]: Applicative](
       metrics: MetricsCollection[F],
-      attributes: Attributes,
-  ): MetricsOps[F] =
-    new MetricsOps[F] {
-      override def increaseActiveRequests(classifier: Option[String]): F[Unit] =
-        metrics.activeRequests
-          .inc(
-            attributes
-              .added(TypedMetricAttributes.classifier(classifier))
-          )
+      contextAttributes: RequestPrelude => F[Attributes],
+  ): MetricsOps2[F] =
+    new MetricsOps2[F] {
+      type Context = Attributes
 
-      override def decreaseActiveRequests(classifier: Option[String]): F[Unit] =
-        metrics.activeRequests
-          .dec(
-            attributes
-              .added(TypedMetricAttributes.classifier(classifier))
-          )
+      override def createContext(request: RequestPrelude): F[Attributes] =
+        contextAttributes(request)
+
+      override def increaseActiveRequests(request: RequestPrelude, context: Attributes): F[Unit] =
+        metrics.activeRequests.inc(context)
+
+      override def decreaseActiveRequests(request: RequestPrelude, context: Attributes): F[Unit] =
+        metrics.activeRequests.dec(context)
 
       override def recordHeadersTime(
-          method: Method,
-          elapsed: Long,
-          classifier: Option[String],
+          request: RequestPrelude,
+          elapsed: FiniteDuration,
+          context: Attributes,
       ): F[Unit] =
-        metrics.requestDuration
-          .record(
-            secondsFromNanos(elapsed),
-            attributes
-              .added(TypedMetricAttributes.classifier(classifier))
-              .added(TypedAttributes.httpRequestMethod(method))
-              .added(TypedMetricAttributes.httpPhase(Phase.Headers)),
-          )
+        metrics.requestDuration.record(
+          elapsed.toUnit(TimeUnit.NANOSECONDS),
+          context
+            .added(TypedAttributes.httpRequestMethod(request.method))
+            .added(TypedMetricAttributes.httpPhase(Phase.Headers)),
+        )
 
       override def recordTotalTime(
-          method: Method,
-          status: Status,
-          elapsed: Long,
-          classifier: Option[String],
+          request: RequestPrelude,
+          response: Option[ResponsePrelude],
+          terminationType: Option[TerminationType],
+          elapsed: FiniteDuration,
+          context: Attributes,
       ): F[Unit] =
-        metrics.requestDuration
-          .record(
-            secondsFromNanos(elapsed),
-            attributes
-              .added(TypedMetricAttributes.classifier(classifier))
-              .added(TypedAttributes.httpRequestMethod(method))
-              .added(TypedAttributes.httpResponseStatusCode(status))
-              .added(TypedMetricAttributes.httpPhase(Phase.Body)),
-          )
+        metrics.requestDuration.record(
+          elapsed.toUnit(TimeUnit.NANOSECONDS),
+          context
+            .added(TypedAttributes.httpRequestMethod(request.method))
+            .concat(TypedAttributes.httpResponseStatusCode(response.map(_.status)))
+            .concat(TypedMetricAttributes.errorType(terminationType))
+            .added(TypedMetricAttributes.httpPhase(Phase.Body)),
+        )
 
-      override def recordAbnormalTermination(
-          elapsed: Long,
-          terminationType: TerminationType,
-          classifier: Option[String],
-      ): F[Unit] =
-        metrics.abnormalTerminations
-          .record(
-            secondsFromNanos(elapsed),
-            attributes
-              .added(TypedMetricAttributes.classifier(classifier))
-              .added(TypedMetricAttributes.errorType(terminationType)),
-          )
+      override def recordRequestBodySize(
+          request: RequestPrelude,
+          response: Option[ResponsePrelude],
+          terminationType: Option[TerminationType],
+          bodySizeBytes: Long,
+          context: Attributes,
+      ): F[Unit] = {
+        println("record request body size: " + request + " " + bodySizeBytes)
+        metrics.requestBodySize.record(
+          bodySizeBytes,
+          context
+            .added(TypedAttributes.httpRequestMethod(request.method))
+            .concat(TypedAttributes.httpResponseStatusCode(response.map(_.status)))
+            .concat(TypedMetricAttributes.errorType(terminationType))
+        ).whenA(bodySizeBytes > 0L)
+      }
 
-      private def secondsFromNanos(nanos: Long): Double =
-        nanos / 1000000000.0
+      override def recordResponseBodySize(
+          request: RequestPrelude,
+          response: ResponsePrelude,
+          terminationType: Option[TerminationType],
+          bodySizeBytes: Long,
+          context: Attributes,
+      ): F[Unit] = {
+        println("record response body size: " + request + " " + bodySizeBytes)
+        metrics.responseBodySize.record(
+          bodySizeBytes,
+          context
+            .added(TypedAttributes.httpRequestMethod(request.method))
+            .added(TypedAttributes.httpResponseStatusCode(response.status))
+            .concat(TypedMetricAttributes.errorType(terminationType))
+        ).whenA(bodySizeBytes > 0L)
+      }
+
     }
 
   private def createMetricsCollection[F[_]: Monad: Meter](
@@ -189,24 +207,35 @@ object OtelMetrics {
         .withDescription(s"Number of active HTTP $kind requests.")
         .create
 
-    val abnormalTerminations: F[Histogram[F, Double]] =
+    val requestBodySize: F[Histogram[F, Long]] =
       Meter[F]
-        .histogram[Double](s"http.$kind.abnormal_terminations")
-        .withUnit("s")
+        .histogram[Long](s"http.$kind.request.body.size")
+        .withUnit("By")
         .withDescription(s"Duration of HTTP $kind abnormal terminations.")
         .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
         .create
 
-    (requestDuration, activeRequests, abnormalTerminations).mapN(MetricsCollection.apply)
+    val responseBodySize: F[Histogram[F, Long]] =
+      Meter[F]
+        .histogram[Long](s"http.$kind.response.body.size")
+        .withUnit("By")
+        .withDescription(s"Duration of HTTP $kind abnormal terminations.")
+        .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
+        .create
+
+    (requestDuration, activeRequests, requestBodySize, responseBodySize).mapN(
+      MetricsCollection.apply
+    )
   }
 
   private val DefaultHistogramBuckets: BucketBoundaries =
-    BucketBoundaries(Vector(.005, .01, .025, .05, .075, .1, .25, .5, .75, 1, 2.5, 5, 7.5, 10))
+    BucketBoundaries(.005, .01, .025, .05, .075, .1, .25, .5, .75, 1, 2.5, 5, 7.5, 10)
 
   final case class MetricsCollection[F[_]](
       requestDuration: Histogram[F, Double],
       activeRequests: UpDownCounter[F, Long],
-      abnormalTerminations: Histogram[F, Double],
+      requestBodySize: Histogram[F, Long],
+      responseBodySize: Histogram[F, Long],
   )
 
   private sealed trait Phase
@@ -218,10 +247,6 @@ object OtelMetrics {
   }
 
   private object TypedMetricAttributes {
-    private val Classifier: AttributeKey[String] = AttributeKey.string("classifier")
-
-    def classifier(string: Option[String]): Attribute[String] =
-      Classifier(string.getOrElse(""))
 
     private val HttpPhase: AttributeKey[String] = AttributeKey.string("http.phase")
 
@@ -231,8 +256,8 @@ object OtelMetrics {
         case Phase.Body => "body"
       })
 
-    def errorType(terminationType: TerminationType): Attribute[String] =
-      ErrorAttributes.ErrorType(terminationType match {
+    def errorType(terminationType: Option[TerminationType]): Option[Attribute[String]] =
+      ErrorAttributes.ErrorType.maybe(terminationType.map {
         case TerminationType.Abnormal(e) => e.getClass.getName
         case TerminationType.Error(e) => e.getClass.getName
         case TerminationType.Canceled => "cancel"
