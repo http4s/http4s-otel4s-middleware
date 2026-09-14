@@ -18,9 +18,8 @@ package org.http4s
 package otel4s.middleware
 package metrics
 
-import java.util.concurrent.TimeUnit
-
-import cats.{Applicative, Monad}
+import cats.Applicative
+import cats.Monad
 import cats.syntax.all._
 import org.http4s.metrics.MetricsOps2
 import org.http4s.metrics.TerminationType
@@ -30,6 +29,7 @@ import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics._
 import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
 
+import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
 /** [[http4s.metrics.MetricsOps]] algebra capable of recording OpenTelemetry metrics
@@ -116,7 +116,12 @@ object OtelMetrics {
       type Context = Attributes
 
       override def createContext(request: RequestPrelude): F[Attributes] =
-        contextAttributes(request)
+        contextAttributes(request).map { attributes =>
+          attributes
+            .added(TypedAttributes.httpRequestMethod(request.method))
+            .concat(TypedAttributes.urlScheme(request.uri.scheme))
+            .concat(TypedAttributes.serverAddress(request.uri.host))
+        }
 
       override def increaseActiveRequests(request: RequestPrelude, context: Attributes): F[Unit] =
         metrics.activeRequests.inc(context)
@@ -132,7 +137,6 @@ object OtelMetrics {
         metrics.requestDuration.record(
           elapsed.toUnit(TimeUnit.NANOSECONDS),
           context
-            .added(TypedAttributes.httpRequestMethod(request.method))
             .added(TypedMetricAttributes.httpPhase(Phase.Headers)),
         )
 
@@ -146,7 +150,6 @@ object OtelMetrics {
         metrics.requestDuration.record(
           elapsed.toUnit(TimeUnit.NANOSECONDS),
           context
-            .added(TypedAttributes.httpRequestMethod(request.method))
             .concat(TypedAttributes.httpResponseStatusCode(response.map(_.status)))
             .concat(TypedMetricAttributes.errorType(terminationType))
             .added(TypedMetricAttributes.httpPhase(Phase.Body)),
@@ -158,16 +161,14 @@ object OtelMetrics {
           terminationType: Option[TerminationType],
           bodySizeBytes: Long,
           context: Attributes,
-      ): F[Unit] = {
-        println("record request body size: " + request + " " + bodySizeBytes)
-        metrics.requestBodySize.record(
-          bodySizeBytes,
-          context
-            .added(TypedAttributes.httpRequestMethod(request.method))
-            .concat(TypedAttributes.httpResponseStatusCode(response.map(_.status)))
-            .concat(TypedMetricAttributes.errorType(terminationType))
-        ).whenA(bodySizeBytes > 0L)
-      }
+      ): F[Unit] =
+        metrics.requestBodySize
+          .record(
+            bodySizeBytes,
+            context
+              .concat(TypedAttributes.httpResponseStatusCode(response.map(_.status)))
+              .concat(TypedMetricAttributes.errorType(terminationType)),
+          )
 
       override def recordResponseBodySize(
           request: RequestPrelude,
@@ -175,16 +176,14 @@ object OtelMetrics {
           terminationType: Option[TerminationType],
           bodySizeBytes: Long,
           context: Attributes,
-      ): F[Unit] = {
-        println("record response body size: " + request + " " + bodySizeBytes)
-        metrics.responseBodySize.record(
-          bodySizeBytes,
-          context
-            .added(TypedAttributes.httpRequestMethod(request.method))
-            .added(TypedAttributes.httpResponseStatusCode(response.status))
-            .concat(TypedMetricAttributes.errorType(terminationType))
-        ).whenA(bodySizeBytes > 0L)
-      }
+      ): F[Unit] =
+        metrics.responseBodySize
+          .record(
+            bodySizeBytes,
+            context
+              .added(TypedAttributes.httpResponseStatusCode(response.status))
+              .concat(TypedMetricAttributes.errorType(terminationType)),
+          )
 
     }
 
@@ -204,14 +203,16 @@ object OtelMetrics {
       Meter[F]
         .upDownCounter[Long](s"http.$kind.active_requests")
         .withUnit("{request}")
-        .withDescription(s"Number of active HTTP $kind requests.")
+        .withDescription(
+          s"Number of active HTTP ${if (kind == "client") "" else "server "}requests."
+        )
         .create
 
     val requestBodySize: F[Histogram[F, Long]] =
       Meter[F]
         .histogram[Long](s"http.$kind.request.body.size")
         .withUnit("By")
-        .withDescription(s"Duration of HTTP $kind abnormal terminations.")
+        .withDescription(s"Size of HTTP $kind request bodies.")
         .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
         .create
 
@@ -219,7 +220,7 @@ object OtelMetrics {
       Meter[F]
         .histogram[Long](s"http.$kind.response.body.size")
         .withUnit("By")
-        .withDescription(s"Duration of HTTP $kind abnormal terminations.")
+        .withDescription(s"Size of HTTP $kind response bodies.")
         .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
         .create
 

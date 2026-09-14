@@ -98,6 +98,7 @@ lazy val metrics = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     name := s"$baseName-metrics",
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
+      "org.typelevel" %%% "otel4s-semconv-metrics-experimental" % otel4sV % Test,
       "org.http4s" %%% "http4s-server" % "0.23.37-9-02f8e29-20260914T100738Z-SNAPSHOT" % Test,
       "org.http4s" %%% "http4s-client" % "0.23.37-9-02f8e29-20260914T100738Z-SNAPSHOT" % Test,
       "org.http4s" %%% "http4s-client" % http4sV % Test,
