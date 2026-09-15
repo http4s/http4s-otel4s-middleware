@@ -42,6 +42,7 @@ import org.typelevel.otel4s.sdk.testkit.metrics.PointExpectation
 import org.typelevel.otel4s.sdk.testkit.metrics.PointSetExpectation
 import org.typelevel.otel4s.semconv.MetricSpec
 import org.typelevel.otel4s.semconv.Requirement
+import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
 import org.typelevel.otel4s.semconv.attributes.HttpAttributes
 import org.typelevel.otel4s.semconv.attributes.NetworkAttributes
 import org.typelevel.otel4s.semconv.attributes.ServerAttributes
@@ -177,7 +178,6 @@ class OtelMetricsTests extends CatsEffectSuite {
                     .attributesExact(
                       ClientAttribute,
                       HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
-                      NetworkAttributes.NetworkProtocolVersion("1.1"),
                       ServerAttributes.ServerAddress("http4s.org"),
                       ServerAttributes.ServerPort(443L),
                       UrlAttributes.UrlScheme("https"),
@@ -298,6 +298,91 @@ class OtelMetricsTests extends CatsEffectSuite {
             "http.client.request.duration",
             "http.server.request.duration",
           ),
+        )
+      }
+  }
+
+  test("client metrics use the response protocol version") {
+    MetricsTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+
+        for {
+          metricsOps <- OtelMetrics.clientMetricsOps[IO](ClientMetricsConfig.recommended)
+          client = ClientMetrics[IO](metricsOps)(Client.fromHttpApp(HttpApp[IO] { _ =>
+            IO.pure(Response[IO](Status.Ok, httpVersion = HttpVersion.`HTTP/2`))
+          }))
+          _ <- client.run(Request[IO](uri = uri"https://http4s.org")).use(_ => IO.unit)
+          metrics <- testkit.collectMetrics
+        } yield assertMetrics(
+          metrics,
+          MetricExpectation
+            .histogram("http.client.request.duration")
+            .points(
+              PointSetExpectation.exactly(
+                PointExpectation.histogram
+                  .count(1L)
+                  .attributesExact(
+                    HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                    HttpAttributes.HttpResponseStatusCode(200L),
+                    NetworkAttributes.NetworkProtocolVersion("2"),
+                    ServerAttributes.ServerAddress("http4s.org"),
+                    ServerAttributes.ServerPort(443L),
+                  )
+              )
+            ),
+        )
+      }
+  }
+
+  test("client metrics treat 4xx responses as errors but server metrics do not") {
+    MetricsTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+
+        for {
+          clientMetricsOps <- OtelMetrics.clientMetricsOps[IO](ClientMetricsConfig.minimal)
+          serverMetricsOps <- OtelMetrics.serverMetricsOps[IO](ServerMetricsConfig.minimal)
+          response = Response[IO](Status.BadRequest)
+          client = ClientMetrics[IO](clientMetricsOps)(Client.fromHttpApp(HttpApp.pure(response)))
+          server = ServerMetrics[IO](serverMetricsOps)(HttpRoutes.of[IO] { case _ =>
+            IO.pure(response)
+          }).orNotFound
+          _ <- client.run(Request[IO](uri = uri"https://http4s.org")).use(_ => IO.unit)
+          _ <- server.run(Request[IO](uri = uri"https://http4s.org")).flatMap(_.body.compile.drain)
+          metrics <- testkit.collectMetrics
+        } yield assertMetrics(
+          metrics,
+          MetricExpectation
+            .histogram("http.client.request.duration")
+            .points(
+              PointSetExpectation.exactly(
+                PointExpectation.histogram
+                  .count(1L)
+                  .attributesExact(
+                    ErrorAttributes.ErrorType("400"),
+                    HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                    HttpAttributes.HttpResponseStatusCode(400L),
+                    ServerAttributes.ServerAddress("http4s.org"),
+                    ServerAttributes.ServerPort(443L),
+                  )
+              )
+            ),
+          MetricExpectation
+            .histogram("http.server.request.duration")
+            .points(
+              PointSetExpectation.exactly(
+                PointExpectation.histogram
+                  .count(1L)
+                  .attributesExact(
+                    HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                    HttpAttributes.HttpResponseStatusCode(400L),
+                    UrlAttributes.UrlScheme("https"),
+                  )
+              )
+            ),
         )
       }
   }

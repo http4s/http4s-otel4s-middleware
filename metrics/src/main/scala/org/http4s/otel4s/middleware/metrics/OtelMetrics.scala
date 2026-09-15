@@ -66,6 +66,15 @@ import scala.concurrent.duration.FiniteDuration
   * attributes derived from the HTTP request or response take precedence when an attribute key is
   * present in both sets. Histogram bucket settings affect only their corresponding histogram.
   *
+  * Body sizes are measured from the streams visible to the http4s metrics middleware. To record
+  * the transport-encoded sizes required by OpenTelemetry, place client metrics inside response
+  * decompression middleware, close to the underlying client; for example,
+  * `GZip()(Metrics(ops)(client))`. Place server metrics outside response compression middleware,
+  * close to the server transport; for example, `Metrics(ops)(GZip(routes))`. Reversing either
+  * ordering records application-facing, decoded body sizes instead. The same principle applies to
+  * middleware that transforms request bodies: metrics must observe the encoded side of the
+  * transformation.
+  *
   * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-metrics/ OpenTelemetry HTTP metric semantic conventions]]
   */
 object OtelMetrics {
@@ -183,6 +192,7 @@ object OtelMetrics {
   private final case class MetricsContext(
       activeRequestAttributes: Attributes,
       requestAttributes: Attributes,
+      responseProtocolVersionEnabled: Boolean,
   )
 
   private def clientContext(config: ClientMetricsConfig)(
@@ -203,11 +213,11 @@ object OtelMetrics {
       .urlTemplate(request.uri, config.urlTemplateClassifier)
 
     val configured = common ++ optIn.result()
-    val requestAttributes =
-      if (config.networkProtocolVersionEnabled)
-        configured.added(TypedClientAttributes.networkProtocolVersion(request.httpVersion))
-      else configured
-    MetricsContext(activeRequestAttributes = configured, requestAttributes = requestAttributes)
+    MetricsContext(
+      activeRequestAttributes = configured,
+      requestAttributes = configured,
+      responseProtocolVersionEnabled = config.networkProtocolVersionEnabled,
+    )
   }
 
   private def serverContext(config: ServerMetricsConfig)(
@@ -240,6 +250,7 @@ object OtelMetrics {
       activeRequestAttributes = common,
       requestAttributes = recommended
         .concat(TypedServerAttributes.httpRoute(request, config.routeClassifier)),
+      responseProtocolVersionEnabled = false,
     )
   }
 
@@ -274,11 +285,12 @@ object OtelMetrics {
           responseBodySizeEnabled,
         )
       }
-    } yield createMetricsOps(metrics, context)
+    } yield createMetricsOps(metrics, context, kind)
 
   private def createMetricsOps[F[_]: Applicative](
       metrics: MetricsCollection[F],
       createRequestContext: MetricsRequest => MetricsContext,
+      kind: String,
   ): MetricsOps2[F] =
     new MetricsOps2[F] {
       type Context = MetricsContext
@@ -350,8 +362,13 @@ object OtelMetrics {
           context: MetricsContext,
       ): Attributes =
         context.requestAttributes
+          .concat(
+            response
+              .filter(_ => context.responseProtocolVersionEnabled)
+              .map(r => TypedAttributes.networkProtocolVersion(r.httpVersion))
+          )
           .concat(TypedAttributes.httpResponseStatusCode(response.map(_.status)))
-          .concat(TypedMetricAttributes.errorType(response, terminationType))
+          .concat(TypedMetricAttributes.errorType(kind, response, terminationType))
     }
 
   private def createMetricsCollection[F[_]: Monad: Meter](
@@ -443,6 +460,7 @@ object OtelMetrics {
 
   private object TypedMetricAttributes {
     def errorType(
+        kind: String,
         response: Option[ResponsePrelude],
         terminationType: Option[TerminationType],
     ): Option[Attribute[String]] =
@@ -457,7 +475,10 @@ object OtelMetrics {
           .orElse(
             response
               .map(_.status)
-              .filter(_.responseClass == Status.ServerError)
+              .filter { status =>
+                status.responseClass == Status.ServerError ||
+                (kind == "client" && status.responseClass == Status.ClientError)
+              }
               .map(_.code.toString)
           )
       )
