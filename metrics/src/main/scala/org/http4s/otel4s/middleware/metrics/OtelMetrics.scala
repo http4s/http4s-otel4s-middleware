@@ -211,12 +211,17 @@ object OtelMetrics {
   }
 
   private def serverContext(config: ServerMetricsConfig)(
-    metricsRequest: MetricsRequest
+      metricsRequest: MetricsRequest
   ): MetricsContext = {
     val request = metricsRequest.requestPrelude
 
     val forwarded = request.headers.get[Forwarded]
-    val scheme = OriginalScheme(forwarded, request.headers, request.uri)
+    val scheme = OriginalScheme(
+      forwarded,
+      request.headers,
+      request.uri,
+      metricsRequest.connectionInfo.map(_.secure),
+    )
     val commonBuilder = Attributes.newBuilder
     commonBuilder ++= config.additionalAttributes
     commonBuilder += TypedServerAttributes.httpRequestMethod(request.method, config.knownMethods)

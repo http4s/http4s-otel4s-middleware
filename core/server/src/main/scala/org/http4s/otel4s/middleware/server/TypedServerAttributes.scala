@@ -46,7 +46,7 @@ private[middleware] trait TypedServerAttributes extends TypedAttributes {
   /** Adds the `server.address` and `server.port` `Attribute`s to the provided
     * builder.
     *
-    * @param request the client's request
+    * @param request the server request
     * @param forwarded the `Forwarded` header, if present in the request.
     *                  Because it is used in the creation of several
     *                  `Attribute`s, it is parsed and provided separately.
@@ -82,8 +82,6 @@ private[middleware] trait TypedServerAttributes extends TypedAttributes {
         b ++= serverPort(host.port)
       }
       .orElse[b.type] {
-        // parsing not currently supported, but if we know it exists then we
-        // know not to keep checking other things
         request.headers
           .get[`X-Forwarded-Host`]
           .map { xfh =>
@@ -121,7 +119,7 @@ private[middleware] trait TypedServerAttributes extends TypedAttributes {
       .getOrElse(b)
   }
 
-  /** @param request the client's request
+  /** @param request the server request
     * @param forwarded the `Forwarded` header, if present in the request.
     *                  Because it is used in the creation of several
     *                  `Attribute`s, it is parsed and provided separately.

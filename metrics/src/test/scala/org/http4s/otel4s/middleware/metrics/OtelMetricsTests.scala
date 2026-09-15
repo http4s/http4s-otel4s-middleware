@@ -19,10 +19,14 @@ package otel4s.middleware.metrics
 
 import cats.data.OptionT
 import cats.effect.IO
+import com.comcast.ip4s.Ipv4Address
+import com.comcast.ip4s.Port
+import com.comcast.ip4s.SocketAddress
 import munit.CatsEffectSuite
 import munit.Location
 import org.http4s.client.Client
 import org.http4s.client.middleware.{Metrics => ClientMetrics}
+import org.http4s.headers.Host
 import org.http4s.server.middleware.{Metrics => ServerMetrics}
 import org.http4s.syntax.literals._
 import org.typelevel.otel4s.Attribute
@@ -294,6 +298,56 @@ class OtelMetricsTests extends CatsEffectSuite {
             "http.client.request.duration",
             "http.server.request.duration",
           ),
+        )
+      }
+  }
+
+  test("server connection security supplies the scheme and default port") {
+    MetricsTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+
+        val connection = Request.Connection(
+          local = SocketAddress(Ipv4Address.fromBytes(127, 0, 0, 1), Port.fromInt(4321).get),
+          remote = SocketAddress(Ipv4Address.fromBytes(192, 168, 1, 1), Port.fromInt(1234).get),
+          secure = true,
+        )
+
+        for {
+          metricsOps <- OtelMetrics.serverMetricsOps[IO](ServerMetricsConfig.all)
+          server = ServerMetrics[IO](metricsOps)(HttpRoutes.of[IO] { case _ =>
+            IO.pure(Response[IO](Status.Ok))
+          }).orNotFound
+          _ <- server
+            .run(
+              Request[IO]()
+                .putHeaders(Host("example.com"))
+                .withAttribute(
+                  Request.Keys.ConnectionInfo,
+                  connection,
+                )
+            )
+            .flatMap(_.body.compile.drain)
+          metrics <- testkit.collectMetrics
+        } yield assertMetrics(
+          metrics,
+          MetricExpectation
+            .histogram("http.server.request.duration")
+            .points(
+              PointSetExpectation.exactly(
+                PointExpectation.histogram
+                  .count(1L)
+                  .attributesExact(
+                    HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                    HttpAttributes.HttpResponseStatusCode(200L),
+                    NetworkAttributes.NetworkProtocolVersion("1.1"),
+                    ServerAttributes.ServerAddress("example.com"),
+                    ServerAttributes.ServerPort(443L),
+                    UrlAttributes.UrlScheme("https"),
+                  )
+              )
+            ),
         )
       }
   }

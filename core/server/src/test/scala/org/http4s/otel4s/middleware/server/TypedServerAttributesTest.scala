@@ -17,6 +17,9 @@
 package org.http4s
 package otel4s.middleware.server
 
+import com.comcast.ip4s.Ipv4Address
+import com.comcast.ip4s.Port
+import com.comcast.ip4s.SocketAddress
 import munit.FunSuite
 import munit.Location
 import org.http4s.headers.Forwarded
@@ -76,6 +79,7 @@ class TypedServerAttributesTest extends FunSuite {
     val u1 = uri"http://opentelemetry.io"
     val u2 = uri"https://opentelemetry.io"
     val u3 = uri"https://opentelemetry.io:1080"
+    val u4 = uri"//opentelemetry.io:1080"
     val os1 = OriginalScheme(None, Headers.empty, Uri())
     val os2 = OriginalScheme(None, Headers.empty, uri"http:")
     val os3 = OriginalScheme(None, Headers.empty, uri"https:")
@@ -204,6 +208,29 @@ class TypedServerAttributesTest extends FunSuite {
       HttpVersion.`HTTP/2`,
       os3,
       Attributes(Attribute("server.address", "opentelemetry.io"), Attribute("server.port", 1080L)),
+    )
+    check(
+      Headers(h1),
+      u4,
+      HttpVersion.`HTTP/2`,
+      os3,
+      Attributes(Attribute("server.address", "opentelemetry.io"), Attribute("server.port", 1080L)),
+    )
+
+    val connection = Request.Connection(
+      local = SocketAddress(Ipv4Address.fromBytes(127, 0, 0, 1), Port.fromInt(4321).get),
+      remote = SocketAddress(Ipv4Address.fromBytes(192, 168, 1, 1), Port.fromInt(1234).get),
+      secure = false,
+    )
+    val requestWithConnection =
+      Request().withAttribute(Request.Keys.ConnectionInfo, connection)
+    checkAttr(
+      _.serverAddressAndPort(requestWithConnection, None, os1),
+      Attributes.empty,
+    )
+    checkAttr(
+      _.serverAddressAndPort(requestWithConnection.putHeaders(h1), None, os1),
+      Attributes(Attribute("server.address", "http4s.org")),
     )
   }
 
