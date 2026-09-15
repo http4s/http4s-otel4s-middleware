@@ -18,78 +18,237 @@ package org.http4s
 package otel4s.middleware
 package metrics
 
+import java.util.concurrent.TimeUnit
+
 import cats.Applicative
 import cats.Monad
 import cats.syntax.all._
-import org.http4s.metrics.MetricsOps2
-import org.http4s.metrics.TerminationType
+import org.http4s.headers.Forwarded
+import org.http4s.metrics.{MetricsOps2, MetricsRequest, TerminationType}
+import org.http4s.otel4s.middleware.client.TypedClientAttributes
+import org.http4s.otel4s.middleware.server.OriginalScheme
+import org.http4s.otel4s.middleware.server.TypedServerAttributes
 import org.typelevel.otel4s.Attribute
-import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics._
 import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
 
-import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
-/** [[http4s.metrics.MetricsOps]] algebra capable of recording OpenTelemetry metrics
+/** Creates [[http4s.metrics.MetricsOps2]] implementations that record HTTP client and server
+  * metrics with OpenTelemetry.
+  *
+  * The following metrics are supported for both clients and servers, where `*` is replaced by
+  * `client` or `server`:
+  *
+  *   - `http.*.request.duration` (`Histogram[Double]`, seconds) records the total time from the
+  *     beginning of a request until its response body terminates. This stable OpenTelemetry metric
+  *     is always enabled.
+  *   - `http.*.active_requests` (`UpDownCounter[Long]`, requests) records requests currently in
+  *     progress. This development OpenTelemetry metric is opt-in.
+  *   - `http.*.request.body.size` (`Histogram[Long]`, bytes) records the number of request-body
+  *     bytes consumed by the middleware. This development OpenTelemetry metric is opt-in.
+  *   - `http.*.response.body.size` (`Histogram[Long]`, bytes) records the number of response-body
+  *     bytes consumed by the middleware. This development OpenTelemetry metric is opt-in.
+  *   - `http.*.response.headers.duration` (`Histogram[Double]`, seconds) records the time until
+  *     response headers are received by a client or sent by a server. This is an http4s-specific,
+  *     non-semantic-convention metric and is opt-in.
+  *
+  * [[ClientMetricsConfig]] and [[ServerMetricsConfig]] provide three presets:
+  *
+  *   - `minimal` emits request duration with required and conditionally-required attributes.
+  *   - `recommended` additionally emits attributes recommended by OpenTelemetry. It is the default
+  *     preset.
+  *   - `all` additionally enables every supported opt-in metric and attribute. Classifier-derived
+  *     attributes are still emitted only when the configured classifier returns a value.
+  *
+  * Additional attributes configured by the user are added to every enabled metric. Semantic
+  * attributes derived from the HTTP request or response take precedence when an attribute key is
+  * present in both sets. Histogram bucket settings affect only their corresponding histogram.
+  *
+  * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-metrics/ OpenTelemetry HTTP metric semantic conventions]]
   */
 object OtelMetrics {
 
-  /** Creates a [[http4s.metrics.MetricsOps]] for clients that supports OpenTelemetry metrics.
+  /** Creates HTTP client metrics using the given configuration.
     *
-    * Registers the following metrics:
+    * Client request duration and body-size metrics include `http.request.method`, `server.address`,
+    * and `server.port` when those values can be derived. `http.response.status_code` and
+    * `error.type` are added after termination when applicable. `network.protocol.version`,
+    * `url.scheme`, and `url.template` are controlled by [[ClientMetricsConfig]].
     *
-    * http.client.request.duration - Histogram
+    * @param config controls enabled metrics, semantic attributes, classifiers, additional
+    *               attributes, and histogram boundaries
+    */
+  def clientMetricsOps[F[_]: Monad: MeterProvider](
+      config: ClientMetricsConfig
+  ): F[MetricsOps2[F]] =
+    metricsOps(
+      kind = "client",
+      config.requestDurationHistogramBuckets,
+      config.responseHeadersDurationHistogramBuckets,
+      config.requestBodySizeHistogramBuckets,
+      config.responseBodySizeHistogramBuckets,
+      config.responseHeadersDurationEnabled,
+      config.activeRequestsEnabled,
+      config.requestBodySizeEnabled,
+      config.responseBodySizeEnabled,
+      clientContext(config),
+    )
+
+  /** Creates HTTP client metrics using the original argument-based API.
     *
-    * http.client.active_requests - UpDownCounter
+    * This overload enables active requests, request and response body sizes, and the
+    * http4s-specific response-header duration metric to preserve the behavior of the
+    * argument-based API. Use the [[ClientMetricsConfig]] overload to select a preset or opt into
+    * individual instruments and attributes.
     *
-    * http.client.abnormal_terminations - Histogram
-    *
-    * https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
-    *
-    * @param attributes additional [[org.typelevel.otel4s.Attributes]] that are added to all metrics
-    * @param responseDurationSecondsHistogramBuckets histogram buckets for the response duration metrics
+    * @param attributes attributes added to every emitted metric
+    * @param responseDurationSecondsHistogramBuckets boundaries used by both request-duration and
+    *                                                response-header-duration histograms; body-size
+    *                                                histograms use their byte-oriented defaults
     */
   def clientMetricsOps[F[_]: Monad: MeterProvider](
       attributes: Attributes = Attributes.empty,
-      responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
+      responseDurationSecondsHistogramBuckets: BucketBoundaries =
+        MetricsConfigDefaults.DurationHistogramBuckets,
   ): F[MetricsOps2[F]] =
-    metricsOps(
-      "client",
-      _ => Monad[F].pure(attributes),
-      responseDurationSecondsHistogramBuckets,
+    clientMetricsOps(
+      ClientMetricsConfig.recommended
+        .withAdditionalAttributes(attributes)
+        .withRequestDurationHistogramBuckets(responseDurationSecondsHistogramBuckets)
+        .withResponseHeadersDurationHistogramBuckets(responseDurationSecondsHistogramBuckets)
+        .optIntoResponseHeadersDuration
+        .optIntoActiveRequests
+        .optIntoRequestBodySize
+        .optIntoResponseBodySize
     )
 
-  /** Creates a [[http4s.metrics.MetricsOps]] for servers that supports OpenTelemetry metrics.
+  /** Creates HTTP server metrics using the given configuration.
     *
-    * Registers the following metrics:
+    * Server request duration and body-size metrics include `http.request.method` and `url.scheme`
+    * when those values can be derived. `http.response.status_code` and `error.type` are added after
+    * termination when applicable. `network.protocol.version`, `http.route`, `server.address`, and
+    * `server.port` are controlled by [[ServerMetricsConfig]]. Server address and port are disabled
+    * by default because request-header-derived values may have unbounded cardinality.
     *
-    * http.server.request.duration - Histogram
+    * @param config controls enabled metrics, semantic attributes, classifiers, additional
+    *               attributes, and histogram boundaries
+    */
+  def serverMetricsOps[F[_]: Monad: MeterProvider](
+      config: ServerMetricsConfig
+  ): F[MetricsOps2[F]] =
+    metricsOps(
+      kind = "server",
+      config.requestDurationHistogramBuckets,
+      config.responseHeadersDurationHistogramBuckets,
+      config.requestBodySizeHistogramBuckets,
+      config.responseBodySizeHistogramBuckets,
+      config.responseHeadersDurationEnabled,
+      config.activeRequestsEnabled,
+      config.requestBodySizeEnabled,
+      config.responseBodySizeEnabled,
+      serverContext(config),
+    )
+
+  /** Creates HTTP server metrics using the original argument-based API.
     *
-    * http.server.active_requests - UpDownCounter
+    * This overload enables active requests, request and response body sizes, and the
+    * http4s-specific response-header duration metric to preserve the behavior of the
+    * argument-based API. Server address and port remain disabled because they are OpenTelemetry
+    * opt-in attributes. Use the [[ServerMetricsConfig]] overload to select a preset or opt into
+    * individual instruments and attributes.
     *
-    * http.server.abnormal_terminations - Histogram
-    *
-    * https://opentelemetry.io/docs/specs/semconv/http/http-metrics/
-    *
-    * @param attributes additional [[org.typelevel.otel4s.Attributes]] that are added to all metrics
-    * @param responseDurationSecondsHistogramBuckets histogram buckets for the response duration metrics
+    * @param attributes attributes added to every emitted metric
+    * @param responseDurationSecondsHistogramBuckets boundaries used by both request-duration and
+    *                                                response-header-duration histograms; body-size
+    *                                                histograms use their byte-oriented defaults
     */
   def serverMetricsOps[F[_]: Monad: MeterProvider](
       attributes: Attributes = Attributes.empty,
-      responseDurationSecondsHistogramBuckets: BucketBoundaries = DefaultHistogramBuckets,
+      responseDurationSecondsHistogramBuckets: BucketBoundaries =
+        MetricsConfigDefaults.DurationHistogramBuckets,
   ): F[MetricsOps2[F]] =
-    metricsOps(
-      "server",
-      _ => Monad[F].pure(attributes),
-      responseDurationSecondsHistogramBuckets,
+    serverMetricsOps(
+      ServerMetricsConfig.recommended
+        .withAdditionalAttributes(attributes)
+        .withRequestDurationHistogramBuckets(responseDurationSecondsHistogramBuckets)
+        .withResponseHeadersDurationHistogramBuckets(responseDurationSecondsHistogramBuckets)
+        .optIntoResponseHeadersDuration
+        .optIntoActiveRequests
+        .optIntoRequestBodySize
+        .optIntoResponseBodySize
     )
+
+  private final case class MetricsContext(
+      activeRequestAttributes: Attributes,
+      requestAttributes: Attributes,
+  )
+
+  private def clientContext(config: ClientMetricsConfig)(
+      metricsRequest: MetricsRequest
+  ): MetricsContext = {
+    val request = metricsRequest.requestPrelude
+
+    val common = config.additionalAttributes
+      .added(TypedClientAttributes.httpRequestMethod(request.method, config.knownMethods))
+      .concat(TypedClientAttributes.serverAddress(request.uri.host))
+      // `Request#remote` is the immediate peer, not necessarily the origin server.
+      .concat(TypedClientAttributes.serverPort(None, request.uri))
+
+    val optIn = Attributes.newBuilder
+    if (config.urlSchemeEnabled)
+      optIn ++= TypedClientAttributes.urlScheme(request.uri.scheme)
+    optIn ++= TypedClientAttributes.Experimental
+      .urlTemplate(request.uri, config.urlTemplateClassifier)
+
+    val configured = common ++ optIn.result()
+    val requestAttributes =
+      if (config.networkProtocolVersionEnabled)
+        configured.added(TypedClientAttributes.networkProtocolVersion(request.httpVersion))
+      else configured
+    MetricsContext(activeRequestAttributes = configured, requestAttributes = requestAttributes)
+  }
+
+  private def serverContext(config: ServerMetricsConfig)(
+    metricsRequest: MetricsRequest
+  ): MetricsContext = {
+    val request = metricsRequest.requestPrelude
+
+    val forwarded = request.headers.get[Forwarded]
+    val scheme = OriginalScheme(forwarded, request.headers, request.uri)
+    val commonBuilder = Attributes.newBuilder
+    commonBuilder ++= config.additionalAttributes
+    commonBuilder += TypedServerAttributes.httpRequestMethod(request.method, config.knownMethods)
+    commonBuilder ++= TypedServerAttributes.urlScheme(scheme)
+    if (config.serverAddressAndPortEnabled)
+      TypedServerAttributes.serverAddressAndPortForBuilder(request, forwarded, scheme)(
+        commonBuilder
+      )
+
+    val common = commonBuilder.result()
+    val recommended =
+      if (config.networkProtocolVersionEnabled)
+        common.added(TypedServerAttributes.networkProtocolVersion(request.httpVersion))
+      else common
+    MetricsContext(
+      activeRequestAttributes = common,
+      requestAttributes = recommended
+        .concat(TypedServerAttributes.httpRoute(request, config.routeClassifier)),
+    )
+  }
 
   private def metricsOps[F[_]: Monad: MeterProvider](
       kind: String,
-      attributes: RequestPrelude => F[Attributes],
-      responseDurationSecondsHistogramBuckets: BucketBoundaries,
+      requestDurationHistogramBuckets: BucketBoundaries,
+      responseHeadersDurationHistogramBuckets: BucketBoundaries,
+      requestBodySizeHistogramBuckets: BucketBoundaries,
+      responseBodySizeHistogramBuckets: BucketBoundaries,
+      responseHeadersDurationEnabled: Boolean,
+      activeRequestsEnabled: Boolean,
+      requestBodySizeEnabled: Boolean,
+      responseBodySizeEnabled: Boolean,
+      context: MetricsRequest => MetricsContext,
   ): F[MetricsOps2[F]] =
     for {
       meter <- MeterProvider[F]
@@ -100,169 +259,202 @@ object OtelMetrics {
         implicit val M: Meter[F] = meter
         createMetricsCollection(
           kind,
-          responseDurationSecondsHistogramBuckets,
+          requestDurationHistogramBuckets,
+          responseHeadersDurationHistogramBuckets,
+          requestBodySizeHistogramBuckets,
+          responseBodySizeHistogramBuckets,
+          responseHeadersDurationEnabled,
+          activeRequestsEnabled,
+          requestBodySizeEnabled,
+          responseBodySizeEnabled,
         )
       }
-    } yield createMetricsOps(
-      metrics,
-      attributes,
-    )
+    } yield createMetricsOps(metrics, context)
 
   private def createMetricsOps[F[_]: Applicative](
       metrics: MetricsCollection[F],
-      contextAttributes: RequestPrelude => F[Attributes],
+      createRequestContext: MetricsRequest => MetricsContext,
   ): MetricsOps2[F] =
     new MetricsOps2[F] {
-      type Context = Attributes
+      type Context = MetricsContext
 
-      override def createContext(request: RequestPrelude): F[Attributes] =
-        contextAttributes(request).map { attributes =>
-          attributes
-            .added(TypedAttributes.httpRequestMethod(request.method))
-            .concat(TypedAttributes.urlScheme(request.uri.scheme))
-            .concat(TypedAttributes.serverAddress(request.uri.host))
-        }
+      override def createContext(request: MetricsRequest): F[MetricsContext] =
+        createRequestContext(request).pure[F]
 
-      override def increaseActiveRequests(request: RequestPrelude, context: Attributes): F[Unit] =
-        metrics.activeRequests.inc(context)
+      override def increaseActiveRequests(
+          request: MetricsRequest,
+          context: MetricsContext,
+      ): F[Unit] =
+        metrics.activeRequests.traverse_(_.inc(context.activeRequestAttributes))
 
-      override def decreaseActiveRequests(request: RequestPrelude, context: Attributes): F[Unit] =
-        metrics.activeRequests.dec(context)
+      override def decreaseActiveRequests(
+          request: MetricsRequest,
+          context: MetricsContext,
+      ): F[Unit] =
+        metrics.activeRequests.traverse_(_.dec(context.activeRequestAttributes))
 
       override def recordHeadersTime(
-          request: RequestPrelude,
+          request: MetricsRequest,
           elapsed: FiniteDuration,
-          context: Attributes,
+          context: MetricsContext,
       ): F[Unit] =
-        metrics.requestDuration.record(
-          elapsed.toUnit(TimeUnit.NANOSECONDS),
-          context
-            .added(TypedMetricAttributes.httpPhase(Phase.Headers)),
+        metrics.responseHeadersDuration.traverse_(
+          _.record(
+            elapsed.toUnit(TimeUnit.SECONDS),
+            context.requestAttributes,
+          )
         )
 
       override def recordTotalTime(
-          request: RequestPrelude,
+          request: MetricsRequest,
           response: Option[ResponsePrelude],
           terminationType: Option[TerminationType],
           elapsed: FiniteDuration,
-          context: Attributes,
+          context: MetricsContext,
       ): F[Unit] =
         metrics.requestDuration.record(
-          elapsed.toUnit(TimeUnit.NANOSECONDS),
-          context
-            .concat(TypedAttributes.httpResponseStatusCode(response.map(_.status)))
-            .concat(TypedMetricAttributes.errorType(terminationType))
-            .added(TypedMetricAttributes.httpPhase(Phase.Body)),
+          elapsed.toUnit(TimeUnit.SECONDS),
+          finalAttributes(response, terminationType, context),
         )
 
       override def recordRequestBodySize(
-          request: RequestPrelude,
+          request: MetricsRequest,
           response: Option[ResponsePrelude],
           terminationType: Option[TerminationType],
           bodySizeBytes: Long,
-          context: Attributes,
+          context: MetricsContext,
       ): F[Unit] =
-        metrics.requestBodySize
-          .record(
-            bodySizeBytes,
-            context
-              .concat(TypedAttributes.httpResponseStatusCode(response.map(_.status)))
-              .concat(TypedMetricAttributes.errorType(terminationType)),
-          )
+        metrics.requestBodySize.traverse_(
+          _.record(bodySizeBytes, finalAttributes(response, terminationType, context))
+        )
 
       override def recordResponseBodySize(
-          request: RequestPrelude,
+          request: MetricsRequest,
           response: ResponsePrelude,
           terminationType: Option[TerminationType],
           bodySizeBytes: Long,
-          context: Attributes,
+          context: MetricsContext,
       ): F[Unit] =
-        metrics.responseBodySize
-          .record(
-            bodySizeBytes,
-            context
-              .added(TypedAttributes.httpResponseStatusCode(response.status))
-              .concat(TypedMetricAttributes.errorType(terminationType)),
-          )
+        metrics.responseBodySize.traverse_(
+          _.record(bodySizeBytes, finalAttributes(Some(response), terminationType, context))
+        )
 
+      private def finalAttributes(
+          response: Option[ResponsePrelude],
+          terminationType: Option[TerminationType],
+          context: MetricsContext,
+      ): Attributes =
+        context.requestAttributes
+          .concat(TypedAttributes.httpResponseStatusCode(response.map(_.status)))
+          .concat(TypedMetricAttributes.errorType(response, terminationType))
     }
 
   private def createMetricsCollection[F[_]: Monad: Meter](
       kind: String,
-      responseDurationSecondsHistogramBuckets: BucketBoundaries,
+      requestDurationHistogramBuckets: BucketBoundaries,
+      responseHeadersDurationHistogramBuckets: BucketBoundaries,
+      requestBodySizeHistogramBuckets: BucketBoundaries,
+      responseBodySizeHistogramBuckets: BucketBoundaries,
+      responseHeadersDurationEnabled: Boolean,
+      activeRequestsEnabled: Boolean,
+      requestBodySizeEnabled: Boolean,
+      responseBodySizeEnabled: Boolean,
   ): F[MetricsCollection[F]] = {
-    val requestDuration: F[Histogram[F, Double]] =
-      Meter[F]
-        .histogram[Double](s"http.$kind.request.duration")
-        .withUnit("s")
-        .withDescription(s"Duration of HTTP $kind requests.")
-        .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
-        .create
+    val requestDuration = Meter[F]
+      .histogram[Double](s"http.$kind.request.duration")
+      .withUnit("s")
+      .withDescription(s"Duration of HTTP $kind requests.")
+      .withExplicitBucketBoundaries(requestDurationHistogramBuckets)
+      .create
 
-    val activeRequests: F[UpDownCounter[F, Long]] =
-      Meter[F]
-        .upDownCounter[Long](s"http.$kind.active_requests")
-        .withUnit("{request}")
-        .withDescription(
-          s"Number of active HTTP ${if (kind == "client") "" else "server "}requests."
+    val responseHeadersDuration =
+      Option
+        .when(responseHeadersDurationEnabled)(
+          Meter[F]
+            .histogram[Double](s"http.$kind.response.headers.duration")
+            .withUnit("s")
+            .withDescription(
+              if (kind == "client") "Time to receive HTTP client response headers."
+              else "Time to send HTTP server response headers."
+            )
+            .withExplicitBucketBoundaries(responseHeadersDurationHistogramBuckets)
+            .create
         )
-        .create
+        .sequence
 
-    val requestBodySize: F[Histogram[F, Long]] =
-      Meter[F]
-        .histogram[Long](s"http.$kind.request.body.size")
-        .withUnit("By")
-        .withDescription(s"Size of HTTP $kind request bodies.")
-        .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
-        .create
+    val activeRequests =
+      Option
+        .when(activeRequestsEnabled)(
+          Meter[F]
+            .upDownCounter[Long](s"http.$kind.active_requests")
+            .withUnit("{request}")
+            .withDescription(
+              s"Number of active HTTP ${if (kind == "client") "" else "server "}requests."
+            )
+            .create
+        )
+        .sequence
 
-    val responseBodySize: F[Histogram[F, Long]] =
-      Meter[F]
-        .histogram[Long](s"http.$kind.response.body.size")
-        .withUnit("By")
-        .withDescription(s"Size of HTTP $kind response bodies.")
-        .withExplicitBucketBoundaries(responseDurationSecondsHistogramBuckets)
-        .create
+    val requestBodySize =
+      Option
+        .when(requestBodySizeEnabled)(
+          Meter[F]
+            .histogram[Long](s"http.$kind.request.body.size")
+            .withUnit("By")
+            .withDescription(s"Size of HTTP $kind request bodies.")
+            .withExplicitBucketBoundaries(requestBodySizeHistogramBuckets)
+            .create
+        )
+        .sequence
 
-    (requestDuration, activeRequests, requestBodySize, responseBodySize).mapN(
-      MetricsCollection.apply
-    )
+    val responseBodySize =
+      Option
+        .when(responseBodySizeEnabled)(
+          Meter[F]
+            .histogram[Long](s"http.$kind.response.body.size")
+            .withUnit("By")
+            .withDescription(s"Size of HTTP $kind response bodies.")
+            .withExplicitBucketBoundaries(responseBodySizeHistogramBuckets)
+            .create
+        )
+        .sequence
+
+    (
+      requestDuration,
+      responseHeadersDuration,
+      activeRequests,
+      requestBodySize,
+      responseBodySize,
+    ).mapN(MetricsCollection.apply)
   }
-
-  private val DefaultHistogramBuckets: BucketBoundaries =
-    BucketBoundaries(.005, .01, .025, .05, .075, .1, .25, .5, .75, 1, 2.5, 5, 7.5, 10)
 
   final case class MetricsCollection[F[_]](
       requestDuration: Histogram[F, Double],
-      activeRequests: UpDownCounter[F, Long],
-      requestBodySize: Histogram[F, Long],
-      responseBodySize: Histogram[F, Long],
+      responseHeadersDuration: Option[Histogram[F, Double]],
+      activeRequests: Option[UpDownCounter[F, Long]],
+      requestBodySize: Option[Histogram[F, Long]],
+      responseBodySize: Option[Histogram[F, Long]],
   )
 
-  private sealed trait Phase
-
-  private object Phase {
-    case object Headers extends Phase
-
-    case object Body extends Phase
-  }
-
   private object TypedMetricAttributes {
-
-    private val HttpPhase: AttributeKey[String] = AttributeKey.string("http.phase")
-
-    def httpPhase(s: Phase): Attribute[String] =
-      HttpPhase(s match {
-        case Phase.Headers => "headers"
-        case Phase.Body => "body"
-      })
-
-    def errorType(terminationType: Option[TerminationType]): Option[Attribute[String]] =
-      ErrorAttributes.ErrorType.maybe(terminationType.map {
-        case TerminationType.Abnormal(e) => e.getClass.getName
-        case TerminationType.Error(e) => e.getClass.getName
-        case TerminationType.Canceled => "cancel"
-        case TerminationType.Timeout => "timeout"
-      })
+    def errorType(
+        response: Option[ResponsePrelude],
+        terminationType: Option[TerminationType],
+    ): Option[Attribute[String]] =
+      ErrorAttributes.ErrorType.maybe(
+        terminationType
+          .map {
+            case TerminationType.Abnormal(e) => e.getClass.getName
+            case TerminationType.Error(e) => e.getClass.getName
+            case TerminationType.Canceled => "cancel"
+            case TerminationType.Timeout => "timeout"
+          }
+          .orElse(
+            response
+              .map(_.status)
+              .filter(_.responseClass == Status.ServerError)
+              .map(_.code.toString)
+          )
+      )
   }
 }

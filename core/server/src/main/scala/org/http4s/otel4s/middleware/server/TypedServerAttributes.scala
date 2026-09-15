@@ -59,6 +59,13 @@ private[middleware] trait TypedServerAttributes extends TypedAttributes {
       request: Request[F],
       forwarded: Option[Forwarded],
       scheme: OriginalScheme,
+  )(b: Attributes.Builder): b.type =
+    serverAddressAndPortForBuilder(request.requestPrelude, forwarded, scheme)(b)
+
+  private[middleware] final def serverAddressAndPortForBuilder(
+      request: RequestPrelude,
+      forwarded: Option[Forwarded],
+      scheme: OriginalScheme,
   )(b: Attributes.Builder): b.type = {
     // https://opentelemetry.io/docs/specs/semconv/http/http-spans/#setting-serveraddress-and-serverport-attributes
 
@@ -83,6 +90,13 @@ private[middleware] trait TypedServerAttributes extends TypedAttributes {
             b += ServerAttributes.ServerAddress(xfh.host)
             b ++= serverPort(xfh.port)
           }
+      }
+      .orElse[b.type] {
+        // An HTTP/1.1 absolute-form request target takes precedence over Host.
+        request.uri.scheme.flatMap(_ => request.uri.authority).map { authority =>
+          b += ServerAttributes.ServerAddress(authority.host.value)
+          b ++= serverPort(authority.port)
+        }
       }
       .orElse[b.type] {
         request.httpVersion.major match {

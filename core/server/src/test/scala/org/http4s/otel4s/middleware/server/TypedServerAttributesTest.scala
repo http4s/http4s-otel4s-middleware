@@ -193,7 +193,10 @@ class TypedServerAttributesTest extends FunSuite {
       u3,
       HttpVersion.`HTTP/1.1`,
       os3,
-      Attributes(Attribute("server.address", "http4s.org"), Attribute("server.port", 443L)),
+      Attributes(
+        Attribute("server.address", "opentelemetry.io"),
+        Attribute("server.port", 1080L),
+      ),
     )
     check(
       Headers(h1),

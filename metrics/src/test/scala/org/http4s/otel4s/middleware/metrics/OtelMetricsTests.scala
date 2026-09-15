@@ -39,6 +39,7 @@ import org.typelevel.otel4s.sdk.testkit.metrics.PointSetExpectation
 import org.typelevel.otel4s.semconv.MetricSpec
 import org.typelevel.otel4s.semconv.Requirement
 import org.typelevel.otel4s.semconv.attributes.HttpAttributes
+import org.typelevel.otel4s.semconv.attributes.NetworkAttributes
 import org.typelevel.otel4s.semconv.attributes.ServerAttributes
 import org.typelevel.otel4s.semconv.attributes.UrlAttributes
 import org.typelevel.otel4s.semconv.experimental.metrics.HttpExperimentalMetrics
@@ -56,8 +57,12 @@ class OtelMetricsTests extends CatsEffectSuite {
         implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
 
         for {
-          serverMetricsOps <- OtelMetrics.serverMetricsOps[IO](Attributes(ServerAttribute))
-          clientMetricsOps <- OtelMetrics.clientMetricsOps[IO](Attributes(ClientAttribute))
+          serverMetricsOps <- OtelMetrics.serverMetricsOps[IO](
+            ServerMetricsConfig.all.withAdditionalAttributes(Attributes(ServerAttribute))
+          )
+          clientMetricsOps <- OtelMetrics.clientMetricsOps[IO](
+            ClientMetricsConfig.all.withAdditionalAttributes(Attributes(ClientAttribute))
+          )
 
           activeServerMetrics <- IO.deferred[List[MetricData]]
           activeClientMetrics <- IO.deferred[List[MetricData]]
@@ -104,7 +109,24 @@ class OtelMetricsTests extends CatsEffectSuite {
                     .attributesExact(
                       ServerAttribute,
                       ServerAttributes.ServerAddress("http4s.org"),
+                      ServerAttributes.ServerPort(443L),
                       HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                      UrlAttributes.UrlScheme("https"),
+                    )
+                )
+              ),
+            MetricExpectation
+              .histogram("http.server.response.headers.duration")
+              .points(
+                PointSetExpectation.exactly(
+                  PointExpectation.histogram
+                    .count(1L)
+                    .attributesExact(
+                      ServerAttribute,
+                      HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                      NetworkAttributes.NetworkProtocolVersion("1.1"),
+                      ServerAttributes.ServerAddress("http4s.org"),
+                      ServerAttributes.ServerPort(443L),
                       UrlAttributes.UrlScheme("https"),
                     )
                 )
@@ -117,21 +139,13 @@ class OtelMetricsTests extends CatsEffectSuite {
                     .count(1L)
                     .attributesExact(
                       ServerAttribute,
-                      Attribute("http.phase", "headers"),
-                      HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
-                      ServerAttributes.ServerAddress("http4s.org"),
-                      UrlAttributes.UrlScheme("https"),
-                    ),
-                  PointExpectation.histogram
-                    .count(1L)
-                    .attributesExact(
-                      ServerAttribute,
-                      Attribute("http.phase", "body"),
                       HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
                       HttpAttributes.HttpResponseStatusCode(200L),
+                      NetworkAttributes.NetworkProtocolVersion("1.1"),
                       ServerAttributes.ServerAddress("http4s.org"),
+                      ServerAttributes.ServerPort(443L),
                       UrlAttributes.UrlScheme("https"),
-                    ),
+                    )
                 )
               ),
             // client
@@ -144,7 +158,24 @@ class OtelMetricsTests extends CatsEffectSuite {
                     .attributesExact(
                       ClientAttribute,
                       ServerAttributes.ServerAddress("http4s.org"),
+                      ServerAttributes.ServerPort(443L),
                       HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                      UrlAttributes.UrlScheme("https"),
+                    )
+                )
+              ),
+            MetricExpectation
+              .histogram("http.client.response.headers.duration")
+              .points(
+                PointSetExpectation.exactly(
+                  PointExpectation.histogram
+                    .count(1L)
+                    .attributesExact(
+                      ClientAttribute,
+                      HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                      NetworkAttributes.NetworkProtocolVersion("1.1"),
+                      ServerAttributes.ServerAddress("http4s.org"),
+                      ServerAttributes.ServerPort(443L),
                       UrlAttributes.UrlScheme("https"),
                     )
                 )
@@ -157,21 +188,13 @@ class OtelMetricsTests extends CatsEffectSuite {
                     .count(1L)
                     .attributesExact(
                       ClientAttribute,
-                      Attribute("http.phase", "headers"),
-                      HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
-                      ServerAttributes.ServerAddress("http4s.org"),
-                      UrlAttributes.UrlScheme("https"),
-                    ),
-                  PointExpectation.histogram
-                    .count(1L)
-                    .attributesExact(
-                      ClientAttribute,
-                      Attribute("http.phase", "body"),
                       HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
                       HttpAttributes.HttpResponseStatusCode(200L),
+                      NetworkAttributes.NetworkProtocolVersion("1.1"),
                       ServerAttributes.ServerAddress("http4s.org"),
+                      ServerAttributes.ServerPort(443L),
                       UrlAttributes.UrlScheme("https"),
-                    ),
+                    )
                 )
               ),
           )
@@ -179,15 +202,19 @@ class OtelMetricsTests extends CatsEffectSuite {
       }
   }
 
-  test("OtelMetrics: semanic conventions") {
+  test("OtelMetrics: semantic conventions") {
     MetricsTestkit
       .inMemory[IO]()
       .use { testkit =>
         implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
 
         for {
-          serverMetricsOps <- OtelMetrics.serverMetricsOps[IO]()
-          clientMetricsOps <- OtelMetrics.clientMetricsOps[IO]()
+          serverMetricsOps <- OtelMetrics.serverMetricsOps[IO](
+            ServerMetricsConfig.all
+          )
+          clientMetricsOps <- OtelMetrics.clientMetricsOps[IO](
+            ClientMetricsConfig.all
+          )
 
           activeServerMetrics <- IO.deferred[List[MetricData]]
           activeClientMetrics <- IO.deferred[List[MetricData]]
@@ -244,9 +271,54 @@ class OtelMetricsTests extends CatsEffectSuite {
       }
   }
 
-  // we cannot reliably populate `server.port`, so skipping it
-  private val IgnoredRequiredAttributes: Set[AttributeKey[_]] =
-    Set(ServerAttributes.ServerPort)
+  test("config defaults do not emit opt-in metrics") {
+    MetricsTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+
+        for {
+          serverMetricsOps <- OtelMetrics.serverMetricsOps[IO](ServerMetricsConfig.recommended)
+          clientMetricsOps <- OtelMetrics.clientMetricsOps[IO](ClientMetricsConfig.recommended)
+          server = ServerMetrics[IO](serverMetricsOps)(HttpRoutes.of[IO] { case _ =>
+            IO.pure(Response[IO](Status.Ok))
+          }).orNotFound
+          client = ClientMetrics[IO](clientMetricsOps)(Client.fromHttpApp(server))
+          _ <- client
+            .run(Request[IO](Method.GET, uri = uri"https://http4s.org"))
+            .use(_ => IO.unit)
+          metrics <- testkit.collectMetrics
+        } yield assertEquals(
+          metrics.map(_.name).sorted,
+          List(
+            "http.client.request.duration",
+            "http.server.request.duration",
+          ),
+        )
+      }
+  }
+
+  test("config presets") {
+    assert(!ClientMetricsConfig.minimal.networkProtocolVersionEnabled)
+    assert(ClientMetricsConfig.recommended.networkProtocolVersionEnabled)
+    assert(!ClientMetricsConfig.recommended.activeRequestsEnabled)
+    assert(ClientMetricsConfig.all.responseHeadersDurationEnabled)
+    assert(ClientMetricsConfig.all.activeRequestsEnabled)
+    assert(ClientMetricsConfig.all.requestBodySizeEnabled)
+    assert(ClientMetricsConfig.all.responseBodySizeEnabled)
+    assert(ClientMetricsConfig.all.urlSchemeEnabled)
+
+    assert(!ServerMetricsConfig.minimal.networkProtocolVersionEnabled)
+    assert(ServerMetricsConfig.recommended.networkProtocolVersionEnabled)
+    assert(!ServerMetricsConfig.recommended.activeRequestsEnabled)
+    assert(ServerMetricsConfig.all.responseHeadersDurationEnabled)
+    assert(ServerMetricsConfig.all.activeRequestsEnabled)
+    assert(ServerMetricsConfig.all.requestBodySizeEnabled)
+    assert(ServerMetricsConfig.all.responseBodySizeEnabled)
+    assert(ServerMetricsConfig.all.serverAddressAndPortEnabled)
+  }
+
+  private val IgnoredRequiredAttributes: Set[AttributeKey[_]] = Set.empty
 
   private def histogramExpectation(spec: MetricSpec): MetricExpectation.Histogram = {
     val requiredKeys = spec.attributeSpecs.collect {
@@ -314,6 +386,7 @@ class OtelMetricsTests extends CatsEffectSuite {
             .attributesExact(
               if (kind == "client") ClientAttribute else ServerAttribute,
               ServerAttributes.ServerAddress("http4s.org"),
+              ServerAttributes.ServerPort(443L),
               HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
               UrlAttributes.UrlScheme("https"),
             )
