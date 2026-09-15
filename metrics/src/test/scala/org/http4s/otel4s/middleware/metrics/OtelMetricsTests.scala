@@ -336,6 +336,74 @@ class OtelMetricsTests extends CatsEffectSuite {
       }
   }
 
+  test("client metrics use Host header when the URI has no authority") {
+    MetricsTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+
+        for {
+          metricsOps <- OtelMetrics.clientMetricsOps[IO](ClientMetricsConfig.minimal)
+          client = ClientMetrics[IO](metricsOps)(
+            Client.fromHttpApp(HttpApp.pure(Response[IO](Status.Ok)))
+          )
+          _ <- client
+            .run(Request[IO](uri = uri"/resource").putHeaders(Host("http4s.org", 8080)))
+            .use(_ => IO.unit)
+          metrics <- testkit.collectMetrics
+        } yield assertMetrics(
+          metrics,
+          MetricExpectation
+            .histogram("http.client.request.duration")
+            .points(
+              PointSetExpectation.exactly(
+                PointExpectation.histogram
+                  .count(1L)
+                  .attributesExact(
+                    HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                    HttpAttributes.HttpResponseStatusCode(200L),
+                    ServerAttributes.ServerAddress("http4s.org"),
+                    ServerAttributes.ServerPort(8080L),
+                  )
+              )
+            ),
+        )
+      }
+  }
+
+  test("client response header duration does not use the response protocol version") {
+    MetricsTestkit
+      .inMemory[IO]()
+      .use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+
+        for {
+          metricsOps <- OtelMetrics.clientMetricsOps[IO](ClientMetricsConfig.all)
+          client = ClientMetrics[IO](metricsOps)(Client.fromHttpApp(HttpApp[IO] { _ =>
+            IO.pure(Response[IO](Status.Ok, httpVersion = HttpVersion.`HTTP/2`))
+          }))
+          _ <- client.run(Request[IO](uri = uri"https://http4s.org")).use(_ => IO.unit)
+          metrics <- testkit.collectMetrics
+        } yield assertMetrics(
+          metrics,
+          MetricExpectation
+            .histogram("http.client.response.headers.duration")
+            .points(
+              PointSetExpectation.exactly(
+                PointExpectation.histogram
+                  .count(1L)
+                  .attributesExact(
+                    HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
+                    ServerAttributes.ServerAddress("http4s.org"),
+                    ServerAttributes.ServerPort(443L),
+                    UrlAttributes.UrlScheme("https"),
+                  )
+              )
+            ),
+        )
+      }
+  }
+
   test("client metrics treat 4xx responses as errors but server metrics do not") {
     MetricsTestkit
       .inMemory[IO]()

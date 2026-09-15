@@ -24,6 +24,7 @@ import cats.Applicative
 import cats.Monad
 import cats.syntax.all._
 import org.http4s.headers.Forwarded
+import org.http4s.headers.Host
 import org.http4s.metrics.{MetricsOps2, MetricsRequest, TerminationType}
 import org.http4s.otel4s.middleware.client.TypedClientAttributes
 import org.http4s.otel4s.middleware.server.OriginalScheme
@@ -82,9 +83,9 @@ object OtelMetrics {
   /** Creates HTTP client metrics using the given configuration.
     *
     * Client request duration and body-size metrics include `http.request.method`, `server.address`,
-    * and `server.port` when those values can be derived. `http.response.status_code` and
-    * `error.type` are added after termination when applicable. `network.protocol.version`,
-    * `url.scheme`, and `url.template` are controlled by [[ClientMetricsConfig]].
+    * and `server.port` when those values can be derived. `http.response.status_code`,
+    * `error.type`, and `network.protocol.version` are added after termination when applicable.
+    * `url.scheme` and `url.template` are controlled by [[ClientMetricsConfig]].
     *
     * @param config controls enabled metrics, semantic attributes, classifiers, additional
     *               attributes, and histogram boundaries
@@ -199,12 +200,21 @@ object OtelMetrics {
       metricsRequest: MetricsRequest
   ): MetricsContext = {
     val request = metricsRequest.requestPrelude
+    val hostHeader = request.headers.get[Host]
 
     val common = config.additionalAttributes
       .added(TypedClientAttributes.httpRequestMethod(request.method, config.knownMethods))
-      .concat(TypedClientAttributes.serverAddress(request.uri.host))
+      .concat(
+        request.uri.host
+          .map(TypedClientAttributes.serverAddress)
+          .orElse(hostHeader.map(host => TypedClientAttributes.serverAddress(host.host)))
+      )
       // `Request#remote` is the immediate peer, not necessarily the origin server.
-      .concat(TypedClientAttributes.serverPort(None, request.uri))
+      .concat(
+        TypedClientAttributes
+          .serverPort(None, request.uri)
+          .orElse(hostHeader.flatMap(_.port.map(TypedClientAttributes.serverPort)))
+      )
 
     val optIn = Attributes.newBuilder
     if (config.urlSchemeEnabled)

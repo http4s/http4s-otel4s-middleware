@@ -141,9 +141,9 @@ object ClientMetricsConfig {
 
   /** Recommended OpenTelemetry configuration.
     *
-    * Enables everything in [[minimal]] plus the recommended `network.protocol.version` attribute.
-    * Opt-in attributes, development metrics, and the http4s-specific response-header duration
-    * metric remain disabled.
+    * Enables everything in [[minimal]] plus the recommended `network.protocol.version` attribute
+    * on metrics recorded after the response protocol version is known. Opt-in attributes,
+    * development metrics, and the http4s-specific response-header duration metric remain disabled.
     */
   val recommended: ClientMetricsConfig = minimal.withNetworkProtocolVersion
 
