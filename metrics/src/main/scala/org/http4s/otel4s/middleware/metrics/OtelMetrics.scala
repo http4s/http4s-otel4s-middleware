@@ -128,10 +128,10 @@ object OtelMetrics {
         .withAdditionalAttributes(attributes)
         .withRequestDurationHistogramBuckets(responseDurationSecondsHistogramBuckets)
         .withResponseHeadersDurationHistogramBuckets(responseDurationSecondsHistogramBuckets)
-        .optIntoResponseHeadersDuration
-        .optIntoActiveRequests
-        .optIntoRequestBodySize
-        .optIntoResponseBodySize
+        .withResponseHeadersDuration(true)
+        .withActiveRequests(true)
+        .withRequestBodySize(true)
+        .withResponseBodySize(true)
     )
 
   /** Creates HTTP server metrics using the given configuration.
@@ -184,10 +184,10 @@ object OtelMetrics {
         .withAdditionalAttributes(attributes)
         .withRequestDurationHistogramBuckets(responseDurationSecondsHistogramBuckets)
         .withResponseHeadersDurationHistogramBuckets(responseDurationSecondsHistogramBuckets)
-        .optIntoResponseHeadersDuration
-        .optIntoActiveRequests
-        .optIntoRequestBodySize
-        .optIntoResponseBodySize
+        .withResponseHeadersDuration(true)
+        .withActiveRequests(true)
+        .withRequestBodySize(true)
+        .withResponseBodySize(true)
     )
 
   private final case class MetricsContext(
@@ -198,7 +198,7 @@ object OtelMetrics {
 
   private def clientContext(config: ClientMetricsConfig)(
       metricsRequest: MetricsRequest
-  ): MetricsContext = {
+  ): Option[MetricsContext] = Option.when(config.requestFilter(metricsRequest)) {
     val request = metricsRequest.requestPrelude
     val hostHeader = request.headers.get[Host]
 
@@ -232,7 +232,7 @@ object OtelMetrics {
 
   private def serverContext(config: ServerMetricsConfig)(
       metricsRequest: MetricsRequest
-  ): MetricsContext = {
+  ): Option[MetricsContext] = Option.when(config.requestFilter(metricsRequest)) {
     val request = metricsRequest.requestPrelude
 
     val forwarded = request.headers.get[Forwarded]
@@ -256,6 +256,7 @@ object OtelMetrics {
       if (config.networkProtocolVersionEnabled)
         common.added(TypedServerAttributes.networkProtocolVersion(request.httpVersion))
       else common
+
     MetricsContext(
       activeRequestAttributes = common,
       requestAttributes = recommended
@@ -274,7 +275,7 @@ object OtelMetrics {
       activeRequestsEnabled: Boolean,
       requestBodySizeEnabled: Boolean,
       responseBodySizeEnabled: Boolean,
-      context: MetricsRequest => MetricsContext,
+      context: MetricsRequest => Option[MetricsContext],
   ): F[MetricsOps2[F]] =
     for {
       meter <- MeterProvider[F]
@@ -299,13 +300,13 @@ object OtelMetrics {
 
   private def createMetricsOps[F[_]: Applicative](
       metrics: MetricsCollection[F],
-      createRequestContext: MetricsRequest => MetricsContext,
+      createRequestContext: MetricsRequest => Option[MetricsContext],
       kind: String,
   ): MetricsOps2[F] =
     new MetricsOps2[F] {
       type Context = MetricsContext
 
-      override def createContext(request: MetricsRequest): F[MetricsContext] =
+      override def createContext(request: MetricsRequest): F[Option[MetricsContext]] =
         createRequestContext(request).pure[F]
 
       override def increaseActiveRequests(

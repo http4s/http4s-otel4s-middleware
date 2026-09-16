@@ -25,6 +25,9 @@ import org.typelevel.otel4s.metrics.BucketBoundaries
 /** Configuration for OpenTelemetry HTTP client metrics. */
 sealed trait ClientMetricsConfig {
 
+  /** Returns true when metrics should be recorded for a request. */
+  def requestFilter: MetricsRequestFilter
+
   /** Attributes added to every enabled metric. */
   def additionalAttributes: Attributes
 
@@ -69,6 +72,9 @@ sealed trait ClientMetricsConfig {
   /** Replaces the attributes added to every enabled metric. */
   def withAdditionalAttributes(attributes: Attributes): ClientMetricsConfig
 
+  /** Replaces the per-request metrics filter. Returning false drops all metrics for that request. */
+  def withRequestFilter(filter: MetricsRequestFilter): ClientMetricsConfig
+
   /** Replaces the complete set of methods emitted verbatim as `http.request.method`. */
   def withKnownMethods(methods: Set[Method]): ClientMetricsConfig
 
@@ -92,23 +98,23 @@ sealed trait ClientMetricsConfig {
       buckets: BucketBoundaries
   ): ClientMetricsConfig
 
-  /** Enables the http4s-specific `http.client.response.headers.duration` metric. */
-  def optIntoResponseHeadersDuration: ClientMetricsConfig
+  /** Enables or disables the http4s-specific `http.client.response.headers.duration` metric. */
+  def withResponseHeadersDuration(enabled: Boolean): ClientMetricsConfig
 
-  /** Enables the opt-in `http.client.active_requests` metric. */
-  def optIntoActiveRequests: ClientMetricsConfig
+  /** Enables or disables the  `http.client.active_requests` metric. */
+  def withActiveRequests(enabled: Boolean): ClientMetricsConfig
 
-  /** Enables the opt-in `http.client.request.body.size` metric. */
-  def optIntoRequestBodySize: ClientMetricsConfig
+  /** Enables or disables `http.client.request.body.size` metric. */
+  def withRequestBodySize(enabled: Boolean): ClientMetricsConfig
 
-  /** Enables the opt-in `http.client.response.body.size` metric. */
-  def optIntoResponseBodySize: ClientMetricsConfig
+  /** Enables or disables the `http.client.response.body.size` metric. */
+  def withResponseBodySize(enabled: Boolean): ClientMetricsConfig
 
-  /** Enables the recommended `network.protocol.version` attribute. */
-  def withNetworkProtocolVersion: ClientMetricsConfig
+  /** Enables or disables the recommended `network.protocol.version` attribute. */
+  def withNetworkProtocolVersion(enabled: Boolean): ClientMetricsConfig
 
-  /** Enables the opt-in `url.scheme` attribute. */
-  def optIntoUrlScheme: ClientMetricsConfig
+  /** Enables or disables the opt-in `url.scheme` attribute. */
+  def withUrlScheme(enabled: Boolean): ClientMetricsConfig
 
   /** Replaces the classifier used to emit low-cardinality `url.template` values. */
   def withUrlTemplateClassifier(classifier: UriTemplateClassifier): ClientMetricsConfig
@@ -124,6 +130,7 @@ object ClientMetricsConfig {
     * metrics, and the http4s-specific response-header duration metric are disabled.
     */
   val minimal: ClientMetricsConfig = Impl(
+    requestFilter = MetricsRequestFilter.all,
     additionalAttributes = Attributes.empty,
     knownMethods = TypedAttributes.defaultKnownMethods,
     requestDurationHistogramBuckets = MetricsConfigDefaults.DurationHistogramBuckets,
@@ -145,7 +152,7 @@ object ClientMetricsConfig {
     * on metrics recorded after the response protocol version is known. Opt-in attributes,
     * development metrics, and the http4s-specific response-header duration metric remain disabled.
     */
-  val recommended: ClientMetricsConfig = minimal.withNetworkProtocolVersion
+  val recommended: ClientMetricsConfig = minimal.withNetworkProtocolVersion(true)
 
   /** All supported OpenTelemetry and http4s metric features.
     *
@@ -156,10 +163,16 @@ object ClientMetricsConfig {
     * [[org.http4s.otel4s.middleware.client.UriTemplateClassifier]] is configured.
     */
   val all: ClientMetricsConfig =
-    recommended.optIntoResponseHeadersDuration.optIntoActiveRequests.optIntoRequestBodySize.optIntoResponseBodySize.optIntoUrlScheme
+    recommended
+      .withResponseHeadersDuration(true)
+      .withActiveRequests(true)
+      .withRequestBodySize(true)
+      .withResponseBodySize(true)
+      .withUrlScheme(true)
 
   private final case class Impl(
       additionalAttributes: Attributes,
+      requestFilter: MetricsRequestFilter,
       knownMethods: Set[Method],
       requestDurationHistogramBuckets: BucketBoundaries,
       responseHeadersDurationHistogramBuckets: BucketBoundaries,
@@ -175,6 +188,8 @@ object ClientMetricsConfig {
   ) extends ClientMetricsConfig {
     def withAdditionalAttributes(attributes: Attributes): ClientMetricsConfig =
       copy(additionalAttributes = attributes)
+    def withRequestFilter(filter: MetricsRequestFilter): ClientMetricsConfig =
+      copy(requestFilter = filter)
     def withKnownMethods(methods: Set[Method]): ClientMetricsConfig =
       copy(knownMethods = methods)
     def withRequestDurationHistogramBuckets(
@@ -189,14 +204,18 @@ object ClientMetricsConfig {
     def withResponseBodySizeHistogramBuckets(
         buckets: BucketBoundaries
     ): ClientMetricsConfig = copy(responseBodySizeHistogramBuckets = buckets)
-    def optIntoResponseHeadersDuration: ClientMetricsConfig =
-      copy(responseHeadersDurationEnabled = true)
-    def optIntoActiveRequests: ClientMetricsConfig = copy(activeRequestsEnabled = true)
-    def optIntoRequestBodySize: ClientMetricsConfig = copy(requestBodySizeEnabled = true)
-    def optIntoResponseBodySize: ClientMetricsConfig = copy(responseBodySizeEnabled = true)
-    def withNetworkProtocolVersion: ClientMetricsConfig =
-      copy(networkProtocolVersionEnabled = true)
-    def optIntoUrlScheme: ClientMetricsConfig = copy(urlSchemeEnabled = true)
+    def withResponseHeadersDuration(enabled: Boolean): ClientMetricsConfig =
+      copy(responseHeadersDurationEnabled = enabled)
+    def withActiveRequests(enabled: Boolean): ClientMetricsConfig =
+      copy(activeRequestsEnabled = enabled)
+    def withRequestBodySize(enabled: Boolean): ClientMetricsConfig =
+      copy(requestBodySizeEnabled = enabled)
+    def withResponseBodySize(enabled: Boolean): ClientMetricsConfig =
+      copy(responseBodySizeEnabled = enabled)
+    def withNetworkProtocolVersion(enabled: Boolean): ClientMetricsConfig =
+      copy(networkProtocolVersionEnabled = enabled)
+    def withUrlScheme(enabled: Boolean): ClientMetricsConfig =
+      copy(urlSchemeEnabled = enabled)
     def withUrlTemplateClassifier(classifier: UriTemplateClassifier): ClientMetricsConfig =
       copy(urlTemplateClassifier = classifier)
   }

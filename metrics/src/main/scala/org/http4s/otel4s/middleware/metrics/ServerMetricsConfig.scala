@@ -25,6 +25,9 @@ import org.typelevel.otel4s.metrics.BucketBoundaries
 /** Configuration for OpenTelemetry HTTP server metrics. */
 sealed trait ServerMetricsConfig {
 
+  /** Returns true when metrics should be recorded for a request. */
+  def requestFilter: MetricsRequestFilter
+
   /** Attributes added to every enabled metric. */
   def additionalAttributes: Attributes
 
@@ -69,6 +72,9 @@ sealed trait ServerMetricsConfig {
   /** Replaces the attributes added to every enabled metric. */
   def withAdditionalAttributes(attributes: Attributes): ServerMetricsConfig
 
+  /** Replaces the per-request metrics filter. Returning false drops all metrics for that request. */
+  def withRequestFilter(filter: MetricsRequestFilter): ServerMetricsConfig
+
   /** Replaces the complete set of methods emitted verbatim as `http.request.method`. */
   def withKnownMethods(methods: Set[Method]): ServerMetricsConfig
 
@@ -92,26 +98,26 @@ sealed trait ServerMetricsConfig {
       buckets: BucketBoundaries
   ): ServerMetricsConfig
 
-  /** Enables the http4s-specific `http.server.response.headers.duration` metric. */
-  def optIntoResponseHeadersDuration: ServerMetricsConfig
+  /** Enables or disables the http4s-specific `http.server.response.headers.duration` metric. */
+  def withResponseHeadersDuration(enabled: Boolean): ServerMetricsConfig
 
-  /** Enables the opt-in `http.server.active_requests` metric. */
-  def optIntoActiveRequests: ServerMetricsConfig
+  /** Enables or disables the `http.server.active_requests` metric. */
+  def withActiveRequests(enabled: Boolean): ServerMetricsConfig
 
-  /** Enables the opt-in `http.server.request.body.size` metric. */
-  def optIntoRequestBodySize: ServerMetricsConfig
+  /** Enables or disables the `http.server.request.body.size` metric. */
+  def withRequestBodySize(enabled: Boolean): ServerMetricsConfig
 
-  /** Enables the opt-in `http.server.response.body.size` metric. */
-  def optIntoResponseBodySize: ServerMetricsConfig
+  /** Enables or disables the `http.server.response.body.size` metric. */
+  def withResponseBodySize(enabled: Boolean): ServerMetricsConfig
 
-  /** Enables the recommended `network.protocol.version` attribute. */
-  def withNetworkProtocolVersion: ServerMetricsConfig
+  /** Enables or disables the recommended `network.protocol.version` attribute */
+  def withNetworkProtocolVersion(enabled: Boolean): ServerMetricsConfig
 
   /** Replaces the classifier used to emit low-cardinality `http.route` values. */
   def withRouteClassifier(classifier: RouteClassifier): ServerMetricsConfig
 
-  /** Enables the opt-in `server.address` and `server.port` attributes. */
-  def optIntoServerAddressAndPort: ServerMetricsConfig
+  /** Enables or disables `server.address` and `server.port` attributes */
+  def withServerAddressAndPort(enabled: Boolean): ServerMetricsConfig
 }
 
 object ServerMetricsConfig {
@@ -125,6 +131,7 @@ object ServerMetricsConfig {
     * are disabled.
     */
   val minimal: ServerMetricsConfig = Impl(
+    requestFilter = MetricsRequestFilter.all,
     additionalAttributes = Attributes.empty,
     knownMethods = TypedAttributes.defaultKnownMethods,
     requestDurationHistogramBuckets = MetricsConfigDefaults.DurationHistogramBuckets,
@@ -146,7 +153,7 @@ object ServerMetricsConfig {
     * Opt-in attributes, development metrics, the `http.route` classifier, and the http4s-specific
     * response-header duration metric remain disabled.
     */
-  val recommended: ServerMetricsConfig = minimal.withNetworkProtocolVersion
+  val recommended: ServerMetricsConfig = minimal.withNetworkProtocolVersion(true)
 
   /** All supported OpenTelemetry and http4s metric features.
     *
@@ -157,10 +164,16 @@ object ServerMetricsConfig {
     * [[org.http4s.otel4s.middleware.server.RouteClassifier]] is configured.
     */
   val all: ServerMetricsConfig =
-    recommended.optIntoResponseHeadersDuration.optIntoActiveRequests.optIntoRequestBodySize.optIntoResponseBodySize.optIntoServerAddressAndPort
+    recommended
+      .withResponseHeadersDuration(true)
+      .withActiveRequests(true)
+      .withRequestBodySize(true)
+      .withResponseBodySize(true)
+      .withServerAddressAndPort(true)
 
   private final case class Impl(
       additionalAttributes: Attributes,
+      requestFilter: MetricsRequestFilter,
       knownMethods: Set[Method],
       requestDurationHistogramBuckets: BucketBoundaries,
       responseHeadersDurationHistogramBuckets: BucketBoundaries,
@@ -176,6 +189,8 @@ object ServerMetricsConfig {
   ) extends ServerMetricsConfig {
     def withAdditionalAttributes(attributes: Attributes): ServerMetricsConfig =
       copy(additionalAttributes = attributes)
+    def withRequestFilter(filter: MetricsRequestFilter): ServerMetricsConfig =
+      copy(requestFilter = filter)
     def withKnownMethods(methods: Set[Method]): ServerMetricsConfig =
       copy(knownMethods = methods)
     def withRequestDurationHistogramBuckets(
@@ -190,17 +205,20 @@ object ServerMetricsConfig {
     def withResponseBodySizeHistogramBuckets(
         buckets: BucketBoundaries
     ): ServerMetricsConfig = copy(responseBodySizeHistogramBuckets = buckets)
-    def optIntoResponseHeadersDuration: ServerMetricsConfig =
-      copy(responseHeadersDurationEnabled = true)
-    def optIntoActiveRequests: ServerMetricsConfig = copy(activeRequestsEnabled = true)
-    def optIntoRequestBodySize: ServerMetricsConfig = copy(requestBodySizeEnabled = true)
-    def optIntoResponseBodySize: ServerMetricsConfig = copy(responseBodySizeEnabled = true)
-    def withNetworkProtocolVersion: ServerMetricsConfig =
-      copy(networkProtocolVersionEnabled = true)
+    def withResponseHeadersDuration(enabled: Boolean): ServerMetricsConfig =
+      copy(responseHeadersDurationEnabled = enabled)
+    def withActiveRequests(enabled: Boolean): ServerMetricsConfig =
+      copy(activeRequestsEnabled = enabled)
+    def withRequestBodySize(enabled: Boolean): ServerMetricsConfig =
+      copy(requestBodySizeEnabled = enabled)
+    def withResponseBodySize(enabled: Boolean): ServerMetricsConfig =
+      copy(responseBodySizeEnabled = enabled)
+    def withNetworkProtocolVersion(enabled: Boolean): ServerMetricsConfig =
+      copy(networkProtocolVersionEnabled = enabled)
     def withRouteClassifier(classifier: RouteClassifier): ServerMetricsConfig =
       copy(routeClassifier = classifier)
-    def optIntoServerAddressAndPort: ServerMetricsConfig =
-      copy(serverAddressAndPortEnabled = true)
+    def withServerAddressAndPort(enabled: Boolean): ServerMetricsConfig =
+      copy(serverAddressAndPortEnabled = enabled)
   }
 
 }

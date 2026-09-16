@@ -83,10 +83,10 @@ class OtelMetricsTests extends CatsEffectSuite {
                 )
               )
 
-            val meteredServer = ServerMetrics[IO](serverMetricsOps)(fakeServer)
+            val meteredServer = ServerMetrics[IO](serverMetricsOps)(fakeServer.orNotFound)
 
             val meteredClient =
-              ClientMetrics[IO](clientMetricsOps)(Client.fromHttpApp(meteredServer.orNotFound))
+              ClientMetrics[IO](clientMetricsOps)(Client.fromHttpApp(meteredServer))
 
             meteredClient
               .run(Request[IO](Method.GET, uri = uri"https://http4s.org"))
@@ -233,10 +233,10 @@ class OtelMetricsTests extends CatsEffectSuite {
                 )
               )
 
-            val meteredServer = ServerMetrics[IO](serverMetricsOps)(fakeServer)
+            val meteredServer = ServerMetrics[IO](serverMetricsOps)(fakeServer.orNotFound)
 
             val meteredClient =
-              ClientMetrics[IO](clientMetricsOps)(Client.fromHttpApp(meteredServer.orNotFound))
+              ClientMetrics[IO](clientMetricsOps)(Client.fromHttpApp(meteredServer))
 
             meteredClient
               .run(Request[IO](Method.GET, uri = uri"https://http4s.org"))
@@ -284,9 +284,13 @@ class OtelMetricsTests extends CatsEffectSuite {
         for {
           serverMetricsOps <- OtelMetrics.serverMetricsOps[IO](ServerMetricsConfig.recommended)
           clientMetricsOps <- OtelMetrics.clientMetricsOps[IO](ClientMetricsConfig.recommended)
-          server = ServerMetrics[IO](serverMetricsOps)(HttpRoutes.of[IO] { case _ =>
-            IO.pure(Response[IO](Status.Ok))
-          }).orNotFound
+          server = ServerMetrics[IO](serverMetricsOps)(
+            HttpRoutes
+              .of[IO] { case _ =>
+                IO.pure(Response[IO](Status.Ok))
+              }
+              .orNotFound
+          )
           client = ClientMetrics[IO](clientMetricsOps)(Client.fromHttpApp(server))
           _ <- client
             .run(Request[IO](Method.GET, uri = uri"https://http4s.org"))
@@ -415,9 +419,13 @@ class OtelMetricsTests extends CatsEffectSuite {
           serverMetricsOps <- OtelMetrics.serverMetricsOps[IO](ServerMetricsConfig.minimal)
           response = Response[IO](Status.BadRequest)
           client = ClientMetrics[IO](clientMetricsOps)(Client.fromHttpApp(HttpApp.pure(response)))
-          server = ServerMetrics[IO](serverMetricsOps)(HttpRoutes.of[IO] { case _ =>
-            IO.pure(response)
-          }).orNotFound
+          server = ServerMetrics[IO](serverMetricsOps)(
+            HttpRoutes
+              .of[IO] { case _ =>
+                IO.pure(response)
+              }
+              .orNotFound
+          )
           _ <- client.run(Request[IO](uri = uri"https://http4s.org")).use(_ => IO.unit)
           _ <- server.run(Request[IO](uri = uri"https://http4s.org")).flatMap(_.body.compile.drain)
           metrics <- testkit.collectMetrics
@@ -469,9 +477,13 @@ class OtelMetricsTests extends CatsEffectSuite {
 
         for {
           metricsOps <- OtelMetrics.serverMetricsOps[IO](ServerMetricsConfig.all)
-          server = ServerMetrics[IO](metricsOps)(HttpRoutes.of[IO] { case _ =>
-            IO.pure(Response[IO](Status.Ok))
-          }).orNotFound
+          server = ServerMetrics[IO](metricsOps)(
+            HttpRoutes
+              .of[IO] { case _ =>
+                IO.pure(Response[IO](Status.Ok))
+              }
+              .orNotFound
+          )
           _ <- server
             .run(
               Request[IO]()
