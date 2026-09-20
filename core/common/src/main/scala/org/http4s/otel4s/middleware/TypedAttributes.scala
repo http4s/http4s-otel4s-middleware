@@ -38,6 +38,13 @@ private[middleware] trait TypedAttributes {
 
   /** @return the `http.request.method` `Attribute` */
   final def httpRequestMethod(method: Method): Attribute[String] =
+    httpRequestMethod(method, TypedAttributes.defaultKnownMethods)
+
+  /** @return the `http.request.method` `Attribute` */
+  final def httpRequestMethod(
+      method: Method,
+      knownMethods: Set[Method],
+  ): Attribute[String] =
     if (knownMethods.contains(method)) HttpAttributes.HttpRequestMethod(method.name)
     else _httpRequestMethodOther
 
@@ -48,6 +55,9 @@ private[middleware] trait TypedAttributes {
   /** @return the `http.response.status_code` `Attribute` */
   final def httpResponseStatusCode(status: Status): Attribute[Long] =
     HttpAttributes.HttpResponseStatusCode(status.code.toLong)
+
+  final def httpResponseStatusCode(status: Option[Status]): Option[Attribute[Long]] =
+    HttpAttributes.HttpResponseStatusCode.maybe(status.map(_.code.toLong))
 
   /** @return the `network.peer.address` `Attribute` */
   final def networkPeerAddress(ip: IpAddress): Attribute[String] =
@@ -65,7 +75,7 @@ private[middleware] trait TypedAttributes {
 
 /** Methods for creating appropriate `Attribute`s from typed HTTP objects. */
 object TypedAttributes extends TypedAttributes {
-  private val knownMethods: Set[Method] = Set(
+  private[middleware] val defaultKnownMethods: Set[Method] = Set(
     Method.CONNECT,
     Method.DELETE,
     Method.GET,
@@ -74,6 +84,7 @@ object TypedAttributes extends TypedAttributes {
     Method.PATCH,
     Method.POST,
     Method.PUT,
+    Method.QUERY,
     Method.TRACE,
   )
 

@@ -48,6 +48,7 @@ import org.typelevel.otel4s.sdk.trace.data.StatusData
 import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
 import org.typelevel.otel4s.semconv.attributes.HttpAttributes
 import org.typelevel.otel4s.semconv.attributes.NetworkAttributes
+import org.typelevel.otel4s.semconv.attributes.ServerAttributes
 import org.typelevel.otel4s.semconv.attributes.UrlAttributes
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
@@ -57,7 +58,7 @@ import scala.concurrent.duration.Duration
 import scala.util.control.NoStackTrace
 
 class ServerMiddlewareTest extends CatsEffectSuite {
-  import ServerMiddlewareTest.NoopRedactor
+  import ServerMiddlewareTest.{NoopRedactor, ServerEndpointAttributes}
 
   private val spanLimits = SpanLimits.default
 
@@ -148,6 +149,8 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
                 HttpAttributes.HttpRequestHeader.transformName(_ + ".foo")(Seq("bar")),
                 NetworkAttributes.NetworkProtocolVersion("1.1"),
+                ServerAttributes.ServerAddress("localhost"),
+                ServerAttributes.ServerPort(80L),
                 UrlAttributes.UrlScheme("http"),
                 UrlAttributes.UrlPath("/"),
                 UrlAttributes.UrlQuery(""),
@@ -290,7 +293,7 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 } yield assertSingleSpan(
                   spans,
                   SpanExpectation.any
-                    .attributesExact(attributes)
+                    .attributesExact(attributes.concat(ServerEndpointAttributes))
                     .status(statusExpectation(status)),
                 )
               }
@@ -736,7 +739,7 @@ class ServerMiddlewareTest extends CatsEffectSuite {
       events: Vector[EventData] = Vector.empty,
   ): SpanExpectation =
     SpanExpectation.any
-      .attributesExact(attributes)
+      .attributesExact(attributes.concat(ServerEndpointAttributes))
       .status(statusExpectation(status))
       .events(eventsExpectation(events))
 
@@ -757,4 +760,9 @@ class ServerMiddlewareTest extends CatsEffectSuite {
 
 object ServerMiddlewareTest {
   object NoopRedactor extends PathRedactor.NeverRedact with QueryRedactor.NeverRedact
+
+  private val ServerEndpointAttributes = Attributes(
+    ServerAttributes.ServerAddress("localhost"),
+    ServerAttributes.ServerPort(80L),
+  )
 }

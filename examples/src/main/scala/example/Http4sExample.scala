@@ -114,7 +114,7 @@ object Http4sExample extends IOApp with Common {
         .withPort(port"8080")
         .withHttpApp {
           serverMiddleware.wrapHttpApp {
-            Metrics(metricsOps)(routes(client)).orNotFound
+            Metrics(metricsOps)(routes(client).orNotFound)
           }
         }
         .build
