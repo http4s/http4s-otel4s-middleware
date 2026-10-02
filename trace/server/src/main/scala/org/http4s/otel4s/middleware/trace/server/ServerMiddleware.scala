@@ -19,11 +19,15 @@ package otel4s.middleware
 package trace
 package server
 
+import cats.effect.kernel.Concurrent
 import cats.effect.kernel.MonadCancelThrow
 import cats.effect.kernel.Outcome
+import cats.effect.kernel.Ref
+import cats.effect.kernel.Resource
 import cats.effect.syntax.monadCancel._
 import cats.mtl.LiftKind
 import cats.syntax.applicative._
+import cats.syntax.applicativeError._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import fs2.Stream
@@ -35,22 +39,25 @@ import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
 
+import scala.util.control.NonFatal
+
 /** A middleware for wrapping [[org.http4s.HttpApp `HttpApp`]],
   * [[org.http4s.HttpRoutes `HttpRoutes`]], and arbitrary
   * [[org.http4s.Http `Http`]] instances.
   *
   * Middlewares built with [[ServerMiddleware.builder]] add tracing.
   *
-  * @note This API requires
-  *       [[cats.effect.kernel.MonadCancelThrow `MonadCancelThrow`]] in order
-  *       to support tracing, and may be overly constraining for some
-  *       middlewares. Consequently, it should not be considered a
-  *       general-purpose interface for middlewares, and should be reserved for
-  *       middlewares that need to compose with one that adds tracing.
+  * @note This API requires [[cats.effect.kernel.Concurrent `Concurrent`]] in
+  *       order to support tracing and coordinate span ownership between the
+  *       request handler and response body. This capability may be overly
+  *       constraining for some middlewares. Consequently, this should not be
+  *       considered a general-purpose interface for middlewares, and should be
+  *       reserved for middlewares that need to compose with one that adds
+  *       tracing.
   */
 trait ServerMiddleware[F[_]] { self =>
 
-  implicit def monadCancelThrow: MonadCancelThrow[F]
+  implicit def concurrent: Concurrent[F]
 
   /** Wraps an [[org.http4s.Http `Http`]] in a way that abstracts over
     * [[org.http4s.HttpApp `HttpApp`]] and
@@ -115,8 +122,7 @@ trait ServerMiddleware[F[_]] { self =>
     */
   final def wrapMiddleware(that: ServerMiddleware[F]): ServerMiddleware[F] =
     new ServerMiddleware[F] {
-      implicit def monadCancelThrow: MonadCancelThrow[F] =
-        self.monadCancelThrow
+      implicit def concurrent: Concurrent[F] = self.concurrent
       def wrapGenericHttp[G[_]: MonadCancelThrow](http: Http[G, F])(implicit
           kt: LiftKind[F, G]
       ): Http[G, F] = self.wrapGenericHttp(that.wrapGenericHttp(http))
@@ -124,13 +130,42 @@ trait ServerMiddleware[F[_]] { self =>
 }
 
 object ServerMiddleware {
+  private[server] sealed trait Ownership
+  private[server] case object HandlerOwned extends Ownership
+  private[server] case object BodyOwned extends Ownership
+  private[server] case object Finished extends Ownership
+
+  private[server] def finishOnce[F[_]](
+      ownership: Ref[F, Ownership],
+      owner: Ownership,
+      exitCase: Resource.ExitCase,
+  )(completeSpan: F[Unit], release: Resource.ExitCase => F[Unit])(implicit
+      F: MonadCancelThrow[F]
+  ): F[Unit] =
+    F.uncancelable { _ =>
+      ownership
+        .modify {
+          case `owner` => (Finished, true)
+          case state => (state, false)
+        }
+        .flatMap { shouldFinish =>
+          if (shouldFinish) {
+            val finalizeSpan = completeSpan.guarantee(release(exitCase))
+            exitCase match {
+              case Resource.ExitCase.Succeeded => finalizeSpan
+              case _ => finalizeSpan.attempt.void
+            }
+          } else F.unit
+        }
+    }
+
   private[this] final class Impl[F[_]](
       tracerF: Tracer[F],
       spanDataProvider: SpanDataProvider,
       errorClassifier: ErrorClassifier,
       perRequestReversePropagationFilter: PerRequestFilter,
       perRequestTracingFilter: PerRequestFilter,
-  )(implicit val monadCancelThrow: MonadCancelThrow[F])
+  )(implicit val concurrent: Concurrent[F])
       extends ServerMiddleware[F] {
     def wrapGenericHttp[G[_]](http: Http[G, F])(implicit
         G: MonadCancelThrow[G],
@@ -150,40 +185,96 @@ object ServerMiddleware {
           val reqAttributes = spanDataProvider.requestAttributes(reqNoBody, shared)
           G.uncancelable { poll =>
             val tracerG = tracerF.liftTo[G]
-            tracerG.joinOrRoot(req.headers) {
-              tracerG
-                .spanBuilder(spanName)
-                .withSpanKind(SpanKind.Server)
-                .addAttributes(reqAttributes)
-                .build
-                .use { span =>
-                  poll {
-                    http.run(req).flatMap { resp =>
-                      if (perRequestReversePropagationFilter(reqPrelude).isEnabled) {
-                        for (traceHeaders <- tracerG.propagate(Headers.empty))
-                          yield resp.withHeaders(resp.headers ++ traceHeaders)
-                      } else G.pure(resp)
-                    }
-                  }.guaranteeCase {
-                    case Outcome.Succeeded(fa) =>
-                      fa.flatMap { resp =>
-                        val respAttributes =
-                          spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
-                        val isError = errorClassifier.isError(reqPrelude, resp.responsePrelude)
-                        val errorAttributes =
-                          if (isError)
-                            spanDataProvider.errorAttributes(reqPrelude, resp.responsePrelude)
-                          else Attributes.empty
-                        span.addAttributes(respAttributes ++ errorAttributes) >> span
-                          .setStatus(StatusCode.Error)
-                          .whenA(isError)
-                      }
-                    case Outcome.Errored(e) =>
-                      span.addAttributes(spanDataProvider.exceptionAttributes(e))
-                    case Outcome.Canceled() =>
-                      G.unit
-                  }
+            kt(
+              tracerF.joinOrRoot(req.headers) {
+                tracerF
+                  .spanBuilder(spanName)
+                  .withSpanKind(SpanKind.Server)
+                  .addAttributes(reqAttributes)
+                  .build
+                  .resource
+                  .evalMap(res => Ref.of[F, Ownership](HandlerOwned).map((res, _)))
+                  .allocatedCase
+              }
+            ).flatMap { case ((res, ownership), release) =>
+              val span = res.span
+              val traceG = res.liftTo[G].trace
+
+              def catchNonFatal[A](thunk: => A): F[A] =
+                try concurrent.pure(thunk)
+                catch {
+                  case NonFatal(cause) => concurrent.raiseError(cause)
                 }
+
+              def recordException(cause: Throwable): F[Unit] =
+                catchNonFatal(spanDataProvider.exceptionAttributes(cause))
+                  .flatMap(attributes => span.addAttributes(attributes))
+
+              traceG {
+                poll {
+                  http.run(req).flatMap { resp =>
+                    if (perRequestReversePropagationFilter(reqPrelude).isEnabled) {
+                      for (traceHeaders <- tracerG.propagate(Headers.empty))
+                        yield resp.withHeaders(resp.headers ++ traceHeaders)
+                    } else G.pure(resp)
+                  }
+                }.flatMap { resp =>
+                  kt(
+                    catchNonFatal {
+                      val respAttributes =
+                        spanDataProvider.responseAttributes(resp.withBodyStream(Stream.empty))
+                      val isError = errorClassifier.isError(reqPrelude, resp.responsePrelude)
+                      val errorAttributes =
+                        if (isError)
+                          spanDataProvider.errorAttributes(reqPrelude, resp.responsePrelude)
+                        else Attributes.empty
+
+                      resp.pipeBodyThrough(
+                        _.scope.translate(res.trace).onFinalizeCaseWeak { exitCase =>
+                          val completeSpan =
+                            span.addAttributes(respAttributes ++ errorAttributes) >>
+                              span.setStatus(StatusCode.Error).whenA(isError) >>
+                              (exitCase match {
+                                case Resource.ExitCase.Errored(cause) =>
+                                  recordException(cause)
+                                case _ =>
+                                  concurrent.unit
+                              })
+                          ServerMiddleware.finishOnce(ownership, BodyOwned, exitCase)(
+                            completeSpan,
+                            release,
+                          )
+                        }
+                      )
+                    }
+                  ).flatTap(_ => kt(ownership.set(BodyOwned)))
+                }.guaranteeCase {
+                  case Outcome.Succeeded(_) =>
+                    kt(
+                      ServerMiddleware.finishOnce(
+                        ownership,
+                        HandlerOwned,
+                        Resource.ExitCase.Succeeded,
+                      )(concurrent.unit, release)
+                    )
+                  case Outcome.Errored(cause) =>
+                    kt(
+                      ServerMiddleware.finishOnce(
+                        ownership,
+                        HandlerOwned,
+                        Resource.ExitCase.Errored(cause),
+                      )(recordException(cause), release)
+                    )
+                  case Outcome.Canceled() =>
+                    kt(
+                      ServerMiddleware.finishOnce(
+                        ownership,
+                        HandlerOwned,
+                        Resource.ExitCase.Canceled,
+                      )(concurrent.unit, release)
+                    )
+                }
+              }
             }
           }
         }
@@ -192,7 +283,7 @@ object ServerMiddleware {
   }
 
   /** A builder for [[`ServerMiddleware`]]s that add tracing. */
-  final class Builder[F[_]: MonadCancelThrow] private[ServerMiddleware] (
+  final class Builder[F[_]: Concurrent] private[ServerMiddleware] (
       spanDataProvider: SpanDataProvider,
       errorClassifier: ErrorClassifier,
       perRequestReversePropagationFilter: PerRequestFilter,
@@ -258,7 +349,7 @@ object ServerMiddleware {
     * @see [[ServerSpanDataProvider.openTelemetry]] for creating OpenTelemetry-
     *      compliant providers
     */
-  def builder[F[_]: MonadCancelThrow: TracerProvider](
+  def builder[F[_]: Concurrent: TracerProvider](
       spanDataProvider: SpanDataProvider
   ): Builder[F] =
     new Builder[F](

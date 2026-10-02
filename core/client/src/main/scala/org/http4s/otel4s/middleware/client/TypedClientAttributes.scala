@@ -32,6 +32,10 @@ private[middleware] trait TypedClientAttributes extends TypedAttributes {
   final def serverAddress(host: Uri.Host): Attribute[String] =
     ServerAttributes.ServerAddress(host.value)
 
+  /** @return the `server.address` `Attribute` */
+  final def serverAddress(host: String): Attribute[String] =
+    ServerAttributes.ServerAddress(host)
+
   /** This is a required `Attribute`, but `Uri` does not guarantee that it is
     * populated. So we just hope that it's always there in practice.
     *
@@ -55,6 +59,10 @@ private[middleware] trait TypedClientAttributes extends TypedAttributes {
       .orElse(url.port.map(_.toLong))
       .orElse(portFromScheme(url.scheme))
       .map(ServerAttributes.ServerPort(_))
+
+  /** @return the `server.port` `Attribute` */
+  final def serverPort(port: Int): Attribute[Long] =
+    ServerAttributes.ServerPort(port.toLong)
 
   /** @return the `url.scheme` `Attribute` */
   final def urlScheme(scheme: Uri.Scheme): Attribute[String] =

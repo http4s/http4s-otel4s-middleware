@@ -40,11 +40,29 @@ object OriginalScheme {
       forwarded: Option[Forwarded],
       headers: Headers,
       url: Uri,
+  ): OriginalScheme =
+    apply(forwarded, headers, url, None)
+
+  /** @param forwarded the `Forwarded` header, if present in the request
+    * @param headers the request's headers
+    * @param url the request's URL
+    * @param secure whether the immediate connection is secure. This is used
+    *               only when the original scheme is not available from the
+    *               forwarded headers or URL.
+    * @return the original scheme used by the client, or the best available
+    *         approximation from the immediate connection
+    */
+  private[middleware] def apply(
+      forwarded: Option[Forwarded],
+      headers: Headers,
+      url: Uri,
+      secure: Option[Boolean],
   ): OriginalScheme = {
     val scheme = forwarded
       .flatMap(findFirstInForwarded(_, _.maybeProto))
       .orElse(headers.get[`X-Forwarded-Proto`].map(_.scheme))
       .orElse(url.scheme)
+      .orElse(secure.map(if (_) Uri.Scheme.https else Uri.Scheme.http))
     new OriginalScheme(scheme)
   }
 }

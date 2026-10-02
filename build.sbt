@@ -1,6 +1,6 @@
 import com.typesafe.tools.mima.core._
 
-ThisBuild / tlBaseVersion := "0.19" // your current series x.y
+ThisBuild / tlBaseVersion := "0.20" // your current series x.y
 
 ThisBuild / licenses := Seq(License.Apache2)
 ThisBuild / developers += tlGitHubDev("rossabaker", "Ross A. Baker")
@@ -18,6 +18,7 @@ ThisBuild / tlJdkRelease := Some(8)
 
 val catsEffectV = "3.7.1"
 val http4sV = "0.23.37"
+val http4sSnapshotV = "0.23.37-10-6d612d2-20260914T175713Z-SNAPSHOT"
 val munitV = "1.3.6"
 val munitCatsEffectV = "2.2.1"
 val openTelemetryV = "1.66.0"
@@ -29,7 +30,7 @@ val baseName = "http4s-otel4s-middleware"
 
 val sharedSettings = Seq(
   libraryDependencies ++= Seq(
-    "org.http4s" %%% "http4s-core" % http4sV,
+    "org.http4s" %%% "http4s-core" % http4sSnapshotV,
     "org.typelevel" %%% "otel4s-core-common" % otel4sV,
     "org.typelevel" %%% "otel4s-semconv" % otel4sV,
     "org.typelevel" %%% "otel4s-semconv-experimental" % otel4sV % Test,
@@ -92,14 +93,15 @@ lazy val `core-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
 lazy val metrics = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("metrics"))
-  .dependsOn(core)
+  .dependsOn(core, `core-client`, `core-server`)
   .settings(sharedSettings)
   .settings(
     name := s"$baseName-metrics",
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
-      "org.http4s" %%% "http4s-server" % http4sV % Test,
-      "org.http4s" %%% "http4s-client" % http4sV % Test,
+      "org.typelevel" %%% "otel4s-semconv-metrics-experimental" % otel4sV % Test,
+      "org.http4s" %%% "http4s-server" % http4sSnapshotV % Test,
+      "org.http4s" %%% "http4s-client" % http4sSnapshotV % Test,
     ),
   )
 
@@ -167,6 +169,8 @@ lazy val examples = project
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "cats-effect" % catsEffectV,
       "org.http4s" %%% "http4s-core" % http4sV,
+      "org.http4s" %% "http4s-server" % http4sSnapshotV,
+      "org.http4s" %% "http4s-client" % http4sSnapshotV,
       "org.http4s" %% "http4s-dsl" % http4sV,
       "org.http4s" %% "http4s-ember-server" % http4sV,
       "org.http4s" %% "http4s-ember-client" % http4sV,

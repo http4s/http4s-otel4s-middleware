@@ -56,5 +56,18 @@ class OriginalSchemeTest extends FunSuite {
     check(Headers(f1, xfp2), u2, Some(Uri.Scheme.http))
     check(Headers(f3, xfp1), u2, Some(Uri.Scheme.http))
     check(Headers(xfp2), u1, Some(Uri.Scheme.https))
+
+    assertEquals(
+      OriginalScheme(None, Headers.empty, u3, Some(false)).value,
+      Some(Uri.Scheme.http),
+    )
+    assertEquals(
+      OriginalScheme(None, Headers.empty, u3, Some(true)).value,
+      Some(Uri.Scheme.https),
+    )
+    assertEquals(
+      OriginalScheme(Headers(f1).get[Forwarded], Headers.empty, u3, Some(true)).value,
+      Some(Uri.Scheme.http),
+    )
   }
 }
