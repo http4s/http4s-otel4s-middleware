@@ -22,7 +22,11 @@ import scala.annotation.unchecked.uncheckedStable
 /** Determines whether a feature is enabled for a given request and its
   * response.
   */
-trait PerRequestFilter {
+@deprecated(
+  "Use `org.http4s.otel4s.middleware.PerRequestFilter` instead",
+  since = "http4s-otel4s-middleware 0.20.0",
+)
+trait PerRequestFilter extends org.http4s.otel4s.middleware.PerRequestFilter {
 
   /** @return whether the feature is enabled for the given request and its
     *         response
@@ -42,13 +46,22 @@ trait PerRequestFilter {
     req => apply(req).or(that(req))
 }
 
+@deprecated(
+  "Use `org.http4s.otel4s.middleware.PerRequestFilter` instead",
+  since = "http4s-otel4s-middleware 0.20.0",
+)
 object PerRequestFilter {
+  private def fromCore(filter: org.http4s.otel4s.middleware.PerRequestFilter): PerRequestFilter =
+    request =>
+      if (filter(request).isEnabled) PerRequestConfig.Enabled else PerRequestConfig.Disabled
 
   /** A filter that always enables a given feature. */
-  val alwaysEnabled: PerRequestFilter = _ => PerRequestConfig.Enabled
+  val alwaysEnabled: PerRequestFilter =
+    fromCore(org.http4s.otel4s.middleware.PerRequestFilter.alwaysEnabled)
 
   /** A filter that always disables a given feature. */
-  val neverEnabled: PerRequestFilter = _ => PerRequestConfig.Disabled
+  val neverEnabled: PerRequestFilter =
+    fromCore(org.http4s.otel4s.middleware.PerRequestFilter.neverEnabled)
 
   @uncheckedStable
   @deprecated("use `alwaysEnabled` instead", since = "http4s-otel4s-middleware 0.14.0")

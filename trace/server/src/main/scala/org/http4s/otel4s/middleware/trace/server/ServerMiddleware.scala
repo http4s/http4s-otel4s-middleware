@@ -27,6 +27,8 @@ import cats.syntax.applicative._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
 import fs2.Stream
+import org.http4s.otel4s.middleware.ErrorClassifier
+import org.http4s.otel4s.middleware.PerRequestFilter
 import org.http4s.server.HttpMiddleware
 import org.http4s.server.Middleware
 import org.typelevel.otel4s.Attributes
@@ -34,6 +36,8 @@ import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
+
+import scala.annotation.nowarn
 
 /** A middleware for wrapping [[org.http4s.HttpApp `HttpApp`]],
   * [[org.http4s.HttpRoutes `HttpRoutes`]], and arbitrary
@@ -217,6 +221,11 @@ object ServerMiddleware {
     def withErrorClassifier(errorClassifier: ErrorClassifier): Builder[F] =
       copy(errorClassifier = errorClassifier)
 
+    @nowarn("cat=deprecation")
+    private[ServerMiddleware] def withErrorClassifier(
+        errorClassifier: org.http4s.otel4s.middleware.trace.ErrorClassifier
+    ): Builder[F] = copy(errorClassifier = errorClassifier)
+
     /** Sets a filter that determines whether each request should propagate
       * tracing and other context information back to the requesting client in
       * the response headers, primarily for debugging (default: never enabled).
@@ -226,6 +235,11 @@ object ServerMiddleware {
     ): Builder[F] =
       copy(perRequestReversePropagationFilter = perRequestReversePropagationFilter)
 
+    @nowarn("cat=deprecation")
+    private[ServerMiddleware] def withPerRequestReversePropagationFilter(
+        perRequestReversePropagationFilter: org.http4s.otel4s.middleware.trace.PerRequestFilter
+    ): Builder[F] = copy(perRequestReversePropagationFilter = perRequestReversePropagationFilter)
+
     /** Sets a filter that determines whether each request and its response
       * should be traced (default: always enabled).
       */
@@ -233,6 +247,11 @@ object ServerMiddleware {
         perRequestTracingFilter: PerRequestFilter
     ): Builder[F] =
       copy(perRequestTracingFilter = perRequestTracingFilter)
+
+    @nowarn("cat=deprecation")
+    private[ServerMiddleware] def withPerRequestTracingFilter(
+        perRequestTracingFilter: org.http4s.otel4s.middleware.trace.PerRequestFilter
+    ): Builder[F] = copy(perRequestTracingFilter = perRequestTracingFilter)
 
     /** @return a middleware that can wrap [[org.http4s.HttpApp `HttpApp`]],
       *         [[org.http4s.HttpRoutes `HttpRoutes`]], and arbitrary

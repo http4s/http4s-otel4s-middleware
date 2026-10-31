@@ -24,9 +24,14 @@ import cats.effect.MonadCancelThrow
 import cats.effect.testkit.TestControl
 import cats.mtl.LiftKind
 import munit.CatsEffectSuite
+import org.http4s.otel4s.middleware.ErrorClassifier
+import org.http4s.otel4s.middleware.PerRequestConfig
+import org.http4s.otel4s.middleware.PerRequestFilter
 import org.http4s.otel4s.middleware.trace.redact.HeaderRedactor
 import org.http4s.otel4s.middleware.trace.redact.PathRedactor
 import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
+import org.http4s.otel4s.middleware.trace.{ErrorClassifier => LegacyErrorClassifier}
+import org.http4s.otel4s.middleware.trace.{PerRequestFilter => LegacyPerRequestFilter}
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
@@ -53,6 +58,7 @@ import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
 
+import scala.annotation.nowarn
 import scala.concurrent.duration.Duration
 import scala.util.control.NoStackTrace
 
@@ -614,7 +620,7 @@ class ServerMiddlewareTest extends CatsEffectSuite {
     }
   }
 
-  test("never reports response statuses as errros with ErrorClassifier.never") {
+  test("accepts inline core policies without reporting error status") {
     TestControl.executeEmbed {
       TracesTestkit
         .inMemory[IO]()
@@ -628,7 +634,8 @@ class ServerMiddlewareTest extends CatsEffectSuite {
                 .optIntoHttpRequestHeaders(HeaderRedactor.default)
                 .optIntoHttpResponseHeaders(HeaderRedactor.default)
             }
-            .withErrorClassifier(ErrorClassifier.never)
+            .withErrorClassifier((_, _) => false)
+            .withPerRequestTracingFilter(_ => PerRequestConfig.Enabled)
             .build
             .flatMap { serverMiddleware =>
               val app = serverMiddleware.wrapHttpApp {
@@ -714,6 +721,38 @@ class ServerMiddlewareTest extends CatsEffectSuite {
             }
         }
     }
+  }
+
+  test("accepts legacy policy values through all builder setters") {
+    legacyPolicyCompatibility
+  }
+
+  @nowarn("cat=deprecation")
+  private def legacyPolicyCompatibility: IO[Unit] = TracesTestkit.inMemory[IO]().use { testkit =>
+    implicit val provider: TracerProvider[IO] = testkit.tracerProvider
+    for {
+      middleware <- ServerMiddleware
+        .builder[IO](ServerSpanDataProvider.openTelemetry(NoopRedactor))
+        .withErrorClassifier(LegacyErrorClassifier.never)
+        .withPerRequestTracingFilter(LegacyPerRequestFilter.alwaysEnabled)
+        .withPerRequestReversePropagationFilter(LegacyPerRequestFilter.neverEnabled)
+        .build
+      response <- middleware
+        .wrapHttpApp(HttpApp[IO](_ => IO.pure(Response[IO](Status.InternalServerError))))
+        .run(Request[IO](uri = uri"http://localhost/"))
+      _ = assertEquals(response.headers.get(ci"traceparent"), None)
+      _ <- response.body.compile.drain
+      spans <- testkit.finishedSpans
+    } yield assertSingleSpan(
+      spans,
+      SpanExpectation
+        .server("GET")
+        .status(StatusExpectation.unset)
+        .eventCount(0)
+        .where("legacy error policy excludes the 500 response") { span =>
+          span.attributes.elements.get(ErrorAttributes.ErrorType).isEmpty
+        },
+    )
   }
 
   private def eventExpectation(event: EventData): EventExpectation =

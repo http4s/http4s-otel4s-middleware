@@ -18,7 +18,12 @@ package org.http4s
 package otel4s.middleware
 package trace
 
-trait ErrorClassifier {
+/** Compatibility policy for tracing. Prefer `org.http4s.otel4s.middleware.ErrorClassifier`. */
+@deprecated(
+  "Use `org.http4s.otel4s.middleware.ErrorClassifier` instead",
+  since = "http4s-otel4s-middleware 0.20.0",
+)
+trait ErrorClassifier extends org.http4s.otel4s.middleware.ErrorClassifier {
   def isError(request: RequestPrelude, response: ResponsePrelude): Boolean
 
   def and(that: ErrorClassifier): ErrorClassifier =
@@ -27,26 +32,31 @@ trait ErrorClassifier {
   def or(that: ErrorClassifier): ErrorClassifier =
     (request, response) => isError(request, response) || that.isError(request, response)
 
-  def excluding(statuses: Status*): ErrorClassifier = {
+  override def excluding(statuses: Status*): ErrorClassifier = {
     val excluded = statuses.toSet
     (request, response) => !excluded.contains(response.status) && isError(request, response)
   }
 
-  def included(statuses: Status*): ErrorClassifier = {
+  override def included(statuses: Status*): ErrorClassifier = {
     val included = statuses.toSet
     (request, response) => included.contains(response.status) || isError(request, response)
   }
 }
 
+@deprecated(
+  "Use `org.http4s.otel4s.middleware.ErrorClassifier` instead",
+  since = "http4s-otel4s-middleware 0.20.0",
+)
 object ErrorClassifier {
-  val default: ErrorClassifier = (_, response) =>
-    response.status.responseClass match {
-      case Status.ClientError | Status.ServerError => true
-      case _ => false
-    }
+  private def fromCore(classifier: org.http4s.otel4s.middleware.ErrorClassifier): ErrorClassifier =
+    (request, response) => classifier.isError(request, response)
+
+  val default: ErrorClassifier =
+    fromCore(org.http4s.otel4s.middleware.ErrorClassifier.default)
 
   val serverError: ErrorClassifier =
-    (_, response) => response.status.responseClass == Status.ServerError
+    fromCore(org.http4s.otel4s.middleware.ErrorClassifier.serverError)
 
-  val never: ErrorClassifier = (_, _) => false
+  val never: ErrorClassifier =
+    fromCore(org.http4s.otel4s.middleware.ErrorClassifier.never)
 }

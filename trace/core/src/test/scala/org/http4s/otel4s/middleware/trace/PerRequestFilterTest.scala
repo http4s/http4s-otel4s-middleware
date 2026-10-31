@@ -19,8 +19,15 @@ package otel4s.middleware.trace
 
 import munit.FunSuite
 
+import scala.annotation.nowarn
+
+@nowarn("cat=deprecation")
 class PerRequestFilterTest extends FunSuite {
-  import PerRequestFilterTest._
+  private val PRF: PerRequestFilter.type = PerRequestFilter
+  private val defaultPrelude = Request().requestPrelude
+
+  private def run(prf: PerRequestFilter): Boolean =
+    prf(defaultPrelude).isEnabled
 
   test("and") {
     assertEquals(run(PRF.alwaysEnabled.and(PRF.alwaysEnabled)), true)
@@ -35,12 +42,4 @@ class PerRequestFilterTest extends FunSuite {
     assertEquals(run(PRF.neverEnabled.or(PRF.alwaysEnabled)), true)
     assertEquals(run(PRF.neverEnabled.or(PRF.neverEnabled)), false)
   }
-}
-
-object PerRequestFilterTest {
-  private val PRF: PerRequestFilter.type = PerRequestFilter
-  private val defaultPrelude = Request().requestPrelude
-
-  private def run(prf: PerRequestFilter): Boolean =
-    prf(defaultPrelude).isEnabled
 }

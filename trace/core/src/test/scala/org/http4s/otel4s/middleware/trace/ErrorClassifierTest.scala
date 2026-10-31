@@ -20,6 +20,9 @@ package otel4s.middleware.trace
 import munit.FunSuite
 import org.http4s.implicits._
 
+import scala.annotation.nowarn
+
+@nowarn("cat=deprecation")
 class ErrorClassifierTest extends FunSuite {
   private def reqPrelude: RequestPrelude =
     RequestPrelude(

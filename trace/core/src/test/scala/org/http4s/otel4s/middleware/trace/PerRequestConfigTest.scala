@@ -18,8 +18,11 @@ package org.http4s.otel4s.middleware.trace
 
 import munit.FunSuite
 
+import scala.annotation.nowarn
+
+@nowarn("cat=deprecation")
 class PerRequestConfigTest extends FunSuite {
-  import PerRequestConfigTest._
+  val PRC: PerRequestConfig.type = PerRequestConfig
 
   test("and") {
     assertEquals(PRC.Enabled.and(PRC.Enabled), PRC.Enabled)
@@ -34,8 +37,4 @@ class PerRequestConfigTest extends FunSuite {
     assertEquals(PRC.Disabled.or(PRC.Enabled), PRC.Enabled)
     assertEquals(PRC.Disabled.or(PRC.Disabled), PRC.Disabled)
   }
-}
-
-object PerRequestConfigTest {
-  val PRC: PerRequestConfig.type = PerRequestConfig
 }
