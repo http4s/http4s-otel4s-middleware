@@ -124,13 +124,20 @@ lazy val `trace-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.http4s" %%% "http4s-client" % http4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
     ),
-    mimaBinaryIssueFilters ++= Seq(
-      // private[this] constructor — not reachable by consumers
-      ProblemFilters
-        .exclude[DirectMissingMethodProblem](
-          "org.http4s.otel4s.middleware.trace.client.ClientMiddleware#Impl.this"
-        )
-    ),
+  )
+  .settings(
+    // Formerly public setters remain checked after being hidden from Scala overload resolution.
+    mimaBinaryApi ++= Seq(
+      BinaryApi.keep[MethodNoLongerCheckedProblem](
+        "org.http4s.otel4s.middleware.trace.client.ClientMiddleware#Builder.withErrorClassifier(org.http4s.otel4s.middleware.trace.ErrorClassifier)org.http4s.otel4s.middleware.trace.client.ClientMiddleware#Builder"
+      ),
+      BinaryApi.keep[MethodNoLongerCheckedProblem](
+        "org.http4s.otel4s.middleware.trace.client.ClientMiddleware#Builder.withPerRequestTracingFilter(org.http4s.otel4s.middleware.trace.PerRequestFilter)org.http4s.otel4s.middleware.trace.client.ClientMiddleware#Builder"
+      ),
+      BinaryApi.keep[MethodNoLongerCheckedProblem](
+        "org.http4s.otel4s.middleware.trace.client.ClientMiddleware#Builder.withPerRequestPropagationFilter(org.http4s.otel4s.middleware.trace.PerRequestFilter)org.http4s.otel4s.middleware.trace.client.ClientMiddleware#Builder"
+      ),
+    )
   )
 
 lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
@@ -145,13 +152,20 @@ lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.http4s" %%% "http4s-server" % http4sV,
       "org.typelevel" %%% "otel4s-core-trace" % otel4sV,
     ),
-    mimaBinaryIssueFilters ++= Seq(
-      // private[this] constructor — not reachable by consumers
-      ProblemFilters
-        .exclude[DirectMissingMethodProblem](
-          "org.http4s.otel4s.middleware.trace.server.ServerMiddleware#Impl.this"
-        )
-    ),
+  )
+  .settings(
+    // Formerly public setters remain checked after being hidden from Scala overload resolution.
+    mimaBinaryApi ++= Seq(
+      BinaryApi.keep[MethodNoLongerCheckedProblem](
+        "org.http4s.otel4s.middleware.trace.server.ServerMiddleware#Builder.withErrorClassifier(org.http4s.otel4s.middleware.trace.ErrorClassifier)org.http4s.otel4s.middleware.trace.server.ServerMiddleware#Builder"
+      ),
+      BinaryApi.keep[MethodNoLongerCheckedProblem](
+        "org.http4s.otel4s.middleware.trace.server.ServerMiddleware#Builder.withPerRequestTracingFilter(org.http4s.otel4s.middleware.trace.PerRequestFilter)org.http4s.otel4s.middleware.trace.server.ServerMiddleware#Builder"
+      ),
+      BinaryApi.keep[MethodNoLongerCheckedProblem](
+        "org.http4s.otel4s.middleware.trace.server.ServerMiddleware#Builder.withPerRequestReversePropagationFilter(org.http4s.otel4s.middleware.trace.PerRequestFilter)org.http4s.otel4s.middleware.trace.server.ServerMiddleware#Builder"
+      ),
+    )
   )
 
 lazy val examples = project

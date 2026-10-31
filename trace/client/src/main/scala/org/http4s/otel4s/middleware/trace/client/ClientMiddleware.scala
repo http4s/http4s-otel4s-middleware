@@ -29,11 +29,15 @@ import cats.syntax.functor._
 import fs2.Stream
 import org.http4s.client.Client
 import org.http4s.client.Middleware
+import org.http4s.otel4s.middleware.ErrorClassifier
+import org.http4s.otel4s.middleware.PerRequestFilter
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 import org.typelevel.otel4s.trace.TracerProvider
+
+import scala.annotation.nowarn
 
 /** A middleware for wrapping [[org.http4s.client.Client HTTP `Client`s]].
   *
@@ -166,6 +170,11 @@ object ClientMiddleware {
     def withErrorClassifier(errorClassifier: ErrorClassifier): Builder[F] =
       copy(errorClassifier = errorClassifier)
 
+    @nowarn("cat=deprecation")
+    private[ClientMiddleware] def withErrorClassifier(
+        errorClassifier: org.http4s.otel4s.middleware.trace.ErrorClassifier
+    ): Builder[F] = copy(errorClassifier = errorClassifier)
+
     /** Sets a filter that determines whether each request should propagate
       * tracing and other context information to the server (default: always
       * enabled).
@@ -175,6 +184,11 @@ object ClientMiddleware {
     ): Builder[F] =
       copy(perRequestPropagationFilter = perRequestPropagationFilter)
 
+    @nowarn("cat=deprecation")
+    private[ClientMiddleware] def withPerRequestPropagationFilter(
+        perRequestPropagationFilter: org.http4s.otel4s.middleware.trace.PerRequestFilter
+    ): Builder[F] = copy(perRequestPropagationFilter = perRequestPropagationFilter)
+
     /** Sets a filter that determines whether each request and its response
       * should be traced (default: always enabled).
       */
@@ -182,6 +196,11 @@ object ClientMiddleware {
         perRequestTracingFilter: PerRequestFilter
     ): Builder[F] =
       copy(perRequestTracingFilter = perRequestTracingFilter)
+
+    @nowarn("cat=deprecation")
+    private[ClientMiddleware] def withPerRequestTracingFilter(
+        perRequestTracingFilter: org.http4s.otel4s.middleware.trace.PerRequestFilter
+    ): Builder[F] = copy(perRequestTracingFilter = perRequestTracingFilter)
 
     /** @return a middleware that can wrap
       *         [[org.http4s.client.Client `Client`s]] to add tracing

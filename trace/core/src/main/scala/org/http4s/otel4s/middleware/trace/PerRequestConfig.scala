@@ -17,7 +17,11 @@
 package org.http4s.otel4s.middleware.trace
 
 /** Whether a feature is enabled for a given request and its response. */
-sealed trait PerRequestConfig {
+@deprecated(
+  "Use `org.http4s.otel4s.middleware.PerRequestConfig` instead",
+  since = "http4s-otel4s-middleware 0.20.0",
+)
+sealed trait PerRequestConfig extends org.http4s.otel4s.middleware.PerRequestConfig.Unsealed {
 
   /** Whether the feature is enabled for a given request and its response. */
   def isEnabled: Boolean
@@ -29,6 +33,10 @@ sealed trait PerRequestConfig {
   def or(that: PerRequestConfig): PerRequestConfig
 }
 
+@deprecated(
+  "Use `org.http4s.otel4s.middleware.PerRequestConfig` instead",
+  since = "http4s-otel4s-middleware 0.20.0",
+)
 object PerRequestConfig {
 
   /** A feature is enabled for a given request and its response. */
