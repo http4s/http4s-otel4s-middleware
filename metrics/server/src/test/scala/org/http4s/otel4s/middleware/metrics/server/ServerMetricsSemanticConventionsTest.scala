@@ -36,6 +36,7 @@ import org.typelevel.otel4s.sdk.metrics.data.MetricData
 import org.typelevel.otel4s.sdk.testkit.InstrumentationScopeExpectation
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectation
+import org.typelevel.otel4s.sdk.testkit.metrics.PointExpectation
 import org.typelevel.otel4s.semconv.MetricSpec
 import org.typelevel.otel4s.semconv.Requirement
 import org.typelevel.otel4s.semconv.SchemaUrls
@@ -51,16 +52,19 @@ import org.typelevel.otel4s.semconv.metrics.HttpMetrics
 class ServerMetricsSemanticConventionsTest extends CatsEffectSuite with ServerMetricsTestSupport {
   private val duration = HttpMetrics.ServerRequestDuration
   private val active = HttpExperimentalMetrics.ServerActiveRequests
+  private val requestSize = HttpExperimentalMetrics.ServerRequestBodySize
+  private val responseSize = HttpExperimentalMetrics.ServerResponseBodySize
   private val request = Request[IO](uri = uri"https://example.test/items/123?secret=value")
     .putHeaders(Header.Raw(ci"Host", "example.test"))
   private val start =
     Attributes(HttpAttributes.HttpRequestMethod("GET"), UrlAttributes.UrlScheme("https"))
-  private val config = ServerMetricsConfig.default.optIntoActiveRequests
+  private val config =
+    ServerMetricsConfig.default.optIntoActiveRequests.optIntoRequestBodySize.optIntoResponseBodySize
 
   test("generated specifications define metadata and required attributes on every point") {
     exchange() { metrics =>
       check(metrics, start, terminal())
-      List(duration, active).foreach { spec =>
+      List(duration, active, requestSize, responseSize).foreach { spec =>
         val keys = spec.attributeSpecs
           .filter(_.requirement.level == Requirement.Level.Required)
           .map(_.key)
@@ -279,7 +283,7 @@ class ServerMetricsSemanticConventionsTest extends CatsEffectSuite with ServerMe
           HttpAttributes.HttpRoute("/items/{id}"),
         ),
       )
-      List(duration, active).foreach { spec =>
+      List(duration, active, requestSize, responseSize).foreach { spec =>
         val keys = spec.attributeSpecs.map(_.key).toSet
         assertMetrics(
           metrics,
@@ -316,6 +320,18 @@ class ServerMetricsSemanticConventionsTest extends CatsEffectSuite with ServerMe
       metrics,
       metadata(active, activeMetric(0L, labels)),
       metadata(duration, durationMetric(labels ++ completion)),
+      metadata(
+        requestSize,
+        MetricExpectation
+          .histogram(requestSize.name)
+          .exactlyPoints(PointExpectation.histogram.count(1L).attributesExact(labels ++ completion)),
+      ),
+      metadata(
+        responseSize,
+        MetricExpectation
+          .histogram(responseSize.name)
+          .exactlyPoints(PointExpectation.histogram.count(1L).attributesExact(labels ++ completion)),
+      ),
     )
 
   private def exchange(
@@ -326,7 +342,11 @@ class ServerMetricsSemanticConventionsTest extends CatsEffectSuite with ServerMe
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
       for {
         middleware <- ServerMetrics.middleware[IO](kit, settings)
-        response <- middleware(HttpApp[IO](_ => IO.pure(Response[IO](status))))(req)
+        response <- middleware(
+          HttpApp[IO](_ =>
+            IO.pure(Response[IO](status).putHeaders(Header.Raw(ci"Content-Length", "5")))
+          )
+        )(req.putHeaders(Header.Raw(ci"Content-Length", "3")))
         _ <- response.body.compile.drain
         metrics <- kit.collectMetrics
       } yield verify(metrics)

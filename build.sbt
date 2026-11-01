@@ -143,6 +143,7 @@ lazy val `metrics-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform
     name := s"$baseName-metrics-server",
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "otel4s-core" % otel4sV,
+      "org.http4s" %%% "http4s-server" % http4sV % Test,
       "org.typelevel" %%% "otel4s-semconv-metrics-experimental" % otel4sV % Test,
     ),
     tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
