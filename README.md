@@ -9,9 +9,33 @@ depending on your needs:
 ```scala
 libraryDependencies ++= Seq(
   "org.http4s" %% "http4s-otel4s-middleware-core" % "<version>",
+  "org.http4s" %% "http4s-otel4s-middleware-metrics-client" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-trace-core" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-trace-client" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-trace-server" % "<version>",
 )
 ```
+
+## Client metrics middleware
+
+Use the `metrics-client` artifact for duration metrics. Enable the experimental active-request
+metric with `ClientMetricsConfig.default.optIntoActiveRequests`:
+
+```scala
+import cats.effect.Temporal
+import cats.syntax.functor._
+import org.http4s.client.Client
+import org.http4s.otel4s.middleware.metrics.client.ClientMetrics
+import org.http4s.otel4s.middleware.metrics.client.ClientMetricsConfig
+import org.typelevel.otel4s.Otel4s
+
+def instrument[F[_]: Temporal](otel4s: Otel4s[F], client: Client[F]): F[Client[F]] =
+  ClientMetrics.middleware[F](otel4s, ClientMetricsConfig.default).map(wrap => wrap(client))
+```
+
+| Instrument | Completion / labels |
+| --- | --- |
+| `http.client.request.duration` | Body termination, or response release when unread, in seconds. |
+| `http.client.active_requests` | Opt-in with `optIntoActiveRequests`; increment before acquisition and decrement once at completion. |
+

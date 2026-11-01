@@ -69,6 +69,8 @@ class TypedAttributesTest extends FunSuite {
 
     check(Method.GET, "GET")
     check(unsafeMethod("GET"), "GET")
+    check(unsafeMethod("QUERY"), "QUERY")
+    check(unsafeMethod("query"), "_OTHER")
     check(Method.ACL, "_OTHER")
     check(unsafeMethod("GeT"), "_OTHER")
     check(unsafeMethod("NOT-A-METHOD"), "_OTHER")
