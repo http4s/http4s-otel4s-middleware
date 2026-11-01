@@ -137,10 +137,14 @@ lazy val `metrics-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform
 lazy val `metrics-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("metrics/server"))
-  .dependsOn(`metrics-core`)
-  .settings(sharedTestSettings)
+  .dependsOn(`metrics-core`, `core-server`)
+  .settings(sharedSettings)
   .settings(
     name := s"$baseName-metrics-server",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %%% "otel4s-core" % otel4sV,
+      "org.typelevel" %%% "otel4s-semconv-metrics-experimental" % otel4sV % Test,
+    ),
     tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
   )
   .jsSettings(sharedJsTestSettings)
@@ -235,6 +239,8 @@ lazy val tests = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .dependsOn(
     `metrics-client` % "test->compile",
     `trace-client` % "test->compile",
+    `metrics-server` % "test->compile",
+    `trace-server` % "test->compile",
   )
   .settings(
     name := s"$baseName-tests",

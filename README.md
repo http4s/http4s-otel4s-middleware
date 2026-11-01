@@ -10,6 +10,7 @@ depending on your needs:
 libraryDependencies ++= Seq(
   "org.http4s" %% "http4s-otel4s-middleware-core" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics-client" % "<version>",
+  "org.http4s" %% "http4s-otel4s-middleware-metrics-server" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-trace-core" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-trace-client" % "<version>",
@@ -41,3 +42,27 @@ def instrument[F[_]: Temporal](otel4s: Otel4s[F], client: Client[F]): F[Client[F
 | `http.client.request.body.size` | Opt-in with `optIntoRequestBodySize`; request body size in bytes. |
 | `http.client.response.body.size` | Opt-in with `optIntoResponseBodySize`; response body size in bytes. |
 
+## Server metrics middleware
+
+Use the `metrics-server` artifact for server duration metrics:
+
+```scala
+import cats.effect.Temporal
+import cats.syntax.functor._
+import org.http4s.HttpApp
+import org.http4s.otel4s.middleware.metrics.server.ServerMetrics
+import org.http4s.otel4s.middleware.metrics.server.ServerMetricsConfig
+import org.typelevel.otel4s.Otel4s
+
+def instrumentServer[F[_]: Temporal](otel4s: Otel4s[F], app: HttpApp[F]): F[HttpApp[F]] =
+  ServerMetrics.middleware[F](otel4s, ServerMetricsConfig.default).map(wrap => wrap(app))
+```
+
+| Instrument | Boundary |
+| --- | --- |
+| `http.server.request.duration` | App failure/cancellation, or response-body termination including cleanup, in seconds. |
+| `http.server.active_requests` | Opt-in with `optIntoActiveRequests`. Increment before the app and decrement once at completion. |
+
+**Unstarted-body limitation:** returning a response without evaluating its body leaves duration
+unrecorded and active requests incremented. This includes empty and HEAD responses. App errors
+and app cancellation still complete immediately. Body completion does not establish network delivery.
