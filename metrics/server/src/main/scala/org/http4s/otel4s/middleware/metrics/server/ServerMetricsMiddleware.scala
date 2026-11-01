@@ -50,7 +50,7 @@ private[server] object ServerMetricsMiddleware {
           claimed <- Ref.of[F, Boolean](false)
           recording <- recorder.start(request, prelude)
           lifecycle = new Lifecycle(started, claimed, recording)
-          response <- poll(app(request)).guaranteeCase {
+          response <- poll(app(recording.observeRequest(request))).guaranteeCase {
             case Outcome.Errored(error) => lifecycle.finish(None, Some(error))
             case Outcome.Canceled() => lifecycle.finish(None, None)
             case Outcome.Succeeded(_) => Temporal[F].unit
@@ -89,8 +89,9 @@ private[server] object ServerMetricsMiddleware {
 
     def observe(response: Response[F]): Stream[F, Byte] = {
       val prelude = response.responsePrelude
+      val body = recording.observeResponse(response)
       Stream.eval(Ref.of[F, Option[Throwable]](None)).flatMap { error =>
-        response.body
+        body
           .translate(recording.runInContext)
           .scope
           .handleErrorWith { cause =>

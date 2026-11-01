@@ -62,7 +62,9 @@ def instrumentServer[F[_]: Temporal](otel4s: Otel4s[F], app: HttpApp[F]): F[Http
 | --- | --- |
 | `http.server.request.duration` | App failure/cancellation, or response-body termination including cleanup, in seconds. |
 | `http.server.active_requests` | Opt-in with `optIntoActiveRequests`. Increment before the app and decrement once at completion. |
+| `http.server.request.body.size` | Opt-in with `optIntoRequestBodySize`; request body size in bytes. |
+| `http.server.response.body.size` | Opt-in with `optIntoResponseBodySize`; response body size in bytes. |
 
 **Unstarted-body limitation:** returning a response without evaluating its body leaves duration
-unrecorded and active requests incremented. This includes empty and HEAD responses. App errors
-and app cancellation still complete immediately. Body completion does not establish network delivery.
+and body sizes unrecorded and active requests incremented. This includes empty and HEAD responses.
+App errors and app cancellation still complete immediately. Body completion does not establish network delivery.
