@@ -27,16 +27,21 @@ val slf4jV = "1.7.36"
 
 val baseName = "http4s-otel4s-middleware"
 
-val sharedSettings = Seq(
+val sharedTestSettings = Seq(
   libraryDependencies ++= Seq(
-    "org.http4s" %%% "http4s-core" % http4sV,
-    "org.typelevel" %%% "otel4s-core-common" % otel4sV,
-    "org.typelevel" %%% "otel4s-semconv" % otel4sV,
     "org.typelevel" %%% "otel4s-semconv-experimental" % otel4sV % Test,
     "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
     "org.scalameta" %%% "munit" % munitV % Test,
     "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
     "org.typelevel" %%% "otel4s-sdk-testkit" % otel4sSdkV % Test,
+  )
+)
+
+val sharedSettings = sharedTestSettings ++ Seq(
+  libraryDependencies ++= Seq(
+    "org.http4s" %%% "http4s-core" % http4sV,
+    "org.typelevel" %%% "otel4s-core-common" % otel4sV,
+    "org.typelevel" %%% "otel4s-semconv" % otel4sV,
   )
 )
 
@@ -47,9 +52,13 @@ lazy val `http4s-otel4s-middleware` = tlCrossRootProject
     `core-client`,
     `core-server`,
     metrics,
+    `metrics-core`,
+    `metrics-client`,
+    `metrics-server`,
     `trace-core`,
     `trace-client`,
     `trace-server`,
+    tests,
     examples,
   )
 
@@ -87,6 +96,42 @@ lazy val `core-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     libraryDependencies ++= Seq(
       "org.http4s" %%% "http4s-dsl" % http4sV % Test
     ),
+  )
+
+lazy val `metrics-core` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("metrics/core"))
+  .dependsOn(core)
+  .settings(sharedTestSettings)
+  .settings(
+    name := s"$baseName-metrics-core",
+    tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
+    libraryDependencies += "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
+  )
+
+lazy val `metrics-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("metrics/client"))
+  .dependsOn(`metrics-core`, `core-client`)
+  .settings(sharedSettings)
+  .settings(
+    name := s"$baseName-metrics-client",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %%% "otel4s-core" % otel4sV,
+      "org.http4s" %%% "http4s-client" % http4sV,
+      "org.typelevel" %%% "otel4s-semconv-metrics-experimental" % otel4sV % Test,
+    ),
+    tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
+  )
+
+lazy val `metrics-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("metrics/server"))
+  .dependsOn(`metrics-core`)
+  .settings(sharedTestSettings)
+  .settings(
+    name := s"$baseName-metrics-server",
+    tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
   )
 
 lazy val metrics = crossProject(JVMPlatform, JSPlatform, NativePlatform)
@@ -166,6 +211,25 @@ lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
         "org.http4s.otel4s.middleware.trace.server.ServerMiddleware#Builder.withPerRequestReversePropagationFilter(org.http4s.otel4s.middleware.trace.PerRequestFilter)org.http4s.otel4s.middleware.trace.server.ServerMiddleware#Builder"
       ),
     )
+  )
+
+lazy val tests = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("tests"))
+  .enablePlugins(NoPublishPlugin)
+  .dependsOn(
+    `metrics-client` % "test->compile",
+    `trace-client` % "test->compile",
+  )
+  .settings(
+    name := s"$baseName-tests",
+    libraryDependencies ++= Seq(
+      "org.typelevel" %%% "cats-effect-testkit" % catsEffectV % Test,
+      "org.scalameta" %%% "munit" % munitV % Test,
+      "org.typelevel" %%% "munit-cats-effect" % munitCatsEffectV % Test,
+      "org.typelevel" %%% "otel4s-sdk-testkit" % otel4sSdkV % Test,
+      "org.typelevel" %%% "otel4s-semconv-metrics-experimental" % otel4sV % Test,
+    ),
   )
 
 lazy val examples = project

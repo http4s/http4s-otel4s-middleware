@@ -74,6 +74,7 @@ object TypedAttributes extends TypedAttributes {
     Method.PATCH,
     Method.POST,
     Method.PUT,
+    Method.QUERY,
     Method.TRACE,
   )
 
