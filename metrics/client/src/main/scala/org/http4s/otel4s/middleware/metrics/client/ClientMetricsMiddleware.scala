@@ -63,11 +63,11 @@ private[client] object ClientMetricsMiddleware {
             )
           }
           .flatMap { lifecycle =>
-            client.run(request).flatMap { response =>
+            client.run(lifecycle.recording.observeRequest(request)).flatMap { response =>
               Resource.make(
                 lifecycle.recording
-                  .observeResponse(prelude, response.responsePrelude)
-                  .as(response.withBodyStream(lifecycle.observe(response.body)))
+                  .observeResponse(prelude, response)
+                  .map(observed => observed.withBodyStream(lifecycle.observe(observed.body)))
               )(_ => lifecycle.finish(None))
             }
           }

@@ -20,13 +20,16 @@ import cats.effect.IO
 import cats.effect.Resource
 import fs2.Stream
 import munit.CatsEffectSuite
+import org.http4s.Header
 import org.http4s.Method
 import org.http4s.Request
 import org.http4s.Response
 import org.http4s.Status
 import org.http4s.client.Client
 import org.http4s.otel4s.middleware.ErrorClassifier
+import org.http4s.otel4s.middleware.metrics.BodySizeConfig
 import org.http4s.syntax.literals._
+import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics.BucketBoundaries
@@ -241,6 +244,58 @@ class ClientMetricsConfigTest extends CatsEffectSuite with ClientMetricsTestSupp
             )
           }
         }
+      }
+    }
+  }
+
+  test("body-size settings are immutable and request/response opt-ins are independent") {
+    val original = ClientMetricsConfig.default
+    val requestSize = BodySizeConfig.observe(BucketBoundaries(0d, 3d, 7d))
+    val responseSize = BodySizeConfig.contentLength(BucketBoundaries(0d, 10d, 100d))
+    val configured =
+      original.optIntoRequestBodySize(requestSize).optIntoResponseBodySize(responseSize)
+    assertEquals(original.requestBodySize, None)
+    assertEquals(original.responseBodySize, None)
+    assertEquals(configured.requestBodySize, Some(requestSize))
+    assertEquals(configured.responseBodySize, Some(responseSize))
+
+    val resetRequest = configured.optIntoRequestBodySize
+    assertEquals(resetRequest.requestBodySize, Some(BodySizeConfig.contentLength))
+    assertEquals(resetRequest.responseBodySize, configured.responseBodySize)
+    val resetResponse = configured.optIntoResponseBodySize
+    assertEquals(resetResponse.responseBodySize, Some(BodySizeConfig.contentLength))
+    assertEquals(resetResponse.requestBodySize, configured.requestBodySize)
+    assertEquals(BodySizeConfig.observe.bucketBoundaries, BodySizeConfig.DefaultBucketBoundaries)
+  }
+
+  test("default body-size opt-ins record declared lengths with default byte boundaries") {
+    OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      val config = ClientMetricsConfig.default.optIntoRequestBodySize.optIntoResponseBodySize
+      val req = request.putHeaders(Header.Raw(CIString("Content-Length"), "3"))
+      val resp = Response[IO]().putHeaders(Header.Raw(CIString("Content-Length"), "5"))
+      for {
+        middleware <- ClientMetrics.middleware[IO](testkit, config)
+        _ <- middleware(Client[IO](_ => Resource.pure(resp))).run(req).use(_ => IO.unit)
+        metrics <- testkit.collectMetrics
+      } yield {
+        val labels = start() ++ response(Status.Ok)
+        def size(name: String, bytes: Double): MetricExpectation =
+          MetricExpectation
+            .histogram(name)
+            .unit("By")
+            .exactlyPoints(
+              PointExpectation.histogram
+                .count(1L)
+                .sum(bytes)
+                .boundaries(BodySizeConfig.DefaultBucketBoundaries)
+                .attributesExact(labels)
+            )
+        assertMetrics(
+          metrics,
+          durationMetric(labels),
+          size(HttpExperimentalMetrics.ClientRequestBodySize.name, 3d),
+          size(HttpExperimentalMetrics.ClientResponseBodySize.name, 5d),
+        )
       }
     }
   }

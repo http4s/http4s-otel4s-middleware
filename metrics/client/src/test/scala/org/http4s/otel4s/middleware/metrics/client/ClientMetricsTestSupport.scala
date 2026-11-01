@@ -38,18 +38,15 @@ private[client] trait ClientMetricsTestSupport { self: CatsEffectSuite =>
       .histogram(HttpMetrics.ClientRequestDuration.name)
       .exactlyPoints(PointExpectation.histogram.count(1L).attributesExact(attributes))
 
-  protected def assertNoMetrics(metrics: List[MetricData])(implicit loc: Location): Unit = {
-    assertEquals(
-      MetricExpectations
-        .find(metrics, MetricExpectation.name(HttpMetrics.ClientRequestDuration.name)),
-      None,
-    )
-    assertEquals(
-      MetricExpectations
-        .find(metrics, MetricExpectation.name(HttpExperimentalMetrics.ClientActiveRequests.name)),
-      None,
-    )
-  }
+  protected def assertNoMetrics(metrics: List[MetricData])(implicit loc: Location): Unit =
+    List(
+      HttpMetrics.ClientRequestDuration.name,
+      HttpExperimentalMetrics.ClientActiveRequests.name,
+      HttpExperimentalMetrics.ClientRequestBodySize.name,
+      HttpExperimentalMetrics.ClientResponseBodySize.name,
+    ).foreach { name =>
+      assertEquals(MetricExpectations.find(metrics, MetricExpectation.name(name)), None)
+    }
 
   protected def assertMetrics(
       metrics: List[MetricData],
