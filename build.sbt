@@ -63,6 +63,7 @@ lazy val `http4s-otel4s-middleware` = tlCrossRootProject
     `trace-core`,
     `trace-client`,
     `trace-server`,
+    client,
     tests,
     examples,
   )
@@ -233,11 +234,23 @@ lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   )
   .jsSettings(sharedJsTestSettings)
 
+lazy val client = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("client"))
+  .dependsOn(`metrics-client`, `trace-client`)
+  .settings(sharedSettings)
+  .settings(
+    name := s"$baseName-client",
+    tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
+  )
+  .jsSettings(sharedJsTestSettings)
+
 lazy val tests = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
   .in(file("tests"))
   .enablePlugins(NoPublishPlugin)
   .dependsOn(
+    client % "test->compile",
     `metrics-client` % "test->compile",
     `trace-client` % "test->compile",
     `metrics-server` % "test->compile",
