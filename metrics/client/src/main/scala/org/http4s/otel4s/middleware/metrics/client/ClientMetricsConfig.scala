@@ -20,6 +20,7 @@ import org.http4s.RequestPrelude
 import org.http4s.otel4s.middleware.ErrorClassifier
 import org.http4s.otel4s.middleware.PerRequestFilter
 import org.http4s.otel4s.middleware.client.UriTemplateClassifier
+import org.http4s.otel4s.middleware.metrics.BodySizeConfig
 import org.http4s.otel4s.middleware.metrics.MetricsDefaults
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics.BucketBoundaries
@@ -30,6 +31,8 @@ sealed trait ClientMetricsConfig {
   def responseDurationSecondsHistogramBuckets: BucketBoundaries
   def requestFilter: PerRequestFilter
   def requestAttributes: RequestPrelude => Attributes
+  def requestBodySize: Option[BodySizeConfig]
+  def responseBodySize: Option[BodySizeConfig]
   def urlSchemeEnabled: Boolean
   def activeRequestsEnabled: Boolean
   def urlTemplateClassifier: UriTemplateClassifier
@@ -38,10 +41,22 @@ sealed trait ClientMetricsConfig {
   /** Sets attributes shared by all requests. */
   def withAttributes(attributes: Attributes): ClientMetricsConfig
 
-  /** Sets request labels for duration and active requests. Use low-cardinality values.
+  /** Sets request labels for all client metrics. Use low-cardinality values.
     * Request labels override shared labels; generated semantic attributes take precedence over both.
     */
   def withRequestAttributes(attributes: RequestPrelude => Attributes): ClientMetricsConfig
+
+  /** Enables request-size recording from Content-Length with default byte buckets. */
+  def optIntoRequestBodySize: ClientMetricsConfig
+
+  /** Enables request-size recording with the selected source and byte buckets. */
+  def optIntoRequestBodySize(config: BodySizeConfig): ClientMetricsConfig
+
+  /** Uses Content-Length or protocol-known zero for response size, with default byte buckets. */
+  def optIntoResponseBodySize: ClientMetricsConfig
+
+  /** Enables response-size recording with the selected source and byte buckets. */
+  def optIntoResponseBodySize(config: BodySizeConfig): ClientMetricsConfig
 
   /** Enables the experimental `http.client.active_requests` metric (disabled by default). */
   def optIntoActiveRequests: ClientMetricsConfig
@@ -65,8 +80,8 @@ sealed trait ClientMetricsConfig {
 object ClientMetricsConfig {
 
   /** Records duration for all requests using the standard HTTP histogram buckets, with no custom
-    * labels, URL scheme or template. Active-request metrics are disabled; 4xx and 5xx responses
-    * are classified as errors.
+    * labels, URL scheme or template. Active-request and body-size metrics are disabled.
+    * 4xx and 5xx responses are classified as errors.
     */
   val default: ClientMetricsConfig = Impl()
 
@@ -75,6 +90,8 @@ object ClientMetricsConfig {
       responseDurationSecondsHistogramBuckets: BucketBoundaries = MetricsDefaults.DurationBuckets,
       requestFilter: PerRequestFilter = PerRequestFilter.alwaysEnabled,
       requestAttributes: RequestPrelude => Attributes = _ => Attributes.empty,
+      requestBodySize: Option[BodySizeConfig] = None,
+      responseBodySize: Option[BodySizeConfig] = None,
       urlSchemeEnabled: Boolean = false,
       activeRequestsEnabled: Boolean = false,
       urlTemplateClassifier: UriTemplateClassifier = UriTemplateClassifier.indeterminate,
@@ -85,6 +102,18 @@ object ClientMetricsConfig {
 
     def withRequestAttributes(attributes: RequestPrelude => Attributes): ClientMetricsConfig =
       copy(requestAttributes = attributes)
+
+    def optIntoRequestBodySize: ClientMetricsConfig =
+      optIntoRequestBodySize(BodySizeConfig.contentLength)
+
+    def optIntoRequestBodySize(config: BodySizeConfig): ClientMetricsConfig =
+      copy(requestBodySize = Some(config))
+
+    def optIntoResponseBodySize: ClientMetricsConfig =
+      optIntoResponseBodySize(BodySizeConfig.contentLength)
+
+    def optIntoResponseBodySize(config: BodySizeConfig): ClientMetricsConfig =
+      copy(responseBodySize = Some(config))
 
     def optIntoActiveRequests: ClientMetricsConfig =
       copy(activeRequestsEnabled = true)

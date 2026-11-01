@@ -27,6 +27,11 @@ val slf4jV = "1.7.36"
 
 val baseName = "http4s-otel4s-middleware"
 
+// Tests run on Node.js and use fs2 APIs that import Node built-in modules.
+val sharedJsTestSettings = Seq(
+  Test / scalaJSLinkerConfig ~= (_.withModuleKind(ModuleKind.CommonJSModule))
+)
+
 val sharedTestSettings = Seq(
   libraryDependencies ++= Seq(
     "org.typelevel" %%% "otel4s-semconv-experimental" % otel4sV % Test,
@@ -73,6 +78,7 @@ lazy val core = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     buildInfoPackage := "org.http4s.otel4s.middleware",
     buildInfoOptions += BuildInfoOption.PackagePrivate,
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val `core-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
@@ -85,6 +91,7 @@ lazy val `core-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.http4s" %%% "http4s-dsl" % http4sV % Test
     ),
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val `core-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
@@ -97,6 +104,7 @@ lazy val `core-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.http4s" %%% "http4s-dsl" % http4sV % Test
     ),
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val `metrics-core` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
@@ -108,6 +116,7 @@ lazy val `metrics-core` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
     tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
     libraryDependencies += "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val `metrics-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
@@ -123,6 +132,7 @@ lazy val `metrics-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform
     ),
     tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val `metrics-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
@@ -133,6 +143,7 @@ lazy val `metrics-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform
     name := s"$baseName-metrics-server",
     tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val metrics = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
@@ -147,6 +158,7 @@ lazy val metrics = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.http4s" %%% "http4s-client" % http4sV % Test,
     ),
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val `trace-core` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
@@ -156,6 +168,7 @@ lazy val `trace-core` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .settings(
     name := s"$baseName-trace-core"
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val `trace-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
@@ -184,6 +197,7 @@ lazy val `trace-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       ),
     )
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
@@ -212,6 +226,7 @@ lazy val `trace-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       ),
     )
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val tests = crossProject(JVMPlatform, JSPlatform, NativePlatform)
   .crossType(CrossType.Pure)
@@ -231,6 +246,7 @@ lazy val tests = crossProject(JVMPlatform, JSPlatform, NativePlatform)
       "org.typelevel" %%% "otel4s-semconv-metrics-experimental" % otel4sV % Test,
     ),
   )
+  .jsSettings(sharedJsTestSettings)
 
 lazy val examples = project
   .in(file("examples"))

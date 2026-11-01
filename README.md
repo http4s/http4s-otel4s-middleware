@@ -38,4 +38,6 @@ def instrument[F[_]: Temporal](otel4s: Otel4s[F], client: Client[F]): F[Client[F
 | --- | --- |
 | `http.client.request.duration` | Body termination, or response release when unread, in seconds. |
 | `http.client.active_requests` | Opt-in with `optIntoActiveRequests`; increment before acquisition and decrement once at completion. |
+| `http.client.request.body.size` | Opt-in with `optIntoRequestBodySize`; request body size in bytes. |
+| `http.client.response.body.size` | Opt-in with `optIntoResponseBodySize`; response body size in bytes. |
 

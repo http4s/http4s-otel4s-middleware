@@ -41,6 +41,7 @@ import org.typelevel.otel4s.sdk.metrics.data.MetricData
 import org.typelevel.otel4s.sdk.testkit.InstrumentationScopeExpectation
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectation
+import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectations
 import org.typelevel.otel4s.sdk.testkit.metrics.PointExpectation
 import org.typelevel.otel4s.semconv.MetricSpec
 import org.typelevel.otel4s.semconv.Requirement
@@ -57,18 +58,21 @@ import org.typelevel.otel4s.semconv.metrics.HttpMetrics
 class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMetricsTestSupport {
   private val duration = HttpMetrics.ClientRequestDuration
   private val active = HttpExperimentalMetrics.ClientActiveRequests
+  private val requestSize = HttpExperimentalMetrics.ClientRequestBodySize
+  private val responseSize = HttpExperimentalMetrics.ClientResponseBodySize
   private val request = Request[IO](uri = uri"https://example.test/items/123?token=secret#fragment")
   private val start = Attributes(
     HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
     ServerAttributes.ServerAddress("example.test"),
     ServerAttributes.ServerPort(443L),
   )
-  private val config = ClientMetricsConfig.default.optIntoActiveRequests
+  private val config =
+    ClientMetricsConfig.default.optIntoActiveRequests.optIntoRequestBodySize.optIntoResponseBodySize
 
   test("metric metadata and every point's required attributes match generated specifications") {
     exchange() { metrics =>
       check(metrics, start, completed())
-      List(duration, active).foreach { spec =>
+      List(duration, active, requestSize, responseSize).foreach { spec =>
         val required = spec.attributeSpecs
           .filter(_.requirement.level == Requirement.Level.Required)
           .map(_.key)
@@ -300,7 +304,7 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
         completed(Status.ServiceUnavailable, "2")
           .added(ErrorAttributes.ErrorType("503")),
       )
-      List(duration, active).foreach { spec =>
+      List(duration, active, requestSize, responseSize).foreach { spec =>
         val keys = spec.attributeSpecs.map(_.key).toSet
         assertMetrics(
           metrics,
@@ -361,7 +365,7 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
               if (!canceled) Some(ErrorAttributes.ErrorType(error.getClass.getName))
               else if (acquired) Some(ErrorAttributes.ErrorType("503"))
               else None
-            check(metrics, start, response ++ errorLabel)
+            check(metrics, start, response ++ errorLabel, hasResponse = acquired)
           }
         }
       }
@@ -407,7 +411,7 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
               ),
           ),
         )
-        List(duration).foreach { spec =>
+        List(duration, requestSize, responseSize).foreach { spec =>
           assertMetrics(
             metrics,
             metadata(
@@ -501,10 +505,21 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
       metrics: List[MetricData],
       startAttributes: Attributes,
       completionAttributes: Attributes,
+      hasResponse: Boolean = true,
   ): Unit = {
     val terminal = startAttributes ++ completionAttributes
 
-    assertMetrics(metrics, activeRequests(0L, startAttributes), histogram(duration, terminal))
+    val expectations = List(
+      activeRequests(0L, startAttributes),
+      histogram(duration, terminal),
+      histogram(requestSize, terminal),
+    ) ++ Option.when(hasResponse)(histogram(responseSize, terminal))
+    assertMetrics(metrics, expectations: _*)
+    if (!hasResponse)
+      assertEquals(
+        MetricExpectations.find(metrics, MetricExpectation.name(responseSize.name)),
+        None,
+      )
   }
 
   private def exchange(
