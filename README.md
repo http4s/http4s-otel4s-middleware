@@ -9,6 +9,7 @@ depending on your needs:
 ```scala
 libraryDependencies ++= Seq(
   "org.http4s" %% "http4s-otel4s-middleware-core" % "<version>",
+  "org.http4s" %% "http4s-otel4s-middleware-client" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics-client" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics-server" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics" % "<version>",
@@ -41,6 +42,32 @@ def instrument[F[_]: Temporal](otel4s: Otel4s[F], client: Client[F]): F[Client[F
 | `http.client.active_requests` | Opt-in with `optIntoActiveRequests`; increment before acquisition and decrement once at completion. |
 | `http.client.request.body.size` | Opt-in with `optIntoRequestBodySize`; request body size in bytes. |
 | `http.client.response.body.size` | Opt-in with `optIntoResponseBodySize`; response body size in bytes. |
+
+## Client metrics and tracing
+
+Use the `client` artifact to enable metrics and tracing together. It records metrics before ending
+each HTTP span. Pass a config for each:
+
+```scala
+import cats.effect.Temporal
+import cats.syntax.functor._
+import org.http4s.client.Client
+import org.http4s.otel4s.middleware.metrics.client.ClientMetricsConfig
+import org.typelevel.otel4s.Otel4s
+import org.http4s.otel4s.middleware.client.ClientInstrumentation
+import org.http4s.otel4s.middleware.client.ClientTracingConfig
+import org.http4s.otel4s.middleware.trace.client.ClientSpanDataProvider
+import org.http4s.otel4s.middleware.trace.client.UriRedactor
+
+val tracingConfig = ClientTracingConfig(
+  ClientSpanDataProvider.openTelemetry(new UriRedactor.OnlyRedactUserInfo {})
+)
+
+def instrumentClient[F[_]: Temporal](otel4s: Otel4s[F], client: Client[F]): F[Client[F]] =
+  ClientInstrumentation
+    .middleware[F](otel4s, ClientMetricsConfig.default, tracingConfig)
+    .map(wrap => wrap(client))
+```
 
 ## Server metrics middleware
 
