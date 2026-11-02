@@ -163,7 +163,7 @@ private[middleware] object ServerMetricsRecorder {
     val builder = Attributes.newBuilder
     builder ++= config.attributes
     builder ++= config.requestAttributes(prelude)
-    builder += TypedServerAttributes.httpRequestMethod(prelude.method)
+    builder += TypedServerAttributes.httpRequestMethod(prelude.method, config.knownMethods)
     builder ++= TypedServerAttributes.urlScheme(scheme)
     if (config.serverAddressEnabled) builder ++= server.get(ServerAttributes.ServerAddress)
     if (config.serverPortEnabled) builder ++= server.get(ServerAttributes.ServerPort)

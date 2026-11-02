@@ -67,7 +67,7 @@ private[middleware] final class ClientMetricsRecorder[F[_]: Temporal] private[cl
       val builder = Attributes.newBuilder
       builder ++= config.attributes
       builder ++= config.requestAttributes(prelude)
-      builder += TypedClientAttributes.httpRequestMethod(prelude.method)
+      builder += TypedClientAttributes.httpRequestMethod(prelude.method, config.knownMethods)
       builder ++= TypedClientAttributes.serverAddress(prelude.uri.host)
       builder ++= TypedClientAttributes.serverPort(request.remotePort, prelude.uri)
 

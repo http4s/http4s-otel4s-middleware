@@ -16,9 +16,11 @@
 
 package org.http4s.otel4s.middleware.metrics.client
 
+import org.http4s.Method
 import org.http4s.RequestPrelude
 import org.http4s.otel4s.middleware.ErrorClassifier
 import org.http4s.otel4s.middleware.PerRequestFilter
+import org.http4s.otel4s.middleware.TypedAttributes
 import org.http4s.otel4s.middleware.client.UriTemplateClassifier
 import org.http4s.otel4s.middleware.metrics.BodySizeConfig
 import org.http4s.otel4s.middleware.metrics.MetricsDefaults
@@ -27,6 +29,7 @@ import org.typelevel.otel4s.metrics.BucketBoundaries
 
 /** Immutable client metrics settings, independent of telemetry providers and effect types. */
 sealed trait ClientMetricsConfig {
+  def knownMethods: Set[Method]
   def attributes: Attributes
   def responseDurationSecondsHistogramBuckets: BucketBoundaries
   def requestFilter: PerRequestFilter
@@ -40,6 +43,11 @@ sealed trait ClientMetricsConfig {
 
   /** Sets attributes shared by all requests. */
   def withAttributes(attributes: Attributes): ClientMetricsConfig
+
+  /** Replaces the default known methods. Matching is case-sensitive; an empty set maps every
+    * method to `_OTHER`. Use `TypedAttributes.DefaultKnownMethods` to extend the defaults.
+    */
+  def withKnownMethods(methods: Set[Method]): ClientMetricsConfig
 
   /** Sets request labels for all client metrics. Use low-cardinality values.
     * Request labels override shared labels; generated semantic attributes take precedence over both.
@@ -86,6 +94,7 @@ object ClientMetricsConfig {
   val default: ClientMetricsConfig = Impl()
 
   private final case class Impl(
+      knownMethods: Set[Method] = TypedAttributes.DefaultKnownMethods,
       attributes: Attributes = Attributes.empty,
       responseDurationSecondsHistogramBuckets: BucketBoundaries = MetricsDefaults.DurationBuckets,
       requestFilter: PerRequestFilter = PerRequestFilter.alwaysEnabled,
@@ -97,6 +106,9 @@ object ClientMetricsConfig {
       urlTemplateClassifier: UriTemplateClassifier = UriTemplateClassifier.indeterminate,
       errorClassifier: ErrorClassifier = ErrorClassifier.default,
   ) extends ClientMetricsConfig {
+    def withKnownMethods(methods: Set[Method]): ClientMetricsConfig =
+      copy(knownMethods = methods)
+
     def withAttributes(attributes: Attributes): ClientMetricsConfig =
       copy(attributes = attributes)
 

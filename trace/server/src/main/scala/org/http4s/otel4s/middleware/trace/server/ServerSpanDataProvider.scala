@@ -19,6 +19,7 @@ package otel4s.middleware.trace
 package server
 
 import org.http4s.headers.Forwarded
+import org.http4s.otel4s.middleware.TypedAttributes
 import org.http4s.otel4s.middleware.server.OriginalScheme
 import org.http4s.otel4s.middleware.server.RouteClassifier
 import org.http4s.otel4s.middleware.trace.redact.HeaderRedactor
@@ -49,6 +50,12 @@ object ServerSpanDataProvider {
     */
   sealed trait OpenTelemetryBuilder { self: SpanDataProvider =>
 
+    /** Replaces the default known methods for attributes and span names. Matching is case-sensitive;
+      * an empty set maps every method to `_OTHER` and uses `HTTP` in span names.
+      * Use `TypedAttributes.DefaultKnownMethods` to extend the defaults.
+      */
+    def withKnownMethods(methods: Set[Method]): SpanDataProvider with OpenTelemetryBuilder
+
     /** Sets how to determine the route within the application from a request. */
     def withRouteClassifier(
         routeClassifier: RouteClassifier
@@ -77,13 +84,15 @@ object ServerSpanDataProvider {
       pathAndQueryRedactor: PathAndQueryRedactor,
       routeClassifier: RouteClassifier,
       optIn: OptIn,
+      knownMethods: Set[Method],
   ) extends SpanDataProvider
       with OpenTelemetryBuilder {
     type Shared = OtelData
 
     def processSharedData[F[_]](request: Request[F]): OtelData =
       OtelData(
-        httpRequestMethod = TypedServerTraceAttributes.httpRequestMethod(request.method),
+        httpRequestMethod =
+          TypedServerTraceAttributes.httpRequestMethod(request.method, knownMethods),
         httpRoute = TypedServerTraceAttributes.httpRoute(request, routeClassifier),
       )
 
@@ -167,12 +176,17 @@ object ServerSpanDataProvider {
     private[this] def copy(
         routeClassifier: RouteClassifier = this.routeClassifier,
         optIn: OptIn = this.optIn,
+        knownMethods: Set[Method] = this.knownMethods,
     ): OtelProvider =
       new OtelProvider(
         this.pathAndQueryRedactor,
         routeClassifier,
         optIn,
+        knownMethods,
       )
+    def withKnownMethods(methods: Set[Method]): OtelProvider =
+      copy(knownMethods = methods)
+
     def withRouteClassifier(routeClassifier: RouteClassifier): OtelProvider =
       copy(routeClassifier = routeClassifier)
     def optIntoClientPort: OtelProvider =
@@ -190,5 +204,10 @@ object ServerSpanDataProvider {
     * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-server]]
     */
   def openTelemetry(redactor: PathAndQueryRedactor): SpanDataProvider with OpenTelemetryBuilder =
-    new OtelProvider(redactor, RouteClassifier.indeterminate, OptIn())
+    new OtelProvider(
+      redactor,
+      RouteClassifier.indeterminate,
+      OptIn(),
+      TypedAttributes.DefaultKnownMethods,
+    )
 }
