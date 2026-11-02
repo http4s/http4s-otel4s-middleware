@@ -30,6 +30,7 @@ import org.http4s.HttpApp
 import org.http4s.Request
 import org.http4s.Response
 import org.http4s.otel4s.middleware.instances.textMap._
+import org.http4s.otel4s.middleware.metrics.BodySizeConfig
 import org.http4s.otel4s.middleware.metrics.server.ServerMetrics
 import org.http4s.otel4s.middleware.metrics.server.ServerMetricsConfig
 import org.http4s.otel4s.middleware.trace.redact.PathRedactor
@@ -91,7 +92,9 @@ class ServerMetricsContextTest extends CatsEffectSuite {
                   tracer <- kit.tracerProvider.get("test")
                   middleware <- ServerMetrics.middleware[IO](
                     kit,
-                    ServerMetricsConfig.default.optIntoActiveRequests,
+                    ServerMetricsConfig.default.optIntoActiveRequests
+                      .optIntoRequestBodySize(BodySizeConfig.observe)
+                      .optIntoResponseBodySize(BodySizeConfig.observe),
                   )
                   entered <- Deferred[IO, Unit]
                   seen <- Ref.of[IO, Vector[String]](Vector.empty)
@@ -241,7 +244,12 @@ class ServerMetricsContextTest extends CatsEffectSuite {
             for {
               tracer <- kit.tracerProvider.get("test")
               middleware <- ServerMetrics
-                .middleware[IO](kit, ServerMetricsConfig.default.optIntoActiveRequests)
+                .middleware[IO](
+                  kit,
+                  ServerMetricsConfig.default.optIntoActiveRequests
+                    .optIntoRequestBodySize(BodySizeConfig.observe)
+                    .optIntoResponseBodySize(BodySizeConfig.observe),
+                )
               tracing <- ServerMiddleware
                 .builder[IO](
                   ServerSpanDataProvider

@@ -19,6 +19,7 @@ package org.http4s.otel4s.middleware.metrics.server
 import org.http4s.RequestPrelude
 import org.http4s.otel4s.middleware.ErrorClassifier
 import org.http4s.otel4s.middleware.PerRequestFilter
+import org.http4s.otel4s.middleware.metrics.BodySizeConfig
 import org.http4s.otel4s.middleware.metrics.MetricsDefaults
 import org.http4s.otel4s.middleware.server.RouteClassifier
 import org.typelevel.otel4s.Attributes
@@ -29,6 +30,8 @@ sealed trait ServerMetricsConfig {
   def attributes: Attributes
   def requestAttributes: RequestPrelude => Attributes
   def requestFilter: PerRequestFilter
+  def requestBodySize: Option[BodySizeConfig]
+  def responseBodySize: Option[BodySizeConfig]
   def errorClassifier: ErrorClassifier
   def routeClassifier: RouteClassifier
   def activeRequestsEnabled: Boolean
@@ -48,17 +51,29 @@ sealed trait ServerMetricsConfig {
   /** Classifies error responses. Defaults to 5xx; observed exceptions take precedence. */
   def withErrorClassifier(classifier: ErrorClassifier): ServerMetricsConfig
 
+  /** Enables request-size recording from Content-Length with default byte buckets. */
+  def optIntoRequestBodySize: ServerMetricsConfig
+
+  /** Enables request-size recording with the selected source and byte buckets. */
+  def optIntoRequestBodySize(config: BodySizeConfig): ServerMetricsConfig
+
+  /** Uses Content-Length or protocol-known zero for response size, with default byte buckets. */
+  def optIntoResponseBodySize: ServerMetricsConfig
+
+  /** Enables response-size recording with the selected source and byte buckets. */
+  def optIntoResponseBodySize(config: BodySizeConfig): ServerMetricsConfig
+
   /** Enables the experimental `http.server.active_requests` metric (disabled by default). */
   def optIntoActiveRequests: ServerMetricsConfig
-
-  /** Adds a classified `http.route` to completion histograms. No raw-path fallback. */
-  def withRouteClassifier(classifier: RouteClassifier): ServerMetricsConfig
 
   /** Adds `server.address` using the existing forwarded/authority/Host extraction. */
   def optIntoServerAddress: ServerMetricsConfig
 
   /** Adds `server.port` using the existing forwarded/authority/Host extraction. */
   def optIntoServerPort: ServerMetricsConfig
+
+  /** Adds a classified `http.route` to completion histograms. No raw-path fallback. */
+  def withRouteClassifier(classifier: RouteClassifier): ServerMetricsConfig
 
   /** Sets duration histogram buckets in seconds. */
   def withResponseDurationSecondsHistogramBuckets(buckets: BucketBoundaries): ServerMetricsConfig
@@ -67,7 +82,7 @@ sealed trait ServerMetricsConfig {
 object ServerMetricsConfig {
 
   /** Records duration for all requests with standard buckets; 5xx responses are errors.
-    * Active requests, custom labels, route classification, and server address/port are disabled.
+    * Active requests, body sizes, custom labels, route classification, and server address/port are disabled.
     */
   val default: ServerMetricsConfig = Impl()
 
@@ -77,6 +92,8 @@ object ServerMetricsConfig {
       requestFilter: PerRequestFilter = PerRequestFilter.alwaysEnabled,
       errorClassifier: ErrorClassifier = ErrorClassifier.serverError,
       routeClassifier: RouteClassifier = RouteClassifier.indeterminate,
+      requestBodySize: Option[BodySizeConfig] = None,
+      responseBodySize: Option[BodySizeConfig] = None,
       activeRequestsEnabled: Boolean = false,
       serverAddressEnabled: Boolean = false,
       serverPortEnabled: Boolean = false,
@@ -89,6 +106,18 @@ object ServerMetricsConfig {
       copy(requestFilter = filter)
     def withErrorClassifier(classifier: ErrorClassifier): ServerMetricsConfig =
       copy(errorClassifier = classifier)
+    def optIntoRequestBodySize: ServerMetricsConfig =
+      optIntoRequestBodySize(BodySizeConfig.contentLength)
+
+    def optIntoRequestBodySize(config: BodySizeConfig): ServerMetricsConfig =
+      copy(requestBodySize = Some(config))
+
+    def optIntoResponseBodySize: ServerMetricsConfig =
+      optIntoResponseBodySize(BodySizeConfig.contentLength)
+
+    def optIntoResponseBodySize(config: BodySizeConfig): ServerMetricsConfig =
+      copy(responseBodySize = Some(config))
+
     def optIntoActiveRequests: ServerMetricsConfig = copy(activeRequestsEnabled = true)
     def withRouteClassifier(classifier: RouteClassifier): ServerMetricsConfig =
       copy(routeClassifier = classifier)

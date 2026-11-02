@@ -23,10 +23,11 @@ import org.typelevel.otel4s.Otel4s
 /** Server metrics entry point. */
 object ServerMetrics {
 
-  /** Records duration and optional active requests at response-body termination.
+  /** Records duration, optional active requests and body sizes at response-body termination.
     *
     * App failure/cancellation completes immediately. An unstarted response body leaves duration
-    * unrecorded and active requests incremented, including empty and HEAD responses.
+    * and body sizes unrecorded and active requests incremented, including empty and HEAD responses.
+    * Observed sizes require EOF and successful body cleanup; incomplete observations are omitted.
     * Body effects and recording restore the invocation's full telemetry context.
     * Completion includes body cleanup; it does not establish network delivery.
     */

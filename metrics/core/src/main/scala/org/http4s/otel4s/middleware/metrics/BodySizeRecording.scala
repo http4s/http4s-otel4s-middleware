@@ -14,20 +14,20 @@
  * limitations under the License.
  */
 
-package org.http4s.otel4s.middleware.metrics.client
+package org.http4s.otel4s.middleware.metrics
 
 import cats.effect.Concurrent
 import cats.syntax.all._
 import fs2.Stream
 import org.http4s.Headers
+import org.http4s.Method
+import org.http4s.Status
 import org.http4s.headers.`Content-Length`
-import org.http4s.otel4s.middleware.metrics.BodySizeConfig
-import org.http4s.otel4s.middleware.metrics.BodySizeObserver
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics.Histogram
 
 /** Per-exchange body measurement and its enabled histogram. */
-private[client] final class BodySizeRecording[F[_]: Concurrent] private (
+private[metrics] final class BodySizeRecording[F[_]: Concurrent] private (
     histogram: Histogram[F, Long],
     observer: Option[BodySizeObserver[F]],
     declaredSize: Option[Long],
@@ -45,7 +45,13 @@ private[client] final class BodySizeRecording[F[_]: Concurrent] private (
     size.traverse_(histogram.record(_, attributes))
 }
 
-private[client] object BodySizeRecording {
+private[metrics] object BodySizeRecording {
+
+  // These responses have a known zero size regardless of headers or body evaluation.
+  def noResponseBody(method: Method, status: Status): Boolean =
+    method == Method.HEAD || !status.isEntityAllowed ||
+      status.responseClass == Status.Informational ||
+      (method == Method.CONNECT && status.responseClass == Status.Successful)
 
   def create[F[_]: Concurrent](
       config: Option[BodySizeConfig],

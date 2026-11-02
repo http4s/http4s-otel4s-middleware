@@ -51,18 +51,15 @@ private[server] trait ServerMetricsTestSupport { self: CatsEffectSuite =>
       .unit("s")
       .exactlyPoints(PointExpectation.histogram.count(1L).sum(seconds).attributesExact(attributes))
 
-  protected def assertNoMetrics(metrics: List[MetricData])(implicit loc: Location): Unit = {
-    assertEquals(
-      MetricExpectations
-        .find(metrics, MetricExpectation.name(HttpMetrics.ServerRequestDuration.name)),
-      None,
-    )
-    assertEquals(
-      MetricExpectations
-        .find(metrics, MetricExpectation.name(HttpExperimentalMetrics.ServerActiveRequests.name)),
-      None,
-    )
-  }
+  protected def assertNoMetrics(metrics: List[MetricData])(implicit loc: Location): Unit =
+    List(
+      HttpMetrics.ServerRequestDuration.name,
+      HttpExperimentalMetrics.ServerActiveRequests.name,
+      HttpExperimentalMetrics.ServerRequestBodySize.name,
+      HttpExperimentalMetrics.ServerResponseBodySize.name,
+    ).foreach { name =>
+      assertEquals(MetricExpectations.find(metrics, MetricExpectation.name(name)), None)
+    }
 
   protected def assertMetrics(
       metrics: List[MetricData],

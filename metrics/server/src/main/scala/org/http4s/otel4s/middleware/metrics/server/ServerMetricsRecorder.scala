@@ -20,12 +20,15 @@ import cats.effect.Temporal
 import cats.effect.syntax.all._
 import cats.syntax.all._
 import cats.~>
+import fs2.Stream
 import org.http4s.Request
 import org.http4s.RequestPrelude
+import org.http4s.Response
 import org.http4s.ResponsePrelude
 import org.http4s.Uri
 import org.http4s.headers.Forwarded
 import org.http4s.otel4s.middleware.BuildInfo
+import org.http4s.otel4s.middleware.metrics.BodySizeRecording
 import org.http4s.otel4s.middleware.server.OriginalScheme
 import org.http4s.otel4s.middleware.server.TypedServerAttributes
 import org.typelevel.otel4s.Attributes
@@ -44,11 +47,19 @@ private[middleware] final class ServerMetricsRecorder[F[_]: Temporal] private[se
     config: ServerMetricsConfig,
     duration: Histogram[F, Double],
     active: Option[UpDownCounter[F, Long]],
+    requestBodySize: Option[Histogram[F, Long]],
+    responseBodySize: Option[Histogram[F, Long]],
 ) {
+  private val optionalInstrumentMetadata = List(
+    active.map(_.backend.meta),
+    requestBodySize.map(_.backend.meta),
+    responseBodySize.map(_.backend.meta),
+  ).flatten
+
   // Instrument metadata may change, so check it for each invocation.
   def isEnabled: F[Boolean] = duration.backend.meta.isEnabled.ifM(
     true.pure[F],
-    active.fold(false.pure[F])(_.backend.meta.isEnabled),
+    optionalInstrumentMetadata.existsM(_.isEnabled),
   )
 
   def start(request: Request[F], prelude: RequestPrelude): F[ServerMetricsRecorder.Exchange[F]] = {
@@ -62,6 +73,12 @@ private[middleware] final class ServerMetricsRecorder[F[_]: Temporal] private[se
     }
     for {
       context <- otel4s.localContext.ask[otel4s.Ctx]
+      requestSize <- BodySizeRecording.create(
+        config.requestBodySize,
+        requestBodySize,
+        prelude.headers,
+      )
+      responseSize <- BodySizeRecording.create(config.responseBodySize, responseBodySize)
       runInContext = new (F ~> F) {
         def apply[A](fa: F[A]): F[A] = otel4s.localContext.scope(fa)(context)
       }
@@ -73,6 +90,8 @@ private[middleware] final class ServerMetricsRecorder[F[_]: Temporal] private[se
         runInContext,
         duration,
         active,
+        requestSize,
+        responseSize,
       )
       _ <- active.traverse_(_.inc(labels))
     } yield exchange
@@ -106,7 +125,30 @@ private[middleware] object ServerMetricsRecorder {
             .create
             .map(_.some)
         else none[UpDownCounter[F, Long]].pure[F]
-    } yield new ServerMetricsRecorder(otel4s, config, duration, active)
+      requestBodySize <- config.requestBodySize.traverse { sizeConfig =>
+        meter
+          .histogram[Long]("http.server.request.body.size")
+          .withUnit("By")
+          .withDescription("Size of HTTP server request bodies.")
+          .withExplicitBucketBoundaries(sizeConfig.bucketBoundaries)
+          .create
+      }
+      responseBodySize <- config.responseBodySize.traverse { sizeConfig =>
+        meter
+          .histogram[Long]("http.server.response.body.size")
+          .withUnit("By")
+          .withDescription("Size of HTTP server response bodies.")
+          .withExplicitBucketBoundaries(sizeConfig.bucketBoundaries)
+          .create
+      }
+    } yield new ServerMetricsRecorder(
+      otel4s,
+      config,
+      duration,
+      active,
+      requestBodySize,
+      responseBodySize,
+    )
 
   private def requestLabels[F[_]](
       request: Request[F],
@@ -145,6 +187,8 @@ private[middleware] object ServerMetricsRecorder {
       val runInContext: F ~> F,
       duration: Histogram[F, Double],
       active: Option[UpDownCounter[F, Long]],
+      requestBodySize: Option[BodySizeRecording[F]],
+      responseBodySize: Option[BodySizeRecording[F]],
   ) {
     def record(
         elapsed: FiniteDuration,
@@ -162,9 +206,38 @@ private[middleware] object ServerMetricsRecorder {
                 builder += TypedServerAttributes.errorType(value.status)
             }
             builder ++= error.map(TypedServerAttributes.errorType)
-            duration.record(elapsed.toUnit(TimeUnit.SECONDS), builder.result())
+            val terminal = builder.result()
+            for {
+              requestSize <- requestBodySize.fold(none[Long].pure[F])(_.freeze())
+              responseSize <- responseBodySize.fold(none[Long].pure[F]) { recording =>
+                val knownSize = response.flatMap { value =>
+                  if (BodySizeRecording.noResponseBody(request.method, value.status)) Some(0L)
+                  else recording.contentLength(value.headers)
+                }
+                recording.freeze(knownSize)
+              }
+              _ <- {
+                val recordDuration = duration.record(elapsed.toUnit(TimeUnit.SECONDS), terminal)
+                val recordRequest = requestBodySize.fold(recordDuration)(recording =>
+                  recordDuration.guarantee(recording.record(requestSize, terminal))
+                )
+                responseBodySize.fold(recordRequest)(recording =>
+                  recordRequest.guarantee(recording.record(responseSize, terminal))
+                )
+              }
+            } yield ()
           }
           .guarantee(active.traverse_(_.dec(startAttributes)))
       )
+
+    def observeRequest(request: Request[F]): Request[F] =
+      requestBodySize.flatMap(_.observe(request.body)).fold(request)(request.withBodyStream)
+
+    def observeResponse(response: Response[F]): Stream[F, Byte] =
+      responseBodySize.fold(response.body) { recording =>
+        if (BodySizeRecording.noResponseBody(request.method, response.status)) response.body
+        else recording.observe(response.body).getOrElse(response.body)
+      }
+
   }
 }

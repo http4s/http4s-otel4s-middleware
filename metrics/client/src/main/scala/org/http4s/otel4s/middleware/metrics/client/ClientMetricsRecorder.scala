@@ -21,14 +21,13 @@ import cats.effect.Temporal
 import cats.effect.syntax.all._
 import cats.syntax.all._
 import cats.~>
-import org.http4s.Method
 import org.http4s.Request
 import org.http4s.RequestPrelude
 import org.http4s.Response
 import org.http4s.ResponsePrelude
-import org.http4s.Status
 import org.http4s.otel4s.middleware.BuildInfo
 import org.http4s.otel4s.middleware.client.TypedClientAttributes
+import org.http4s.otel4s.middleware.metrics.BodySizeRecording
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.Otel4s
 import org.typelevel.otel4s.metrics.Histogram
@@ -222,10 +221,7 @@ private[middleware] object ClientMetricsRecorder {
 
     def observeResponse(request: RequestPrelude, response: Response[F]): F[Response[F]] = {
       val (knownSize, observed) = responseBodySize.fold((none[Long], response)) { recording =>
-        val noBody = request.method == Method.HEAD || !response.status.isEntityAllowed ||
-          response.status.responseClass == Status.Informational ||
-          (request.method == Method.CONNECT && response.status.responseClass == Status.Successful)
-        if (noBody) (Some(0L), response)
+        if (BodySizeRecording.noResponseBody(request.method, response.status)) (Some(0L), response)
         else
           (
             recording.contentLength(response.headers),
