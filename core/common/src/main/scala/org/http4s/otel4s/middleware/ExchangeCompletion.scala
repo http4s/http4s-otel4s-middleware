@@ -39,16 +39,20 @@ private[middleware] final class ExchangeCompletion[F[_]: Temporal] private (
       .getAndSet(true)
       .ifM(
         done.get.rethrow,
-        (for {
-          monotonic <- Temporal[F].monotonic
-          timestamp <- Temporal[F].realTime
-          terminal = ExchangeCompletion.Terminal(error, monotonic - start.monotonic, timestamp)
-          _ <- Temporal[F].unit
-            .flatMap(_ => record(terminal))
-            .guarantee(Temporal[F].unit.flatMap(_ => end(terminal)))
-        } yield ()).attempt.flatTap(result => done.complete(result)).rethrow,
+        recordAndEnd(error).attempt.flatTap(result => done.complete(result)).rethrow,
       )
   }
+
+  private def recordAndEnd(error: Option[Throwable]): F[Unit] =
+    for {
+      monotonic <- Temporal[F].monotonic
+      timestamp <- Temporal[F].realTime
+      terminal = ExchangeCompletion.Terminal(error, monotonic - start.monotonic, timestamp)
+      _ <- Temporal[F].unit
+        .flatMap(_ => record(terminal))
+        .guarantee(Temporal[F].unit.flatMap(_ => end(terminal)))
+    } yield ()
+
 }
 
 private[middleware] object ExchangeCompletion {
