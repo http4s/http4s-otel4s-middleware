@@ -17,6 +17,7 @@
 package org.http4s.otel4s.middleware.server
 
 import org.http4s.Headers
+import org.http4s.Request
 import org.http4s.Uri
 import org.http4s.headers.Forwarded
 import org.http4s.headers.`X-Forwarded-Proto`
@@ -25,6 +26,13 @@ import org.http4s.headers.`X-Forwarded-Proto`
 final class OriginalScheme private (val value: Option[Uri.Scheme]) extends AnyVal
 
 object OriginalScheme {
+
+  /** Uses forwarded headers, then the URI scheme, then the connection's TLS setting. */
+  def apply[F[_]](request: Request[F], forwarded: Option[Forwarded]): OriginalScheme = {
+    val original = apply(forwarded, request.headers, request.uri)
+    if (original.value.isDefined) original
+    else new OriginalScheme(request.isSecure.map(if (_) Uri.Scheme.https else Uri.Scheme.http))
+  }
 
   /** @param forwarded the `Forwarded` header, if present in the request.
     *                  Because it is used in the creation of several

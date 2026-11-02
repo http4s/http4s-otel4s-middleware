@@ -25,7 +25,6 @@ import org.http4s.Request
 import org.http4s.RequestPrelude
 import org.http4s.Response
 import org.http4s.ResponsePrelude
-import org.http4s.Uri
 import org.http4s.headers.Forwarded
 import org.http4s.otel4s.middleware.BuildInfo
 import org.http4s.otel4s.middleware.metrics.BodySizeRecording
@@ -156,14 +155,7 @@ private[middleware] object ServerMetricsRecorder {
       config: ServerMetricsConfig,
   ): Attributes = {
     val forwarded = prelude.headers.get[Forwarded]
-    val uri =
-      if (prelude.uri.scheme.isDefined) prelude.uri
-      else
-        prelude.uri.copy(scheme = request.isSecure.map {
-          case true => Uri.Scheme.https
-          case false => Uri.Scheme.http
-        })
-    val scheme = OriginalScheme(forwarded, prelude.headers, uri)
+    val scheme = OriginalScheme(request, forwarded)
     val server =
       if (config.serverAddressEnabled || config.serverPortEnabled)
         TypedServerAttributes.serverAddressAndPort(request, forwarded, scheme)

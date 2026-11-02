@@ -10,6 +10,7 @@ depending on your needs:
 libraryDependencies ++= Seq(
   "org.http4s" %% "http4s-otel4s-middleware-core" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-client" % "<version>",
+  "org.http4s" %% "http4s-otel4s-middleware-server" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics-client" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics-server" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics" % "<version>",
@@ -95,3 +96,40 @@ def instrumentServer[F[_]: Temporal](otel4s: Otel4s[F], app: HttpApp[F]): F[Http
 **Unstarted-body limitation:** returning a response without evaluating its body leaves duration
 and body sizes unrecorded and active requests incremented. This includes empty and HEAD responses.
 App errors and app cancellation still complete immediately. Body completion does not establish network delivery.
+
+## Server metrics and tracing
+
+Use the `server` artifact to enable metrics and tracing together. It records metrics before ending
+each HTTP span. Pass a config for each:
+
+```scala
+import cats.effect.Temporal
+import cats.syntax.functor._
+import org.http4s.HttpApp
+import org.http4s.otel4s.middleware.metrics.server.ServerMetricsConfig
+import org.http4s.otel4s.middleware.server.ServerInstrumentation
+import org.http4s.otel4s.middleware.server.ServerTracingConfig
+import org.http4s.otel4s.middleware.trace.redact.PathRedactor
+import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
+import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
+import org.typelevel.otel4s.Otel4s
+
+val serverTracingConfig = ServerTracingConfig(
+  ServerSpanDataProvider.openTelemetry(
+    new PathRedactor.NeverRedact with QueryRedactor.NeverRedact {}
+  )
+)
+
+def instrumentServerApp[F[_]: Temporal](otel4s: Otel4s[F], app: HttpApp[F]): F[HttpApp[F]] =
+  ServerInstrumentation
+    .middleware[F](otel4s, ServerMetricsConfig.default, serverTracingConfig)
+    .map(wrap => wrap(app))
+```
+
+Apply once to the final app. App and response body effects run in the context extracted from the
+request headers. Code consuming the body keeps its own context. Metrics and tracing have separate
+request filters and error classifiers. Response context propagation is disabled by default; enable
+it with `withReversePropagationFilter`.
+
+The response body must be run, including for empty and HEAD responses. Until then, the span stays
+open, the request counts as active, and duration and body sizes are not recorded.

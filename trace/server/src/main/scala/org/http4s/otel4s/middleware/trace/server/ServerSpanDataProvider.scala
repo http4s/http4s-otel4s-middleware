@@ -98,7 +98,7 @@ object ServerSpanDataProvider {
     def requestAttributes[F[_]](request: Request[F], sharedProcessedData: OtelData): Attributes = {
       val b = Attributes.newBuilder
       val forwarded = request.headers.get[Forwarded]
-      val scheme = OriginalScheme(forwarded, request.headers, request.uri)
+      val scheme = OriginalScheme(request, forwarded)
 
       b += sharedProcessedData.httpRequestMethod
       b ++= TypedServerTraceAttributes.urlPath(request.uri.path, pathAndQueryRedactor)

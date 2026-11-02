@@ -17,6 +17,7 @@
 package org.http4s
 package otel4s.middleware.server
 
+import com.comcast.ip4s._
 import munit.FunSuite
 import munit.Location
 import org.http4s.headers.Forwarded
@@ -57,4 +58,29 @@ class OriginalSchemeTest extends FunSuite {
     check(Headers(f3, xfp1), u2, Some(Uri.Scheme.http))
     check(Headers(xfp2), u1, Some(Uri.Scheme.https))
   }
+
+  test("request scheme falls back to TLS without overriding URI or forwarded scheme") {
+    def request(secure: Boolean): Request[Option] = Request[Option](uri = uri"/items")
+      .withAttribute(
+        Request.Keys.ConnectionInfo,
+        Request.Connection(
+          SocketAddress(ip"127.0.0.1", port"443"),
+          SocketAddress(ip"192.0.2.1", port"12345"),
+          secure,
+        ),
+      )
+    assertEquals(OriginalScheme(request(true), None).value, Some(Uri.Scheme.https))
+    assertEquals(OriginalScheme(request(false), None).value, Some(Uri.Scheme.http))
+    assertEquals(
+      OriginalScheme(request(true).withUri(uri"http://example.test/items"), None).value,
+      Some(Uri.Scheme.http),
+    )
+    val forwarded = request(false).putHeaders("Forwarded" -> "proto=https")
+    assertEquals(
+      OriginalScheme(forwarded, forwarded.headers.get[Forwarded]).value,
+      Some(Uri.Scheme.https),
+    )
+    assertEquals(OriginalScheme(Request[Option](uri = uri"/items"), None).value, None)
+  }
+
 }
