@@ -117,8 +117,8 @@ object ClientSpanDataProvider {
       val b = Attributes.newBuilder
 
       b += sharedProcessedData.httpRequestMethod
-      b ++= TypedClientTraceAttributes.serverAddress(request.uri.host)
-      b ++= TypedClientTraceAttributes.serverPort(request.remotePort, request.uri)
+      b ++= TypedClientTraceAttributes.serverAddress(request)
+      b ++= TypedClientTraceAttributes.serverPort(request)
       b += TypedClientTraceAttributes.urlFull(request.uri, urlRedactor)
       // `error.type` handled by `responseAttributes` and `exceptionAttributes`
       if (sharedProcessedData.requestMethodIsUnknown) {

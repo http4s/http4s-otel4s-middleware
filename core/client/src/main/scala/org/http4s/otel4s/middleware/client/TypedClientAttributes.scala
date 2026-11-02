@@ -19,6 +19,7 @@ package otel4s.middleware
 package client
 
 import com.comcast.ip4s.Port
+import org.http4s.headers.Host
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.AttributeKey
 import org.typelevel.otel4s.semconv.attributes.ServerAttributes
@@ -40,6 +41,11 @@ private[middleware] trait TypedClientAttributes extends TypedAttributes {
   final def serverAddress(host: Option[Uri.Host]): Option[Attribute[String]] =
     host.map(serverAddress)
 
+  /** Uses the URI host, falling back to `Host` for requests without a URI authority. */
+  final def serverAddress[F[_]](request: Request[F]): Option[Attribute[String]] =
+    serverAddress(request.uri.host)
+      .orElse(request.headers.get[Host].map(host => ServerAttributes.ServerAddress(host.host)))
+
   /** This is a required `Attribute`, but none of `Request#remote`, `Uri#port`
     * and `Uri#scheme` are guaranteed to be populated. So we just hope that at
     * least one of them is always there in practice.
@@ -50,9 +56,27 @@ private[middleware] trait TypedClientAttributes extends TypedAttributes {
       remotePort: Option[Port],
       url: Uri,
   ): Option[Attribute[Long]] =
-    url.port
+    serverPort(remotePort, url.port, url.scheme)
+
+  /** Uses the destination port before the connection port, with a `Host` port fallback when the URI
+    * has no authority. Without an explicit port, only a known URI scheme supplies a default.
+    */
+  final def serverPort[F[_]](request: Request[F]): Option[Attribute[Long]] = {
+    val port = request.uri.authority match {
+      case Some(authority) => authority.port
+      case None => request.headers.get[Host].flatMap(_.port)
+    }
+    serverPort(request.remotePort, port, request.uri.scheme)
+  }
+
+  private def serverPort(
+      remotePort: Option[Port],
+      port: Option[Int],
+      scheme: Option[Uri.Scheme],
+  ): Option[Attribute[Long]] =
+    port
       .map(_.toLong)
-      .orElse(portFromScheme(url.scheme))
+      .orElse(portFromScheme(scheme))
       .orElse(remotePort.map(_.value.toLong))
       .map(ServerAttributes.ServerPort(_))
 
