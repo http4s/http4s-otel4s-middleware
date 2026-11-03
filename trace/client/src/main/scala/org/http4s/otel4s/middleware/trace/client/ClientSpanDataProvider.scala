@@ -118,13 +118,12 @@ object ClientSpanDataProvider {
       }
       // `http.response.status_code` handled by `responseAttributes`
       // `network.protocol.name` not required because http4s only supports http
-      //   and `Request#httpVersion` is always populated/available
       b ++= TypedClientTraceAttributes.httpRequestResendCount(request)
       request.remote.foreach { socketAddress =>
         b += TypedClientTraceAttributes.networkPeerAddress(socketAddress.host)
         b += TypedClientTraceAttributes.networkPeerPort(socketAddress.port)
       }
-      b += TypedClientTraceAttributes.networkProtocolVersion(request.httpVersion)
+      // `network.protocol.version` handled by `responseAttributes`, once the actual version is known
       // `http.request.body.size` not available to opt into at this time
       optIn.httpRequestHeaders.foreach { redactor =>
         TypedClientTraceAttributes
@@ -156,6 +155,7 @@ object ClientSpanDataProvider {
       // which the caller invokes only for statuses it considers to be errors;
       // `error.type` for a `Throwable` is provided by `exceptionAttributes`
       b += TypedClientTraceAttributes.httpResponseStatusCode(response.status)
+      b += TypedClientTraceAttributes.networkProtocolVersion(response.httpVersion)
       optIn.httpResponseHeaders.foreach { redactor =>
         TypedClientTraceAttributes
           .httpResponseHeadersForBuilder(response.headers, redactor)(b)
