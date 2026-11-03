@@ -19,9 +19,20 @@ package org.http4s.otel4s.middleware.trace.client
 import munit.FunSuite
 import org.http4s.Query
 import org.http4s.Uri
+import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 import org.http4s.syntax.literals._
 
 class UriRedactorTest extends FunSuite {
+  test("standard query redaction composes with user-info redaction") {
+    val redactor = new UriRedactor.OnlyRedactUserInfo with QueryRedactor.RedactSensitive {}
+    val uri =
+      uri"https://user:password@example.test/items?color=blue&sig=secret&sig=second#fragment"
+    assertEquals(
+      redactor.redactFull(uri),
+      uri"https://REDACTED:REDACTED@example.test/items?color=blue&sig=REDACTED&sig=REDACTED#fragment",
+    )
+  }
+
   test("UriRedactor.OnlyRedactUserInfo redacts username and password") {
     val redactor = new UriRedactor.OnlyRedactUserInfo {}
 
