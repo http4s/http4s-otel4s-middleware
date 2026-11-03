@@ -50,10 +50,10 @@ private[middleware] trait TypedClientAttributes extends TypedAttributes {
       remotePort: Option[Port],
       url: Uri,
   ): Option[Attribute[Long]] =
-    remotePort
-      .map(_.value.toLong)
-      .orElse(url.port.map(_.toLong))
+    url.port
+      .map(_.toLong)
       .orElse(portFromScheme(url.scheme))
+      .orElse(remotePort.map(_.value.toLong))
       .map(ServerAttributes.ServerPort(_))
 
   /** @return the `url.scheme` `Attribute` */
