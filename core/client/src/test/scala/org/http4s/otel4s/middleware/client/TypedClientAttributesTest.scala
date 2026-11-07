@@ -17,9 +17,10 @@
 package org.http4s
 package otel4s.middleware.client
 
-import com.comcast.ip4s.Port
+import com.comcast.ip4s._
 import munit.FunSuite
 import munit.Location
+import org.http4s.Request
 import org.http4s.syntax.literals._
 import org.typelevel.otel4s.Attribute
 
@@ -68,5 +69,42 @@ class TypedClientAttributesTest extends FunSuite {
     check(None, None)
     check(Some(Uri.Scheme.http), Some("http"))
     check(Some(Uri.Scheme.https), Some("https"))
+  }
+
+  List(
+    (uri"/items", "example.test:8443", Some("example.test"), Some(8443L)),
+    (uri"/items", "example.test", Some("example.test"), None),
+    (uri"/items", "192.0.2.1:8080", Some("192.0.2.1"), Some(8080L)),
+    (uri"/items", "[2001:db8::1]:8443", Some("2001:db8::1"), Some(8443L)),
+    (uri"https:/items", "example.test:8443", Some("example.test"), Some(8443L)),
+    (uri"https:/items", "example.test", Some("example.test"), Some(443L)),
+    (uri"https://origin.test/items", "other.test:9000", Some("origin.test"), Some(443L)),
+    (uri"//origin.test/items", "other.test:9000", Some("origin.test"), None),
+    (uri"/items", "bad host:invalid", None, None),
+  ).foreach { case (uri, host, address, port) =>
+    test(s"request destination falls back to Host only without URI authority: $uri / $host") {
+      val request = Request[Option](uri = uri).putHeaders("Host" -> host)
+      assertEquals(TypedClientAttributes.serverAddress(request).map(_.value), address)
+      assertEquals(TypedClientAttributes.serverPort(request).map(_.value), port)
+
+      val connected = request.withAttribute(
+        Request.Keys.ConnectionInfo,
+        Request.Connection(
+          SocketAddress(ip"127.0.0.1", port"12345"),
+          SocketAddress(ip"192.0.2.1", port"4140"),
+          secure = false,
+        ),
+      )
+      assertEquals(
+        TypedClientAttributes.serverPort(connected).map(_.value),
+        port.orElse(Some(4140L)),
+      )
+    }
+  }
+
+  test("request destination stays unknown without URI authority or Host") {
+    val request = Request[Option](uri = uri"/items")
+    assertEquals(TypedClientAttributes.serverAddress(request), None)
+    assertEquals(TypedClientAttributes.serverPort(request), None)
   }
 }

@@ -68,8 +68,8 @@ private[middleware] final class ClientMetricsRecorder[F[_]: Temporal] private[cl
       builder ++= config.attributes
       builder ++= config.requestAttributes(prelude)
       builder += TypedClientAttributes.httpRequestMethod(prelude.method, config.knownMethods)
-      builder ++= TypedClientAttributes.serverAddress(prelude.uri.host)
-      builder ++= TypedClientAttributes.serverPort(request.remotePort, prelude.uri)
+      builder ++= TypedClientAttributes.serverAddress(request)
+      builder ++= TypedClientAttributes.serverPort(request)
 
       if (config.urlSchemeEnabled)
         builder ++= TypedClientAttributes.urlScheme(prelude.uri.scheme)
