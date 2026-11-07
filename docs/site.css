@@ -1,0 +1,13 @@
+/* Keep the explorer readable in both Helium color schemes and on small screens. */
+.lifecycle-explorer { border: 1px solid currentColor; border-radius: .5rem; padding: 1.25rem; margin: 1.5rem 0; }
+.lifecycle-controls { display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; margin-bottom: 1rem; }
+.lifecycle-controls label { display: grid; gap: .35rem; }
+.lifecycle-controls select, .lifecycle-controls button { font: inherit; padding: .4rem .65rem; color: inherit; background: transparent; border: 1px solid currentColor; border-radius: .25rem; }
+.lifecycle-controls select option { color: #172638; background: #fff; }
+.lifecycle-controls button { cursor: pointer; }
+.lifecycle-controls button:disabled { opacity: .5; cursor: default; }
+.lifecycle-controls :focus-visible { outline: 3px solid #618ce5; outline-offset: 3px; }
+.lifecycle-steps li { opacity: .55; padding: .25rem; }
+.lifecycle-steps li[data-reached="true"] { opacity: 1; }
+.lifecycle-steps li[aria-current="step"] { font-weight: bold; border-left: 3px solid currentColor; }
+#lifecycle-state { font-weight: bold; margin: 1rem 0; }

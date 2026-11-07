@@ -11,7 +11,7 @@ ThisBuild / tlCiReleaseBranches := Seq("main")
 val scala213 = "2.13.18"
 val scala3 = "3.3.9"
 ThisBuild / crossScalaVersions := Seq(scala213, scala3)
-ThisBuild / scalaVersion := scala213
+ThisBuild / scalaVersion := scala3
 
 ThisBuild / githubWorkflowJavaVersions := Seq(JavaSpec.temurin("17"))
 ThisBuild / tlJdkRelease := Some(8)
@@ -310,5 +310,39 @@ lazy val examples = project
 lazy val site = project
   .in(file("site"))
   .enablePlugins(TypelevelSitePlugin)
-  .dependsOn(core.jvm)
-  .settings(tlSite := {}) // disabled until a site is set up
+  .dependsOn(client.jvm, server.jvm, metrics.jvm)
+  .settings(
+    scalaVersion := scala3,
+    tlSiteApiUrl := Some(
+      url("https://javadoc.io/doc/org.http4s/http4s-otel4s-middleware-client_3")
+    ),
+    mdocIn := file("docs"),
+    mdocOut := target.value / "mdoc",
+    mdocVariables ++= Map(
+      "OTEL4S_VERSION" -> otel4sV,
+      "HTTP4S_VERSION" -> http4sV,
+      "OTELJAVA_VERSION" -> openTelemetryV,
+    ),
+    laikaConfig := LaikaConfig.defaults.withRawContent,
+    tlSiteHelium := tlSiteHelium.value.all
+      .metadata(title = Some("http4s-otel4s-middleware"), language = Some("en"))
+      .site
+      .topNavigationBar(
+        homeLink = laika.helium.config.TextLink.internal(
+          laika.ast.Path.Root / "README.md",
+          "http4s-otel4s-middleware",
+        )
+      )
+      .site
+      .internalCSS(laika.ast.Path.Root / "site.css")
+      .site
+      .internalJS(laika.ast.Path.Root / "assets" / "lifecycle.js"),
+    libraryDependencies ++= Seq(
+      "org.http4s" %% "http4s-ember-client" % http4sV,
+      "org.http4s" %% "http4s-ember-server" % http4sV,
+      "org.http4s" %% "http4s-dsl" % http4sV,
+      "org.typelevel" %% "otel4s-oteljava" % otel4sV,
+      "io.opentelemetry" % "opentelemetry-exporter-otlp" % openTelemetryV % Runtime,
+      "io.opentelemetry" % "opentelemetry-sdk-extension-autoconfigure" % openTelemetryV % Runtime,
+    ),
+  )

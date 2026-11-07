@@ -1,5 +1,10 @@
 # http4s-otel4s-middleware
 
+OpenTelemetry metrics and tracing for http4s clients and servers, built on
+[otel4s](https://typelevel.org/otel4s/). Supports Scala 2.13 and Scala 3 on JVM, Scala.js and Scala Native.
+
+[Documentation](https://http4s.github.io/http4s-otel4s-middleware/).
+
 ## Quick Start
 
 To use http4s-otel4s-middleware in an existing SBT project with Scala 2.13 or a
