@@ -40,6 +40,9 @@ import org.http4s.otel4s.middleware.trace.client.ClientSpanDataProvider
 import org.http4s.otel4s.middleware.trace.client.UriRedactor
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
+import org.typelevel.otel4s.trace.TracerProvider
+import org.typelevel.otel4s.metrics.MeterProvider
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.context.TraceContext
@@ -93,6 +96,9 @@ class ClientInstrumentationPoliciesTest extends CatsEffectSuite {
         OpenTelemetrySdkTestkit
           .inMemory[IO](_.addTextMapPropagators(W3CTraceContextPropagator.default))
           .use { kit =>
+            implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+            implicit val contextManager: ContextManager[IO] = kit.contextManager
+            implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
             for {
               tracer <- kit.tracerProvider.get("test")
               received <- Ref.of[IO, Headers](Headers.empty)
@@ -100,7 +106,6 @@ class ClientInstrumentationPoliciesTest extends CatsEffectSuite {
               producer <- Ref.of[IO, Option[SpanContext]](None)
               cleanup <- Ref.of[IO, Option[SpanContext]](None)
               wrap <- ClientInstrumentation.middleware[IO](
-                kit,
                 ClientMetricsConfig.default.optIntoActiveRequests
                   .withRequestFilter(filter(meter))
                   .withRequestAttributes { _ =>
@@ -237,10 +242,12 @@ class ClientInstrumentationPoliciesTest extends CatsEffectSuite {
   List(false, true).foreach { sourceError =>
     test(s"public tracing config keeps classification independent: sourceError=$sourceError") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
+        implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
         val boom = new IllegalStateException("source")
         for {
           wrap <- ClientInstrumentation.middleware[IO](
-            kit,
             ClientMetricsConfig.default.optIntoActiveRequests,
             ClientTracingConfig(provider).withErrorClassifier(ErrorClassifier.never),
           )
@@ -296,12 +303,14 @@ class ClientInstrumentationPoliciesTest extends CatsEffectSuite {
           .addTracerProviderCustomizer(_.withSampler(Sampler.alwaysOff))
       )
       .use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
+        implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
         for {
           tracer <- kit.tracerProvider.get("test")
           http <- Ref.of[IO, Option[SpanContext]](None)
           wrap <- ClientInstrumentation
             .middleware[IO](
-              kit,
               ClientMetricsConfig.default.optIntoActiveRequests,
               ClientTracingConfig(provider),
             )
@@ -364,6 +373,9 @@ class ClientInstrumentationPoliciesTest extends CatsEffectSuite {
           )
         )
         .use { kit =>
+          implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+          implicit val contextManager: ContextManager[IO] = kit.contextManager
+          implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
           val metricsConfig =
             ClientMetricsConfig.default.optIntoActiveRequests
               .withRequestAttributes { _ =>
@@ -378,7 +390,7 @@ class ClientInstrumentationPoliciesTest extends CatsEffectSuite {
           for {
             acquisitions <- Ref.of[IO, Int](0)
             releases <- Ref.of[IO, Int](0)
-            wrap <- ClientInstrumentation.middleware[IO](kit, metricsConfig, tracingConfig)
+            wrap <- ClientInstrumentation.middleware[IO](metricsConfig, tracingConfig)
             base = Client[IO](_ =>
               Resource
                 .make(acquisitions.update(_ + 1).as(Response[IO]()))(_ => releases.update(_ + 1))
@@ -435,6 +447,9 @@ class ClientInstrumentationPoliciesTest extends CatsEffectSuite {
     "a reused resource creates independent exchanges and evaluates policies once per acquisition"
   ) {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
+      implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
       var metricsFilters = 0
       var labels = 0
       var traceFilters = 0
@@ -464,7 +479,7 @@ class ClientInstrumentationPoliciesTest extends CatsEffectSuite {
         tracer <- kit.tracerProvider.get("test")
         contexts <- Ref.of[IO, Vector[SpanContext]](Vector.empty)
         releases <- Ref.of[IO, Int](0)
-        wrap <- ClientInstrumentation.middleware[IO](kit, metricsConfig, tracingConfig)
+        wrap <- ClientInstrumentation.middleware[IO](metricsConfig, tracingConfig)
         base = Client[IO](_ =>
           Resource.make(
             tracer.currentSpanContext

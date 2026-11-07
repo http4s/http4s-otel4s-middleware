@@ -36,6 +36,9 @@ import org.http4s.otel4s.middleware.trace.redact.PathRedactor
 import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.trace.TracerProvider
+import org.typelevel.otel4s.metrics.MeterProvider
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.context.propagation.TextMapGetter
 import org.typelevel.otel4s.context.propagation.TextMapPropagator
@@ -235,15 +238,19 @@ class ServerInstrumentationContextTest extends CatsEffectSuite {
   private def createMiddleware(
       kit: OpenTelemetrySdkTestkit[IO],
       metricsConfig: ServerMetricsConfig,
-  ): IO[HttpApp[IO] => HttpApp[IO]] = ServerInstrumentation.middleware[IO](
-    kit,
-    metricsConfig,
-    ServerTracingConfig(
-      ServerSpanDataProvider.openTelemetry(
-        new PathRedactor.NeverRedact with QueryRedactor.NeverRedact {}
-      )
-    ),
-  )
+  ): IO[HttpApp[IO] => HttpApp[IO]] = {
+    implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+    implicit val contextManager: ContextManager[IO] = kit.contextManager
+    implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
+    ServerInstrumentation.middleware[IO](
+      metricsConfig,
+      ServerTracingConfig(
+        ServerSpanDataProvider.openTelemetry(
+          new PathRedactor.NeverRedact with QueryRedactor.NeverRedact {}
+        )
+      ),
+    )
+  }
 
   private def headers(value: String): Headers = Headers(
     "traceparent" -> s"00-$remoteTrace-$remoteSpan-01",

@@ -21,8 +21,8 @@ val http4sV = "0.23.38"
 val munitV = "1.3.6"
 val munitCatsEffectV = "2.2.1"
 val openTelemetryV = "1.68.0"
-val otel4sV = "1.1.0"
-val otel4sSdkV = "0.19.4"
+val otel4sV = "1.1.0-90-d1e6765-20261107T094642Z-SNAPSHOT"
+val otel4sSdkV = "0.19.4-15-77979fd-20261107T110512Z-SNAPSHOT"
 val slf4jV = "1.7.36"
 
 val baseName = "http4s-otel4s-middleware"
@@ -128,7 +128,6 @@ lazy val `metrics-client` = crossProject(JVMPlatform, JSPlatform, NativePlatform
   .settings(
     name := s"$baseName-metrics-client",
     libraryDependencies ++= Seq(
-      "org.typelevel" %%% "otel4s-core" % otel4sV,
       "org.http4s" %%% "http4s-client" % http4sV,
       "org.typelevel" %%% "otel4s-semconv-metrics-experimental" % otel4sV % Test,
     ),
@@ -144,7 +143,6 @@ lazy val `metrics-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform
   .settings(
     name := s"$baseName-metrics-server",
     libraryDependencies ++= Seq(
-      "org.typelevel" %%% "otel4s-core" % otel4sV,
       "org.http4s" %%% "http4s-server" % http4sV % Test,
       "org.typelevel" %%% "otel4s-semconv-metrics-experimental" % otel4sV % Test,
     ),

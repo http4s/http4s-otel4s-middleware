@@ -33,6 +33,9 @@ import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
+import org.typelevel.otel4s.trace.TracerProvider
+import org.typelevel.otel4s.metrics.MeterProvider
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectation
@@ -55,6 +58,9 @@ class ServerInstrumentationAttributesTest extends CatsEffectSuite {
       test(s"metric and span opt-ins stay separate: metrics=$metricOptIns, tracing=$traceOptIns") {
         TestControl.executeEmbed {
           OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+            implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+            implicit val contextManager: ContextManager[IO] = kit.contextManager
+            implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
             val baseProvider = ServerSpanDataProvider.openTelemetry(
               new PathRedactor.NeverRedact with QueryRedactor.NeverRedact {}
             )
@@ -90,7 +96,7 @@ class ServerInstrumentationAttributesTest extends CatsEffectSuite {
               .withBodyStream(Stream.emits(Vector[Byte](1, 2, 3)).covary[IO])
             for {
               wrap <- ServerInstrumentation
-                .middleware[IO](kit, config, ServerTracingConfig(provider))
+                .middleware[IO](config, ServerTracingConfig(provider))
               response <- wrap(
                 HttpApp[IO](req =>
                   req.body.compile.drain.as(

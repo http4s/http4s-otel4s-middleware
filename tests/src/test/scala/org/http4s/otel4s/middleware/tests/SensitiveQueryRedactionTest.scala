@@ -37,6 +37,8 @@ import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 import org.http4s.otel4s.middleware.trace.server.ServerMiddleware
 import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.metrics.MeterProvider
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.trace.SpanExpectation
 import org.typelevel.otel4s.sdk.testkit.trace.SpanExpectations
@@ -67,6 +69,8 @@ class SensitiveQueryRedactionTest extends CatsEffectSuite {
 
   private def checkClient(combined: Boolean): IO[Unit] =
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
       val provider = ClientSpanDataProvider.openTelemetry(
         new UriRedactor.OnlyRedactUserInfo with QueryRedactor.RedactSensitive {}
@@ -80,7 +84,7 @@ class SensitiveQueryRedactionTest extends CatsEffectSuite {
       val wrap =
         if (combined)
           ClientInstrumentation
-            .middleware[IO](kit, ClientMetricsConfig.default, ClientTracingConfig(provider))
+            .middleware[IO](ClientMetricsConfig.default, ClientTracingConfig(provider))
         else ClientMiddleware.builder[IO](provider).build.map(middleware => middleware.wrapClient _)
       for {
         middleware <- wrap
@@ -101,6 +105,8 @@ class SensitiveQueryRedactionTest extends CatsEffectSuite {
 
   private def checkServer(combined: Boolean): IO[Unit] =
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
       val provider = ServerSpanDataProvider.openTelemetry(
         new PathRedactor.NeverRedact with QueryRedactor.RedactSensitive {}
@@ -114,7 +120,7 @@ class SensitiveQueryRedactionTest extends CatsEffectSuite {
       val wrap =
         if (combined)
           ServerInstrumentation
-            .middleware[IO](kit, ServerMetricsConfig.default, ServerTracingConfig(provider))
+            .middleware[IO](ServerMetricsConfig.default, ServerTracingConfig(provider))
         else
           ServerMiddleware.builder[IO](provider).build.map(middleware => middleware.wrapHttpApp _)
       for {

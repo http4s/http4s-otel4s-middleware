@@ -30,6 +30,8 @@ import org.http4s.client.Client
 import org.http4s.otel4s.middleware.PerRequestConfig
 import org.http4s.otel4s.middleware.PerRequestFilter
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.metrics.data.MetricData
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
@@ -53,12 +55,13 @@ class ClientMetricsFilterTest extends CatsEffectSuite with ClientMetricsTestSupp
   List("success", "acquire-error", "body-error", "body-cancel").foreach { mode =>
     test(s"filtering: excluded requests preserve HTTP behavior and record no metrics: $mode") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+        implicit val contextManager: ContextManager[IO] = testkit.contextManager
         for {
           middleware <- ClientMetrics
             .middleware[IO](
-              testkit,
               ClientMetricsConfig.default.optIntoActiveRequests
-                .withRequestFilter(PerRequestFilter.neverEnabled),
+                .withRequestFilter(PerRequestFilter.neverEnabled)
             )
           entered <- Deferred[IO, Unit]
           snapshots <- Ref.of[IO, Vector[List[MetricData]]](Vector.empty)
@@ -107,14 +110,15 @@ class ClientMetricsFilterTest extends CatsEffectSuite with ClientMetricsTestSupp
 
   test("filtering: request prelude selects which exchanges are measured") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       for {
         middleware <- ClientMetrics
           .middleware[IO](
-            testkit,
             ClientMetricsConfig.default.optIntoActiveRequests.withRequestFilter(req =>
               if (req.uri.path != uri"/health".path) PerRequestConfig.Enabled
               else PerRequestConfig.Disabled
-            ),
+            )
           )
         calls <- Ref.of[IO, Int](0)
         base = Client[IO](_ => Resource.eval(calls.update(_ + 1)).as(Response[IO]()))
@@ -137,14 +141,15 @@ class ClientMetricsFilterTest extends CatsEffectSuite with ClientMetricsTestSupp
     "filtering: the predicate is lazy and evaluated once for each acquisition of a reused resource"
   ) {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       var evaluations = 0
       for {
         middleware <- ClientMetrics.middleware[IO](
-          testkit,
           ClientMetricsConfig.default.optIntoActiveRequests.withRequestFilter { _ =>
             evaluations += 1
             if (evaluations == 2) PerRequestConfig.Enabled else PerRequestConfig.Disabled
-          },
+          }
         )
         base = Client[IO](_ => Resource.pure(Response[IO]()))
         response = middleware(base).run(request)
@@ -165,14 +170,15 @@ class ClientMetricsFilterTest extends CatsEffectSuite with ClientMetricsTestSupp
 
   test("filtering: excluded requests skip attribute, template and error callbacks") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       for {
         middleware <- ClientMetrics.middleware[IO](
-          testkit,
           ClientMetricsConfig.default.optIntoActiveRequests
             .withRequestFilter(PerRequestFilter.neverEnabled)
             .withRequestAttributes(_ => fail("request callback"))
             .withUrlTemplateClassifier(_ => fail("template callback"))
-            .withErrorClassifier((_, _) => fail("error callback")),
+            .withErrorClassifier((_, _) => fail("error callback"))
         )
         client = middleware(Client[IO](_ => Resource.pure(Response[IO](Status.ServiceUnavailable))))
         _ <- client.run(request).use(_.body.compile.drain)

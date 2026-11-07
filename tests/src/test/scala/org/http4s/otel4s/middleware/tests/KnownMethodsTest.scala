@@ -39,6 +39,9 @@ import org.http4s.otel4s.middleware.trace.redact.PathRedactor
 import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.trace.TracerProvider
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectation
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectations
@@ -66,6 +69,9 @@ class KnownMethodsTest extends CatsEffectSuite {
       cases.foreach { case (methods, method, expected) =>
         test(s"$side known methods: combined=$combined, override=$methods, method=$method") {
           OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+            implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
+            implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+            implicit val contextManager: ContextManager[IO] = kit.contextManager
             val clientDefaults =
               ClientMetricsConfig.default.optIntoActiveRequests.optIntoRequestBodySize.optIntoResponseBodySize
             val serverDefaults =
@@ -89,11 +95,11 @@ class KnownMethodsTest extends CatsEffectSuite {
               val wrap =
                 if (combined)
                   ClientInstrumentation.middleware[IO](
-                    kit,
                     clientConfig,
                     ClientTracingConfig(clientProvider),
                   )
-                else ClientMetrics.middleware[IO](kit, clientConfig)
+                else
+                  ClientMetrics.middleware[IO](clientConfig)
               wrap.flatMap(
                 _(Client[IO](_ => Resource.pure(response))).run(request).use(_.body.compile.drain)
               )
@@ -101,11 +107,11 @@ class KnownMethodsTest extends CatsEffectSuite {
               val wrap =
                 if (combined)
                   ServerInstrumentation.middleware[IO](
-                    kit,
                     serverConfig,
                     ServerTracingConfig(serverProvider),
                   )
-                else ServerMetrics.middleware[IO](kit, serverConfig)
+                else
+                  ServerMetrics.middleware[IO](serverConfig)
               wrap.flatMap(_(HttpApp.pure[IO](response))(request)).flatMap(_.body.compile.drain)
             }
             for {
