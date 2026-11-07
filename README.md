@@ -23,7 +23,8 @@ libraryDependencies ++= Seq(
 ## Client metrics middleware
 
 Use the `metrics-client` artifact for duration metrics. Enable the experimental active-request
-metric with `ClientMetricsConfig.default.optIntoActiveRequests`:
+metric with `ClientMetricsConfig.default.optIntoActiveRequests`. Supply the meter provider and context
+manager from the same telemetry instance in implicit scope:
 
 ```scala
 import cats.effect.Temporal
@@ -31,10 +32,13 @@ import cats.syntax.functor._
 import org.http4s.client.Client
 import org.http4s.otel4s.middleware.metrics.client.ClientMetrics
 import org.http4s.otel4s.middleware.metrics.client.ClientMetricsConfig
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 
-def instrument[F[_]: Temporal](otel4s: Otel4s[F], client: Client[F]): F[Client[F]] =
-  ClientMetrics.middleware[F](otel4s, ClientMetricsConfig.default).map(wrap => wrap(client))
+def instrument[F[_]: Temporal: MeterProvider: ContextManager](client: Client[F]): F[Client[F]] =
+  ClientMetrics
+    .middleware[F](ClientMetricsConfig.default)
+    .map(wrap => wrap(client))
 ```
 
 | Instrument | Completion / labels |
@@ -54,7 +58,9 @@ import cats.effect.Temporal
 import cats.syntax.functor._
 import org.http4s.client.Client
 import org.http4s.otel4s.middleware.metrics.client.ClientMetricsConfig
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
+import org.typelevel.otel4s.trace.TracerProvider
 import org.http4s.otel4s.middleware.client.ClientInstrumentation
 import org.http4s.otel4s.middleware.client.ClientTracingConfig
 import org.http4s.otel4s.middleware.trace.client.ClientSpanDataProvider
@@ -67,9 +73,11 @@ val tracingConfig = ClientTracingConfig(
   )
 )
 
-def instrumentClient[F[_]: Temporal](otel4s: Otel4s[F], client: Client[F]): F[Client[F]] =
+def instrumentClient[F[_]: Temporal: MeterProvider: TracerProvider: ContextManager](
+    client: Client[F]
+): F[Client[F]] =
   ClientInstrumentation
-    .middleware[F](otel4s, ClientMetricsConfig.default, tracingConfig)
+    .middleware[F](ClientMetricsConfig.default, tracingConfig)
     .map(wrap => wrap(client))
 ```
 
@@ -83,10 +91,13 @@ import cats.syntax.functor._
 import org.http4s.HttpApp
 import org.http4s.otel4s.middleware.metrics.server.ServerMetrics
 import org.http4s.otel4s.middleware.metrics.server.ServerMetricsConfig
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 
-def instrumentServer[F[_]: Temporal](otel4s: Otel4s[F], app: HttpApp[F]): F[HttpApp[F]] =
-  ServerMetrics.middleware[F](otel4s, ServerMetricsConfig.default).map(wrap => wrap(app))
+def instrumentServer[F[_]: Temporal: MeterProvider: ContextManager](app: HttpApp[F]): F[HttpApp[F]] =
+  ServerMetrics
+    .middleware[F](ServerMetricsConfig.default)
+    .map(wrap => wrap(app))
 ```
 
 | Instrument | Boundary |
@@ -115,7 +126,9 @@ import org.http4s.otel4s.middleware.server.ServerTracingConfig
 import org.http4s.otel4s.middleware.trace.redact.PathRedactor
 import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
+import org.typelevel.otel4s.trace.TracerProvider
 
 val serverTracingConfig = ServerTracingConfig(
   ServerSpanDataProvider.openTelemetry(
@@ -123,9 +136,11 @@ val serverTracingConfig = ServerTracingConfig(
   )
 )
 
-def instrumentServerApp[F[_]: Temporal](otel4s: Otel4s[F], app: HttpApp[F]): F[HttpApp[F]] =
+def instrumentServerApp[F[_]: Temporal: MeterProvider: TracerProvider: ContextManager](
+    app: HttpApp[F]
+): F[HttpApp[F]] =
   ServerInstrumentation
-    .middleware[F](otel4s, ServerMetricsConfig.default, serverTracingConfig)
+    .middleware[F](ServerMetricsConfig.default, serverTracingConfig)
     .map(wrap => wrap(app))
 ```
 

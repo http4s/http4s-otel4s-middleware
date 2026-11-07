@@ -27,6 +27,8 @@ import org.http4s.otel4s.middleware.PerRequestConfig
 import org.http4s.otel4s.middleware.metrics.server.ServerMetricsConfig
 import org.http4s.otel4s.middleware.trace.SpanDataProvider
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.metrics.MeterProvider
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectation
@@ -56,6 +58,9 @@ class ServerInstrumentationAvailabilityTest extends CatsEffectSuite {
       s"disabled tracing skips all tracing policies and retains HTTP behavior: metered=$metered"
     ) {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
+        implicit val tracer: Tracer[IO] = Tracer.noop[IO]
         var filters = 0
         val metricsConfig = ServerMetricsConfig.default.optIntoActiveRequests
           .withRequestFilter { _ =>
@@ -73,9 +78,7 @@ class ServerInstrumentationAvailabilityTest extends CatsEffectSuite {
           request = Request[IO](uri = uri"https://example.test/items")
             .withBodyStream(Stream.exec(effects.update(_ + 1)))
           original = Response[IO]().withBodyStream(Stream.exec(effects.update(_ + 1)))
-          wrap <- ServerInstrumentationMiddleware.create(
-            kit,
-            Tracer.noop[IO],
+          wrap <- ServerInstrumentationMiddleware.create[IO](
             metricsConfig,
             tracingConfig,
           )

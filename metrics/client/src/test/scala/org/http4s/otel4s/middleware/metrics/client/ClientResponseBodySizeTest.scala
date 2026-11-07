@@ -37,6 +37,8 @@ import org.http4s.otel4s.middleware.PerRequestFilter
 import org.http4s.otel4s.middleware.metrics.BodySizeConfig
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIString
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics.BucketBoundaries
@@ -70,8 +72,11 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
   ).foreach { case (name, sizeConfig, declared, consume, expected) =>
     test(s"body size: $name") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
-          middleware <- ClientMetrics.middleware[IO](kit, config(sizeConfig))
+          middleware <- ClientMetrics
+            .middleware[IO](config(sizeConfig))
           effects <- Ref.of[IO, Int](0)
           source =
             (if (consume == "empty") Stream.empty else payload).onFinalize(effects.update(_ + 1))
@@ -112,13 +117,14 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
   ).foreach { case (observed, method, status) =>
     test(s"protocol-known zero overrides declared length: observe=$observed $method $status") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
           middleware <- ClientMetrics.middleware[IO](
-            kit,
             config(
               if (observed) BodySizeConfig.observe(buckets)
               else BodySizeConfig.contentLength(buckets)
-            ),
+            )
           )
           response = length(Response[IO](status), Some(99L))
           _ <- middleware(Client[IO](_ => Resource.pure(response)))
@@ -133,8 +139,12 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
   test("an unsuccessful CONNECT can still have an observed HTTP body") {
     val status = Status.Forbidden
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ClientMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ClientMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         _ <- middleware(
           Client[IO](_ => Resource.pure(Response[IO](status).withBodyStream(payload)))
         )
@@ -147,8 +157,12 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
 
   test("protocol-zero handling preserves body effects rather than changing the response stream") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ClientMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ClientMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         effects <- Ref.of[IO, Int](0)
         response = Response[IO]().withBodyStream(payload.onFinalize(effects.update(_ + 1)))
         bytes <- middleware(Client[IO](_ => Resource.pure(response)))
@@ -171,13 +185,14 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
       ) {
         val boom = new RuntimeException("response body failure")
         OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+          implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+          implicit val contextManager: ContextManager[IO] = kit.contextManager
           for {
             middleware <- ClientMetrics.middleware[IO](
-              kit,
               config(
                 if (observed) BodySizeConfig.observe(buckets)
                 else BodySizeConfig.contentLength(buckets)
-              ),
+              )
             )
             source =
               if (cleanup) payload.onFinalize(IO.raiseError[Unit](boom))
@@ -201,13 +216,14 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
     test(s"acquisition failure has no response-size sample: observe=$observed") {
       val boom = new RuntimeException("acquisition failure")
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
           middleware <- ClientMetrics.middleware[IO](
-            kit,
             config(
               if (observed) BodySizeConfig.observe(buckets)
               else BodySizeConfig.contentLength(buckets)
-            ),
+            )
           )
           result <- middleware(Client[IO](_ => Resource.eval(IO.raiseError[Response[IO]](boom))))
             .run(request)
@@ -227,14 +243,15 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
       s"cancellation retains a completed request size and freezes response size: observe=$observed"
     ) {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
           middleware <- ClientMetrics.middleware[IO](
-            kit,
             config(
               if (observed) BodySizeConfig.observe(buckets)
               else BodySizeConfig.contentLength(buckets)
             )
-              .optIntoRequestBodySize(BodySizeConfig.observe(buckets)),
+              .optIntoRequestBodySize(BodySizeConfig.observe(buckets))
           )
           entered <- Deferred[IO, Unit]
           released <- Ref.of[IO, Int](0)
@@ -264,11 +281,12 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
   test("a completed request remains measurable when the response body fails") {
     val boom = new RuntimeException("response failure")
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
         middleware <- ClientMetrics.middleware[IO](
-          kit,
           config(BodySizeConfig.observe(buckets))
-            .optIntoRequestBodySize(BodySizeConfig.observe(buckets)),
+            .optIntoRequestBodySize(BodySizeConfig.observe(buckets))
         )
         base = Client[IO](req =>
           Resource
@@ -297,8 +315,12 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
     ) {
       val boom = new RuntimeException("consumer failure")
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
-          middleware <- ClientMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+          middleware <- ClientMetrics.middleware[IO](
+            config(BodySizeConfig.observe(buckets))
+          )
           base = Client[IO](_ => Resource.pure(Response[IO]().withBodyStream(payload)))
           result <- middleware(base)
             .run(request)
@@ -319,8 +341,12 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
   test("catching a source error does not make its size complete or erase the HTTP error") {
     val boom = new RuntimeException("caught source error")
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ClientMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ClientMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         base = Client[IO](_ =>
           Resource.pure(Response[IO]().withBodyStream(payload ++ Stream.raiseError[IO](boom)))
         )
@@ -334,12 +360,13 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
 
   test("request and response size sources and buckets are independent") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       val requestBuckets = BucketBoundaries(Vector(0d, 2d, 10d))
       for {
         middleware <- ClientMetrics.middleware[IO](
-          kit,
           config(BodySizeConfig.observe(buckets))
-            .optIntoRequestBodySize(BodySizeConfig.contentLength(requestBuckets)),
+            .optIntoRequestBodySize(BodySizeConfig.contentLength(requestBuckets))
         )
         req = request
           .withBodyStream(payload)
@@ -364,8 +391,12 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
   test("backend cleanup failure after EOF does not change the recorded size or HTTP outcome") {
     val boom = new RuntimeException("backend cleanup failure")
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ClientMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ClientMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         base = Client[IO](_ =>
           Resource
             .make(IO.pure(Response[IO]().withBodyStream(payload)))(_ => IO.raiseError[Unit](boom))
@@ -381,8 +412,12 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
 
   test("backend draining an unread response cannot add a late observed size") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ClientMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ClientMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         effects <- Ref.of[IO, Int](0)
         response = Response[IO]().withBodyStream(payload.onFinalize(effects.update(_ + 1)))
         base = Client[IO](_ => Resource.make(IO.pure(response))(_.body.compile.drain))
@@ -398,12 +433,14 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
 
   test("disabled and excluded response-size instrumentation produces no sample") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        disabled <- ClientMetrics.middleware[IO](kit, ClientMetricsConfig.default)
+        disabled <- ClientMetrics
+          .middleware[IO](ClientMetricsConfig.default)
         excluded <- ClientMetrics.middleware[IO](
-          kit,
           config(BodySizeConfig.observe(buckets))
-            .withRequestFilter(PerRequestFilter.neverEnabled),
+            .withRequestFilter(PerRequestFilter.neverEnabled)
         )
         response = Response[IO]().withBodyStream(payload)
         base = Client[IO](_ => Resource.pure(response))
@@ -419,8 +456,12 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
 
   test("each acquisition of a reused resource has independent response observation state") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ClientMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ClientMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         resource = middleware(
           Client[IO](_ => Resource.pure(Response[IO]().withBodyStream(payload)))
         ).run(request)
@@ -437,15 +478,16 @@ class ClientResponseBodySizeTest extends CatsEffectSuite with ClientMetricsTestS
         s"GZip placement controls visible response representation: observe=$observed beforeDecompression=$beforeDecompression"
       ) {
         OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+          implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+          implicit val contextManager: ContextManager[IO] = kit.contextManager
           val raw = Vector.fill[Byte](128)(42)
           for {
             encoded <- Stream.emits(raw).covary[IO].through(Compression[IO].gzip()).compile.toVector
             middleware <- ClientMetrics.middleware[IO](
-              kit,
               config(
                 if (observed) BodySizeConfig.observe(buckets)
                 else BodySizeConfig.contentLength(buckets)
-              ),
+              )
             )
             response = length(
               Response[IO]().withBodyStream(Stream.emits(encoded).covary[IO]),

@@ -28,6 +28,8 @@ import org.http4s.Response
 import org.http4s.Status
 import org.http4s.client.Client
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.metrics.data.MetricData
@@ -98,10 +100,11 @@ class ClientMetricsLifecycleTest extends CatsEffectSuite with ClientMetricsTestS
     test(s"lifecycle: records one duration and balances active requests: $mode") {
       TestControl.executeEmbed {
         OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+          implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+          implicit val contextManager: ContextManager[IO] = testkit.contextManager
           for {
             middleware <- ClientMetrics.middleware[IO](
-              testkit,
-              ClientMetricsConfig.default.optIntoActiveRequests.withAttributes(Attributes(custom)),
+              ClientMetricsConfig.default.optIntoActiveRequests.withAttributes(Attributes(custom))
             )
             entered <- Deferred[IO, Unit]
             during <- Ref.of[IO, List[MetricData]](Nil)
@@ -193,12 +196,13 @@ class ClientMetricsLifecycleTest extends CatsEffectSuite with ClientMetricsTestS
 
   test("body: an observed body exception takes precedence over an error response status") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       val boom = new IllegalStateException("body")
       for {
         middleware <- ClientMetrics
           .middleware[IO](
-            testkit,
-            ClientMetricsConfig.default.optIntoActiveRequests.withAttributes(Attributes(custom)),
+            ClientMetricsConfig.default.optIntoActiveRequests.withAttributes(Attributes(custom))
           )
         base = Client[IO](_ =>
           Resource.pure(
@@ -230,11 +234,12 @@ class ClientMetricsLifecycleTest extends CatsEffectSuite with ClientMetricsTestS
 
   test("acquisition: resource construction is lazy and each acquisition creates a new exchange") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       for {
         middleware <- ClientMetrics
           .middleware[IO](
-            testkit,
-            ClientMetricsConfig.default.optIntoActiveRequests.withAttributes(Attributes(custom)),
+            ClientMetricsConfig.default.optIntoActiveRequests.withAttributes(Attributes(custom))
           )
         base = Client[IO](_ => Resource.pure(Response[IO]()))
         response = middleware(base).run(request)

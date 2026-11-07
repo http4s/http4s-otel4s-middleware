@@ -30,6 +30,8 @@ import org.http4s.otel4s.middleware.ErrorClassifier
 import org.http4s.otel4s.middleware.metrics.BodySizeConfig
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIString
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics.BucketBoundaries
@@ -55,15 +57,16 @@ class ClientMetricsConfigTest extends CatsEffectSuite with ClientMetricsTestSupp
   ).foreach { case (method, status, isError) =>
     test(s"classification: response classifier receives request and response: $method $status") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+        implicit val contextManager: ContextManager[IO] = testkit.contextManager
         var evaluations = 0
         for {
           middleware <- ClientMetrics.middleware[IO](
-            testkit,
             ClientMetricsConfig.default.optIntoActiveRequests
               .withErrorClassifier { (req, resp) =>
                 evaluations += 1
                 req.method == Method.GET && Set(Status.Ok, Status.ServiceUnavailable)(resp.status)
-              },
+              }
           )
           client = middleware(Client[IO](_ => Resource.pure(Response[IO](status))))
           _ <- client.run(request.withMethod(method)).use(_.body.compile.drain)
@@ -86,12 +89,13 @@ class ClientMetricsConfigTest extends CatsEffectSuite with ClientMetricsTestSupp
       s"classification: body exception takes precedence over configured status classification: $classifiedError"
     ) {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+        implicit val contextManager: ContextManager[IO] = testkit.contextManager
         val boom = new IllegalStateException("body")
         for {
           middleware <- ClientMetrics.middleware[IO](
-            testkit,
             ClientMetricsConfig.default.optIntoActiveRequests
-              .withErrorClassifier((_, _) => classifiedError),
+              .withErrorClassifier((_, _) => classifiedError)
           )
           client = middleware(
             Client[IO](_ =>
@@ -122,9 +126,13 @@ class ClientMetricsConfigTest extends CatsEffectSuite with ClientMetricsTestSupp
     val original = ClientMetricsConfig.default.optIntoActiveRequests
     val derived = original.withErrorClassifier(ErrorClassifier.default.excluding(Status.NotFound))
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       for {
-        defaultMiddleware <- ClientMetrics.middleware[IO](testkit, original)
-        customMiddleware <- ClientMetrics.middleware[IO](testkit, derived)
+        defaultMiddleware <- ClientMetrics
+          .middleware[IO](original)
+        customMiddleware <- ClientMetrics
+          .middleware[IO](derived)
         base = Client[IO](_ => Resource.pure(Response[IO](Status.NotFound)))
         _ <- defaultMiddleware(base).run(request).use(_.body.compile.drain)
         _ <- customMiddleware(base).run(request).use(_.body.compile.drain)
@@ -156,8 +164,10 @@ class ClientMetricsConfigTest extends CatsEffectSuite with ClientMetricsTestSupp
     kit.use { first =>
       kit.use { second =>
         for {
-          firstMiddleware <- ClientMetrics.middleware[IO](first, config)
-          secondMiddleware <- ClientMetrics.middleware[IO](second, config)
+          firstMiddleware <- ClientMetrics
+            .middleware[IO](config)(implicitly, first.meterProvider, first.contextManager)
+          secondMiddleware <- ClientMetrics
+            .middleware[IO](config)(implicitly, second.meterProvider, second.contextManager)
           base = Client[IO](_ => Resource.pure(Response[IO]()))
           _ <- firstMiddleware(base).run(request).use(_.body.compile.drain)
           _ <- firstMiddleware(base).run(request).use(_.body.compile.drain)
@@ -186,8 +196,11 @@ class ClientMetricsConfigTest extends CatsEffectSuite with ClientMetricsTestSupp
     val configured = original.withResponseDurationSecondsHistogramBuckets(buckets)
     assertNotEquals(original.responseDurationSecondsHistogramBuckets, buckets)
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       for {
-        middleware <- ClientMetrics.middleware[IO](testkit, configured)
+        middleware <- ClientMetrics
+          .middleware[IO](configured)
         client = middleware(Client[IO](_ => Resource.pure(Response[IO]())))
         _ <- client.run(request).use(_.body.compile.drain)
         metrics <- testkit.collectMetrics
@@ -225,8 +238,11 @@ class ClientMetricsConfigTest extends CatsEffectSuite with ClientMetricsTestSupp
       assertEquals(config.activeRequestsEnabled, enabled)
       assert(!ClientMetricsConfig.default.activeRequestsEnabled)
       OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+        implicit val contextManager: ContextManager[IO] = testkit.contextManager
         for {
-          middleware <- ClientMetrics.middleware[IO](testkit, config)
+          middleware <- ClientMetrics
+            .middleware[IO](config)
           client = middleware(Client[IO](_ => Resource.pure(Response[IO]())))
           _ <- client.run(request).use(_.body.compile.drain)
           metrics <- testkit.collectMetrics
@@ -270,11 +286,14 @@ class ClientMetricsConfigTest extends CatsEffectSuite with ClientMetricsTestSupp
 
   test("default body-size opt-ins record declared lengths with default byte boundaries") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       val config = ClientMetricsConfig.default.optIntoRequestBodySize.optIntoResponseBodySize
       val req = request.putHeaders(Header.Raw(CIString("Content-Length"), "3"))
       val resp = Response[IO]().putHeaders(Header.Raw(CIString("Content-Length"), "5"))
       for {
-        middleware <- ClientMetrics.middleware[IO](testkit, config)
+        middleware <- ClientMetrics
+          .middleware[IO](config)
         _ <- middleware(Client[IO](_ => Resource.pure(resp))).run(req).use(_ => IO.unit)
         metrics <- testkit.collectMetrics
       } yield {

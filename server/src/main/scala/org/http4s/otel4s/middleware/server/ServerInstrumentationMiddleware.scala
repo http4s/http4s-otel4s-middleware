@@ -33,15 +33,16 @@ import org.http4s.otel4s.middleware.instances.textMap._
 import org.http4s.otel4s.middleware.metrics.server.ServerMetricsConfig
 import org.http4s.otel4s.middleware.metrics.server.ServerMetricsRecorder
 import org.typelevel.otel4s.Attributes
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.trace.Span
 import org.typelevel.otel4s.trace.SpanKind
 import org.typelevel.otel4s.trace.StatusCode
 import org.typelevel.otel4s.trace.Tracer
 
-private[server] final class ServerInstrumentationMiddleware[F[_]: Temporal] private (
-    otel4s: Otel4s[F],
-    tracer: Tracer[F],
+private[server] final class ServerInstrumentationMiddleware[
+    F[_]: Temporal: Tracer: ContextManager
+] private (
     recorder: ServerMetricsRecorder[F],
     metricsConfig: ServerMetricsConfig,
     tracingConfig: ServerTracingConfig,
@@ -49,7 +50,7 @@ private[server] final class ServerInstrumentationMiddleware[F[_]: Temporal] priv
   import ServerInstrumentationMiddleware._
 
   def apply(app: HttpApp[F]): HttpApp[F] = HttpApp[F] { request =>
-    (recorder.isEnabled, tracer.meta.isEnabled).tupled.flatMap {
+    (recorder.isEnabled, Tracer[F].meta.isEnabled).tupled.flatMap {
       case (false, false) => app(request)
       case (metricsEnabled, tracingEnabled) =>
         val prelude = request.requestPrelude
@@ -58,7 +59,7 @@ private[server] final class ServerInstrumentationMiddleware[F[_]: Temporal] priv
         if (!metered && !traced) app(request)
         else {
           val exchange = instrument(app, request, prelude, metered, traced)
-          if (traced) tracer.joinOrRoot(request.headers)(exchange) else exchange
+          if (traced) Tracer[F].joinOrRoot(request.headers)(exchange) else exchange
         }
     }
   }
@@ -92,7 +93,7 @@ private[server] final class ServerInstrumentationMiddleware[F[_]: Temporal] priv
       traced: Boolean,
   ): F[Response[F]] =
     if (traced && tracingConfig.reversePropagationFilter(request).isEnabled)
-      tracer.propagate(Headers.empty).map { headers =>
+      Tracer[F].propagate(Headers.empty).map { headers =>
         if (headers.headers.isEmpty) response
         else response.withHeaders(response.headers ++ headers)
       }
@@ -102,7 +103,7 @@ private[server] final class ServerInstrumentationMiddleware[F[_]: Temporal] priv
     val provider = tracingConfig.spanDataProvider
     val noBody = request.withBodyStream(Stream.empty)
     val shared = provider.processSharedData(noBody)
-    tracer
+    Tracer[F]
       .spanBuilder(provider.spanName(noBody, shared))
       .withSpanKind(SpanKind.Server)
       .addAttributes(provider.requestAttributes(noBody, shared))
@@ -119,11 +120,8 @@ private[server] final class ServerInstrumentationMiddleware[F[_]: Temporal] priv
   ): F[Exchange[F]] = for {
     start <- ExchangeCompletion.started[F]
     span <- if (traced) startSpan(request, start).map(_.some) else none[Span[F]].pure[F]
-    context <- span.fold(otel4s.localContext.ask[otel4s.Ctx]) { span =>
-      tracer.childScope(span.context)(otel4s.localContext.ask[otel4s.Ctx])
-    }
-    runInContext = new (F ~> F) {
-      def apply[A](fa: F[A]): F[A] = otel4s.localContext.scope(fa)(context)
+    runInContext <- span.fold(ContextManager[F].captureScope) { span =>
+      Tracer[F].childScope(span.context)(ContextManager[F].captureScope)
     }
     response <- Ref.of[F, Option[Response[F]]](None)
     tracing = span.map(new TraceRecording(_, response, prelude, tracingConfig))
@@ -149,21 +147,19 @@ private[server] final class ServerInstrumentationMiddleware[F[_]: Temporal] priv
 }
 
 private[server] object ServerInstrumentationMiddleware {
-  def create[F[_]: Temporal](
-      otel4s: Otel4s[F],
-      tracer: Tracer[F],
+  def create[F[_]: Temporal: MeterProvider: Tracer: ContextManager](
       metricsConfig: ServerMetricsConfig,
       tracingConfig: ServerTracingConfig,
   ): F[HttpApp[F] => HttpApp[F]] =
-    ServerMetricsRecorder.create(otel4s, metricsConfig).map { recorder =>
-      new ServerInstrumentationMiddleware(
-        otel4s,
-        tracer,
-        recorder,
-        metricsConfig,
-        tracingConfig,
-      ).apply
-    }
+    ServerMetricsRecorder
+      .create[F](metricsConfig)
+      .map { recorder =>
+        new ServerInstrumentationMiddleware(
+          recorder,
+          metricsConfig,
+          tracingConfig,
+        ).apply
+      }
 
   /** Records response attributes and ends the span, including when a callback fails. */
   private final class TraceRecording[F[_]: Temporal](

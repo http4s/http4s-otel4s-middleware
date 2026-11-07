@@ -32,6 +32,8 @@ import org.http4s.otel4s.middleware.trace.client.ClientMiddleware
 import org.http4s.otel4s.middleware.trace.client.ClientSpanDataProvider
 import org.http4s.otel4s.middleware.trace.client.UriRedactor
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.context.TraceContext
@@ -71,10 +73,11 @@ class ClientMetricsTracingTest extends CatsEffectSuite {
   ) {
     TestControl.executeEmbed {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+        implicit val contextManager: ContextManager[IO] = testkit.contextManager
         for {
           middleware <- ClientMetrics.middleware[IO](
-            testkit,
-            ClientMetricsConfig.default.optIntoActiveRequests.withAttributes(Attributes(custom)),
+            ClientMetricsConfig.default.optIntoActiveRequests.withAttributes(Attributes(custom))
           )
           tracer <- testkit.tracerProvider.get("test")
           base = Client[IO](_ =>
@@ -121,11 +124,12 @@ class ClientMetricsTracingTest extends CatsEffectSuite {
       test(s"existing tracing composition: tracingOutside=$tracingOutside, unread=$unread") {
         TestControl.executeEmbed {
           OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+            implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+            implicit val contextManager: ContextManager[IO] = testkit.contextManager
             implicit val tracerProvider: TracerProvider[IO] = testkit.tracerProvider
             for {
               middleware <- ClientMetrics.middleware[IO](
-                testkit,
-                ClientMetricsConfig.default.optIntoActiveRequests.withAttributes(Attributes(custom)),
+                ClientMetricsConfig.default.optIntoActiveRequests.withAttributes(Attributes(custom))
               )
               tracing <- ClientMiddleware
                 .builder[IO](

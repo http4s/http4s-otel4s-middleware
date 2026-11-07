@@ -34,6 +34,9 @@ import org.http4s.otel4s.middleware.metrics.client.ClientMetricsConfig
 import org.http4s.otel4s.middleware.trace.client.ClientSpanDataProvider
 import org.http4s.otel4s.middleware.trace.client.UriRedactor
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.trace.TracerProvider
+import org.typelevel.otel4s.metrics.MeterProvider
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.context.propagation.TextMapGetter
 import org.typelevel.otel4s.context.propagation.TextMapPropagator
@@ -364,13 +367,16 @@ class ClientInstrumentationLifecycleTest extends CatsEffectSuite {
       }
     }
   }
-  private def createMiddleware(kit: OpenTelemetrySdkTestkit[IO]): IO[Client[IO] => Client[IO]] =
+  private def createMiddleware(kit: OpenTelemetrySdkTestkit[IO]): IO[Client[IO] => Client[IO]] = {
+    implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+    implicit val contextManager: ContextManager[IO] = kit.contextManager
+    implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
     ClientInstrumentation.middleware[IO](
-      kit,
       ClientMetricsConfig.default.optIntoActiveRequests,
       ClientTracingConfig(
         ClientSpanDataProvider.openTelemetry(new UriRedactor.OnlyRedactUserInfo {})
       ),
     )
+  }
 
 }

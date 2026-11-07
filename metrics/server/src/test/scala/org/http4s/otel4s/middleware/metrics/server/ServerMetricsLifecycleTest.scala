@@ -28,6 +28,8 @@ import org.http4s.Request
 import org.http4s.Response
 import org.http4s.Status
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.metrics.data.MetricData
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
@@ -70,6 +72,8 @@ class ServerMetricsLifecycleTest extends CatsEffectSuite with ServerMetricsTestS
     test(s"duration and active requests follow the selected server boundary: $mode") {
       TestControl.executeEmbed {
         OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+          implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+          implicit val contextManager: ContextManager[IO] = kit.contextManager
           val boom = new IllegalStateException("source or consumer failure")
           val status = if (mode == "error-status") Status.ServiceUnavailable else Status.Ok
           for {
@@ -78,7 +82,9 @@ class ServerMetricsLifecycleTest extends CatsEffectSuite with ServerMetricsTestS
             afterApp <- Ref.of[IO, List[MetricData]](Nil)
             cleanups <- Ref.of[IO, Int](0)
             middleware <- ServerMetrics
-              .middleware[IO](kit, ServerMetricsConfig.default.optIntoActiveRequests)
+              .middleware[IO](
+                ServerMetricsConfig.default.optIntoActiveRequests
+              )
             cleanup = IO.sleep(5.seconds) >> cleanups.update(_ + 1) >>
               (if (mode == "cleanup-error") IO.raiseError[Unit](boom) else IO.unit)
             body = (Stream.sleep_[IO](3.seconds) ++
@@ -186,9 +192,13 @@ class ServerMetricsLifecycleTest extends CatsEffectSuite with ServerMetricsTestS
     .foreach { case (method, status) =>
       test(s"an unstarted empty body stays incomplete even for $method/${status.code}") {
         OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+          implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+          implicit val contextManager: ContextManager[IO] = kit.contextManager
           for {
             middleware <- ServerMetrics
-              .middleware[IO](kit, ServerMetricsConfig.default.optIntoActiveRequests)
+              .middleware[IO](
+                ServerMetricsConfig.default.optIntoActiveRequests
+              )
             _ <- middleware(HttpApp[IO](_ => IO.pure(Response[IO](status))))(
               request.withMethod(method)
             )
@@ -210,12 +220,16 @@ class ServerMetricsLifecycleTest extends CatsEffectSuite with ServerMetricsTestS
 
   test("body wrapping preserves demand, chunks, request effects, and cleanup") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
         pulls <- Ref.of[IO, Int](0)
         requestEffects <- Ref.of[IO, Int](0)
         releases <- Ref.of[IO, Int](0)
         middleware <- ServerMetrics
-          .middleware[IO](kit, ServerMetricsConfig.default.optIntoActiveRequests)
+          .middleware[IO](
+            ServerMetricsConfig.default.optIntoActiveRequests
+          )
         first = fs2.Chunk.array(Array[Byte](1, 2, 3))
         second = fs2.Chunk.array(Array[Byte](4, 5))
         body = (Stream.eval(pulls.update(_ + 1)).drain ++ Stream.chunk(first) ++
@@ -241,12 +255,16 @@ class ServerMetricsLifecycleTest extends CatsEffectSuite with ServerMetricsTestS
 
   test("concurrent body evaluations can complete the exchange only once") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
         entered <- Deferred[IO, Unit]
         release <- Deferred[IO, Unit]
         evaluations <- Ref.of[IO, Int](0)
         middleware <- ServerMetrics
-          .middleware[IO](kit, ServerMetricsConfig.default.optIntoActiveRequests)
+          .middleware[IO](
+            ServerMetricsConfig.default.optIntoActiveRequests
+          )
         body = Stream.exec(evaluations.updateAndGet(_ + 1).flatMap {
           case 2 => entered.complete(()).void
           case _ => IO.unit

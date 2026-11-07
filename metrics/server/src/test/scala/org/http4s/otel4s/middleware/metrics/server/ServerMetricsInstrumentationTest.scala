@@ -28,6 +28,8 @@ import org.http4s.otel4s.middleware.PerRequestConfig
 import org.http4s.otel4s.middleware.metrics.BodySizeConfig
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics.Histogram
@@ -72,6 +74,7 @@ class ServerMetricsInstrumentationTest extends CatsEffectSuite with ServerMetric
         ) =>
       test(s"instrument availability: $name") {
         OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+          implicit val contextManager: ContextManager[IO] = kit.contextManager
           val enabled =
             durationEnabled || activeEnabled || requestSizeEnabled || responseSizeEnabled
           var filters = 0
@@ -117,7 +120,6 @@ class ServerMetricsInstrumentationTest extends CatsEffectSuite with ServerMetric
                 meter.histogram[Long](HttpExperimentalMetrics.ServerResponseBodySize.name).create
               else IO.pure(Histogram.noop[IO, Long])
             recorder = new ServerMetricsRecorder[IO](
-              kit,
               config,
               duration,
               active,
@@ -183,12 +185,13 @@ class ServerMetricsInstrumentationTest extends CatsEffectSuite with ServerMetric
   test("a failed error classifier still balances active requests and preserves body cleanup") {
     val boom = new IllegalStateException("classification failure")
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
         cleanups <- Ref.of[IO, Int](0)
         middleware <- ServerMetrics.middleware[IO](
-          kit,
           ServerMetricsConfig.default.optIntoActiveRequests
-            .withErrorClassifier((_, _) => throw boom),
+            .withErrorClassifier((_, _) => throw boom)
         )
         response <- middleware(
           HttpApp[IO](_ =>
@@ -225,11 +228,14 @@ class ServerMetricsInstrumentationTest extends CatsEffectSuite with ServerMetric
           )
         )
         .use { kit =>
+          implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+          implicit val contextManager: ContextManager[IO] = kit.contextManager
           val config =
             ServerMetricsConfig.default.optIntoActiveRequests.optIntoRequestBodySize.optIntoResponseBodySize
           for {
             cleanups <- Ref.of[IO, Int](0)
-            middleware <- ServerMetrics.middleware[IO](kit, config)
+            middleware <- ServerMetrics
+              .middleware[IO](config)
             response <- middleware(
               HttpApp[IO](_ =>
                 IO.pure(
@@ -269,6 +275,7 @@ class ServerMetricsInstrumentationTest extends CatsEffectSuite with ServerMetric
       s"body-size metrics preserve messages without an enabled observer: configured=$configured"
     ) {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         val config =
           if (configured)
             ServerMetricsConfig.default
@@ -277,7 +284,6 @@ class ServerMetricsInstrumentationTest extends CatsEffectSuite with ServerMetric
           else ServerMetricsConfig.default
         val histogram = Option.when(configured)(Histogram.noop[IO, Long])
         val recorder = new ServerMetricsRecorder[IO](
-          kit,
           config,
           Histogram.noop[IO, Double],
           None,

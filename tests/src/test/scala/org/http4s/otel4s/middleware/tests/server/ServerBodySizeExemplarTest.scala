@@ -31,6 +31,8 @@ import org.http4s.otel4s.middleware.metrics.server.ServerMetrics
 import org.http4s.otel4s.middleware.metrics.server.ServerMetricsConfig
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics.BucketBoundaries
 import org.typelevel.otel4s.sdk.context.TraceContext
@@ -74,6 +76,8 @@ class ServerBodySizeExemplarTest extends CatsEffectSuite {
   ).foreach { case (observed, mode) =>
     test(s"size exemplars are recorded once before the HTTP span ends: observe=$observed $mode") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         val sizeConfig =
           if (observed) BodySizeConfig.observe(buckets) else BodySizeConfig.contentLength(buckets)
         val config = ServerMetricsConfig.default.optIntoActiveRequests
@@ -81,7 +85,7 @@ class ServerBodySizeExemplarTest extends CatsEffectSuite {
           .optIntoResponseBodySize(sizeConfig)
         val boom = new IllegalStateException("response body")
         for {
-          middleware <- ServerMetrics.middleware[IO](kit, config)
+          middleware <- ServerMetrics.middleware[IO](config)
           tracer <- kit.tracerProvider.get("test")
           entered <- Deferred[IO, Unit]
           _ <- tracer.spanBuilder("HTTP").withSpanKind(SpanKind.Server).build.use { http =>

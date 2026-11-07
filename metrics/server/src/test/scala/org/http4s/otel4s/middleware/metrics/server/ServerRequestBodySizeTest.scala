@@ -34,6 +34,8 @@ import org.http4s.otel4s.middleware.PerRequestFilter
 import org.http4s.otel4s.middleware.metrics.BodySizeConfig
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.metrics.BucketBoundaries
@@ -74,9 +76,12 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
   ).foreach { case (name, settings, length, consume, expected) =>
     test(name) {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
           evaluations <- Ref.of[IO, Int](0)
-          middleware <- ServerMetrics.middleware[IO](kit, config(settings))
+          middleware <- ServerMetrics
+            .middleware[IO](config(settings))
           source = (if (consume == "empty") Stream.empty else payload).onFinalize(
             evaluations.update(_ + 1)
           )
@@ -114,13 +119,16 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
         s"failure preserves error and records only a known request size: ${settings.strategy}/$phase"
       ) {
         OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+          implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+          implicit val contextManager: ContextManager[IO] = kit.contextManager
           val boom = new IllegalStateException("failure")
           val complete = phase.endsWith("after-eof")
           val expected =
             if (settings.strategy == BodySizeConfig.Strategy.ContentLength) Some(99L)
             else Option.when(complete)(5L)
           for {
-            middleware <- ServerMetrics.middleware[IO](kit, config(settings))
+            middleware <- ServerMetrics
+              .middleware[IO](config(settings))
             source =
               if (phase == "source") payload ++ Stream.raiseError[IO](boom)
               else if (phase == "cleanup") payload.onFinalize(IO.raiseError[Unit](boom))
@@ -157,9 +165,12 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
       test(s"cancellation retains only known request size: ${settings.strategy}/$phase") {
         TestControl.executeEmbed {
           OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+            implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+            implicit val contextManager: ContextManager[IO] = kit.contextManager
             for {
               entered <- Deferred[IO, Unit]
-              middleware <- ServerMetrics.middleware[IO](kit, config(settings))
+              middleware <- ServerMetrics
+                .middleware[IO](config(settings))
               stop = entered.complete(()).void >> IO.never[Unit]
               source = if (phase == "app-before-eof") payload ++ Stream.exec(stop) else payload
               app = middleware(
@@ -191,8 +202,12 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
     "a caught request-source error omits observed size without changing existing HTTP classification"
   ) {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ServerMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ServerMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         response <- middleware(
           HttpApp[IO](req =>
             req.body
@@ -210,8 +225,12 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
 
   test("request consumption deferred into the response body can reach EOF before recording") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ServerMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ServerMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         response <- middleware(
           HttpApp[IO](req => IO.pure(Response[IO]().withBodyStream(req.body)))
         )(request)
@@ -226,10 +245,14 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
 
   test("a request still streaming at response completion cannot add a sample after late EOF") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
         entered <- Deferred[IO, Unit]
         release <- Deferred[IO, Unit]
-        middleware <- ServerMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ServerMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         source = payload ++ Stream.exec(entered.complete(()).void >> release.get)
         _ <- Resource
           .make(Ref.of[IO, Option[cats.effect.FiberIO[Unit]]](None))(
@@ -258,8 +281,11 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
   List(BodySizeConfig.contentLength(buckets), BodySizeConfig.observe(buckets)).foreach { settings =>
     test(s"a known request size is not published for an unstarted response: ${settings.strategy}") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
-          middleware <- ServerMetrics.middleware[IO](kit, config(settings))
+          middleware <- ServerMetrics
+            .middleware[IO](config(settings))
           _ <- middleware(HttpApp[IO](req => req.body.compile.drain.as(Response[IO]())))(
             declared(request, Some(99L))
           )
@@ -284,6 +310,8 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
 
   test("disabled and excluded instrumentation leaves the original request stream intact") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
         effects <- Ref.of[IO, Int](0)
         req = request.withBodyStream(payload.onFinalize(effects.update(_ + 1)))
@@ -292,12 +320,14 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
           config(BodySizeConfig.observe(buckets))
             .withRequestFilter(PerRequestFilter.neverEnabled),
         ).foldLeft(IO.unit) { (previous, settings) =>
-          previous >> ServerMetrics.middleware[IO](kit, settings).flatMap { wrap =>
-            wrap(HttpApp[IO] { received =>
-              assert(received eq req)
-              received.body.compile.drain.as(Response[IO]())
-            })(req).flatMap(_.body.compile.drain)
-          }
+          previous >> ServerMetrics
+            .middleware[IO](settings)
+            .flatMap { wrap =>
+              wrap(HttpApp[IO] { received =>
+                assert(received eq req)
+                received.body.compile.drain.as(Response[IO]())
+              })(req).flatMap(_.body.compile.drain)
+            }
         }
         metrics <- kit.collectMetrics
         count <- effects.get
@@ -310,8 +340,12 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
 
   test("each invocation has independent observation state and response replay cannot record twice") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ServerMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ServerMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         effect = middleware(HttpApp[IO](req => req.body.compile.drain.as(Response[IO]())))(request)
         first <- effect
         second <- effect
@@ -336,8 +370,12 @@ class ServerRequestBodySizeTest extends CatsEffectSuite with ServerMetricsTestSu
   List((Method.HEAD, Status.Ok), (Method.POST, Status.NoContent)).foreach { case (method, status) =>
     test(s"response no-body rules do not replace request-body observation: $method/${status.code}") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
-          middleware <- ServerMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+          middleware <- ServerMetrics.middleware[IO](
+            config(BodySizeConfig.observe(buckets))
+          )
           response <- middleware(
             HttpApp[IO](req => req.body.compile.drain.as(Response[IO](status)))
           )(request.withMethod(method))

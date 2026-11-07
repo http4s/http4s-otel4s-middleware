@@ -38,6 +38,9 @@ import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
+import org.typelevel.otel4s.trace.TracerProvider
+import org.typelevel.otel4s.metrics.MeterProvider
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.context.TraceContext
 import org.typelevel.otel4s.sdk.testkit.InstrumentationScopeExpectation
@@ -241,12 +244,14 @@ class ServerInstrumentationPoliciesTest extends CatsEffectSuite {
           .addTracerProviderCustomizer(_.withSampler(Sampler.alwaysOff))
       )
       .use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
+        implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
         for {
           tracer <- kit.tracerProvider.get("test")
           http <- Ref.of[IO, Option[SpanContext]](None)
           producer <- Ref.of[IO, Option[SpanContext]](None)
           wrap <- ServerInstrumentation.middleware[IO](
-            kit,
             ServerMetricsConfig.default.optIntoActiveRequests,
             ServerTracingConfig(provider)
               .withReversePropagationFilter(PerRequestFilter.alwaysEnabled),
@@ -293,6 +298,9 @@ class ServerInstrumentationPoliciesTest extends CatsEffectSuite {
     "a reused effect creates independent exchanges and evaluates policies once per invocation"
   ) {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
+      implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
       var metricsFilters = 0
       var labels = 0
       var traceFilters = 0
@@ -322,7 +330,7 @@ class ServerInstrumentationPoliciesTest extends CatsEffectSuite {
         tracer <- kit.tracerProvider.get("test")
         contexts <- Ref.of[IO, Vector[SpanContext]](Vector.empty)
         releases <- Ref.of[IO, Int](0)
-        wrap <- ServerInstrumentation.middleware[IO](kit, metricsConfig, tracingConfig)
+        wrap <- ServerInstrumentation.middleware[IO](metricsConfig, tracingConfig)
         base = HttpApp[IO](_ =>
           tracer.currentSpanContext
             .flatMap(ctx => contexts.update(_ :+ ctx.get))
@@ -379,6 +387,9 @@ class ServerInstrumentationPoliciesTest extends CatsEffectSuite {
     test(s"$failure failure still ends the HTTP span") {
       val boom = new IllegalStateException("callback failure")
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
+        implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
         val metricsConfig = ServerMetricsConfig.default.optIntoActiveRequests
           .withRequestAttributes { _ =>
             if (failure == "metrics initialization") throw boom else Attributes.empty
@@ -392,7 +403,7 @@ class ServerInstrumentationPoliciesTest extends CatsEffectSuite {
         for {
           calls <- Ref.of[IO, Int](0)
           cleanups <- Ref.of[IO, Int](0)
-          wrap <- ServerInstrumentation.middleware[IO](kit, metricsConfig, tracingConfig)
+          wrap <- ServerInstrumentation.middleware[IO](metricsConfig, tracingConfig)
           base = HttpApp[IO](_ =>
             if (failure == "app construction") throw boom
             else
@@ -462,13 +473,17 @@ class ServerInstrumentationPoliciesTest extends CatsEffectSuite {
       metricsConfig: ServerMetricsConfig,
       tracingFilter: PerRequestFilter,
       reversePropagationFilter: PerRequestFilter,
-  ): IO[HttpApp[IO] => HttpApp[IO]] = ServerInstrumentation.middleware[IO](
-    kit,
-    metricsConfig,
-    ServerTracingConfig(provider)
-      .withRequestFilter(tracingFilter)
-      .withReversePropagationFilter(reversePropagationFilter),
-  )
+  ): IO[HttpApp[IO] => HttpApp[IO]] = {
+    implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+    implicit val contextManager: ContextManager[IO] = kit.contextManager
+    implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
+    ServerInstrumentation.middleware[IO](
+      metricsConfig,
+      ServerTracingConfig(provider)
+        .withRequestFilter(tracingFilter)
+        .withReversePropagationFilter(reversePropagationFilter),
+    )
+  }
 
   private def enabled(value: Boolean): PerRequestConfig =
     if (value) PerRequestConfig.Enabled else PerRequestConfig.Disabled

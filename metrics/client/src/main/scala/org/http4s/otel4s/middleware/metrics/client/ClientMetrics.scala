@@ -18,7 +18,8 @@ package org.http4s.otel4s.middleware.metrics.client
 
 import cats.effect.Temporal
 import org.http4s.client.Client
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 
 /** Client metrics entry points. */
 object ClientMetrics {
@@ -28,11 +29,11 @@ object ClientMetrics {
     * Completes at body termination or unread-response release, before backend cleanup.
     * Observed acquisition/body errors take precedence over error response status.
     * Recording restores acquisition context. For HTTP-span exemplars, place tracing outside metrics.
+    * Supply the meter provider and context manager from the same telemetry instance.
     */
-  def middleware[F[_]: Temporal](
-      otel4s: Otel4s[F],
-      config: ClientMetricsConfig,
+  def middleware[F[_]: Temporal: MeterProvider: ContextManager](
+      config: ClientMetricsConfig
   ): F[Client[F] => Client[F]] =
-    ClientMetricsMiddleware.create(otel4s, config)
+    ClientMetricsMiddleware.create(config)
 
 }

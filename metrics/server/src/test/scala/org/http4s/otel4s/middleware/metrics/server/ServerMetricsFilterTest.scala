@@ -26,6 +26,8 @@ import org.http4s.Request
 import org.http4s.Response
 import org.http4s.otel4s.middleware.PerRequestConfig
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.Attributes
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.semconv.attributes.HttpAttributes
@@ -44,6 +46,8 @@ class ServerMetricsFilterTest extends CatsEffectSuite with ServerMetricsTestSupp
   List("success", "app-error", "app-cancel", "body-error", "body-cancel").foreach { mode =>
     test(s"excluded invocations preserve HTTP behavior and skip callbacks: $mode") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         val boom = new IllegalStateException("HTTP failure")
         var filters = 0
         val config = ServerMetricsConfig.default.optIntoActiveRequests
@@ -63,7 +67,7 @@ class ServerMetricsFilterTest extends CatsEffectSuite with ServerMetricsTestSupp
               Stream.exec(entered.complete(()).void) ++ Stream.never[IO]
             else Stream.empty
           original = Response[IO]().withBodyStream(body)
-          middleware <- ServerMetrics.middleware[IO](kit, config)
+          middleware <- ServerMetrics.middleware[IO](config)
           app = middleware(HttpApp[IO] { req =>
             assert(req eq request)
             if (mode == "app-error") IO.raiseError[Response[IO]](boom)
@@ -98,11 +102,13 @@ class ServerMetricsFilterTest extends CatsEffectSuite with ServerMetricsTestSupp
 
   test("request prelude selects which invocations are measured") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       val config = ServerMetricsConfig.default.optIntoActiveRequests.withRequestFilter { request =>
         if (request.method == Method.GET) PerRequestConfig.Enabled else PerRequestConfig.Disabled
       }
       for {
-        middleware <- ServerMetrics.middleware[IO](kit, config)
+        middleware <- ServerMetrics.middleware[IO](config)
         app = middleware(HttpApp[IO](_ => IO.pure(Response[IO]())))
         _ <- app(request).flatMap(_.body.compile.drain)
         _ <- app(request.withMethod(Method.POST)).flatMap(_.body.compile.drain)
