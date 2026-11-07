@@ -31,7 +31,9 @@ import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.metrics.BucketBoundaries
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectation
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectations
@@ -76,10 +78,11 @@ class ServerMetricsConfigTest extends CatsEffectSuite with ServerMetricsTestSupp
 
   test("default body-size opt-ins record declared lengths with default byte boundaries") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
         middleware <- ServerMetrics.middleware[IO](
-          kit,
-          ServerMetricsConfig.default.optIntoRequestBodySize.optIntoResponseBodySize,
+          ServerMetricsConfig.default.optIntoRequestBodySize.optIntoResponseBodySize
         )
         response <- middleware(
           HttpApp[IO](_ => IO.pure(Response[IO]().putHeaders(Header.Raw(ci"Content-Length", "5"))))
@@ -113,6 +116,8 @@ class ServerMetricsConfigTest extends CatsEffectSuite with ServerMetricsTestSupp
 
   test("filter and labels run lazily once per invocation, with immutable labels at decrement") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       var filters = 0
       var labels = 0
       var value = "captured"
@@ -123,7 +128,7 @@ class ServerMetricsConfigTest extends CatsEffectSuite with ServerMetricsTestSupp
         .withRequestFilter { _ => filters += 1; PerRequestConfig.Enabled }
         .withRequestAttributes { _ => labels += 1; Attributes(Attribute("operation", value)) }
       for {
-        middleware <- ServerMetrics.middleware[IO](kit, settings)
+        middleware <- ServerMetrics.middleware[IO](settings)
         responseF = middleware(HttpApp[IO](_ => IO.pure(Response[IO]())))(request)
         _ = assertEquals(filters, 0)
         _ = assertEquals(labels, 0)
@@ -156,6 +161,8 @@ class ServerMetricsConfigTest extends CatsEffectSuite with ServerMetricsTestSupp
     "configuration is immutable and reusable; repeated invocations have separate completion guards"
   ) {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       val defaults = ServerMetricsConfig.default.optIntoActiveRequests
       val buckets = BucketBoundaries(Vector(0d, 1d, 10d))
       val settings = defaults.optIntoServerAddress.optIntoServerPort
@@ -166,7 +173,9 @@ class ServerMetricsConfigTest extends CatsEffectSuite with ServerMetricsTestSupp
       assertEquals(settings.serverPortEnabled, true)
       for {
         middleware <- ServerMetrics
-          .middleware[IO](kit, defaults.withResponseDurationSecondsHistogramBuckets(buckets))
+          .middleware[IO](
+            defaults.withResponseDurationSecondsHistogramBuckets(buckets)
+          )
         effect = middleware(HttpApp[IO](_ => IO.pure(Response[IO]())))(request)
         first <- effect
         second <- effect
@@ -195,8 +204,10 @@ class ServerMetricsConfigTest extends CatsEffectSuite with ServerMetricsTestSupp
       assertEquals(original.activeRequestsEnabled, false)
       assertEquals(config.activeRequestsEnabled, enabled)
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
-          middleware <- ServerMetrics.middleware[IO](kit, config)
+          middleware <- ServerMetrics.middleware[IO](config)
           response <- middleware(HttpApp[IO](_ => IO.pure(Response[IO]())))(request)
           _ <- response.body.compile.drain
           metrics <- kit.collectMetrics
@@ -229,6 +240,8 @@ class ServerMetricsConfigTest extends CatsEffectSuite with ServerMetricsTestSupp
     .foreach { case (method, status, isError) =>
       test(s"classification: response classifier receives request and response: $method $status") {
         OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+          implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+          implicit val contextManager: ContextManager[IO] = kit.contextManager
           var classifications = 0
           val config = ServerMetricsConfig.default.optIntoActiveRequests.withErrorClassifier {
             (request, response) =>
@@ -236,7 +249,8 @@ class ServerMetricsConfigTest extends CatsEffectSuite with ServerMetricsTestSupp
               request.method == Method.GET && response.status == Status.NotFound
           }
           for {
-            middleware <- ServerMetrics.middleware[IO](kit, config)
+            middleware <- ServerMetrics
+              .middleware[IO](config)
             response <- middleware(HttpApp[IO](_ => IO.pure(Response[IO](status))))(
               request.withMethod(method)
             )
@@ -258,10 +272,12 @@ class ServerMetricsConfigTest extends CatsEffectSuite with ServerMetricsTestSupp
   test("classification: source exceptions take precedence over status classification") {
     val boom = new IllegalStateException("body error")
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       val config = ServerMetricsConfig.default.optIntoActiveRequests
         .withErrorClassifier((_, _) => true)
       for {
-        middleware <- ServerMetrics.middleware[IO](kit, config)
+        middleware <- ServerMetrics.middleware[IO](config)
         response <- middleware(
           HttpApp[IO](_ =>
             IO.pure(

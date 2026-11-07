@@ -21,8 +21,10 @@ import cats.syntax.flatMap._
 import org.http4s.client.Client
 import org.http4s.otel4s.middleware.BuildInfo
 import org.http4s.otel4s.middleware.metrics.client.ClientMetricsConfig
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.semconv.SchemaUrls
+import org.typelevel.otel4s.trace.TracerProvider
 
 /** HTTP client metrics and tracing. */
 object ClientInstrumentation {
@@ -37,20 +39,17 @@ object ClientInstrumentation {
     * Cancellation and errors in caller code do not count as HTTP failures.
     * Callers must release the response resource for unread responses to be recorded.
     */
-  def middleware[F[_]: Temporal](
-      otel4s: Otel4s[F],
+  def middleware[F[_]: Temporal: MeterProvider: TracerProvider: ContextManager](
       metricsConfig: ClientMetricsConfig,
       tracingConfig: ClientTracingConfig,
   ): F[Client[F] => Client[F]] =
-    otel4s.tracerProvider
+    TracerProvider[F]
       .tracer("org.http4s.otel4s.middleware.client")
       .withVersion(BuildInfo.version)
       .withSchemaUrl(SchemaUrls.V1_43_0)
       .get
-      .flatMap { tracer =>
-        ClientInstrumentationMiddleware.create(
-          otel4s,
-          tracer,
+      .flatMap { implicit tracer =>
+        ClientInstrumentationMiddleware.create[F](
           metricsConfig,
           tracingConfig,
         )

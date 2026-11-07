@@ -29,8 +29,9 @@ import org.http4s.otel4s.middleware.BuildInfo
 import org.http4s.otel4s.middleware.client.TypedClientAttributes
 import org.http4s.otel4s.middleware.metrics.BodySizeRecording
 import org.typelevel.otel4s.Attributes
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.metrics.Histogram
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.metrics.UpDownCounter
 import org.typelevel.otel4s.semconv.SchemaUrls
 
@@ -38,8 +39,9 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 
 /** Instruments and per-exchange recording, independent of completion ownership. */
-private[middleware] final class ClientMetricsRecorder[F[_]: Temporal] private[client] (
-    otel4s: Otel4s[F],
+private[middleware] final class ClientMetricsRecorder[
+    F[_]: Temporal: ContextManager
+] private[client] (
     config: ClientMetricsConfig,
     duration: Histogram[F, Double],
     active: Option[UpDownCounter[F, Long]],
@@ -83,7 +85,7 @@ private[middleware] final class ClientMetricsRecorder[F[_]: Temporal] private[cl
     }
 
     for {
-      context <- otel4s.localContext.ask[otel4s.Ctx]
+      runInContext <- ContextManager[F].captureScope
       responseData <- Ref.of[F, Option[ClientMetricsRecorder.ResponseData]](None)
       requestSize <- BodySizeRecording.create(
         config.requestBodySize,
@@ -91,9 +93,6 @@ private[middleware] final class ClientMetricsRecorder[F[_]: Temporal] private[cl
         prelude.headers,
       )
       responseSize <- BodySizeRecording.create(config.responseBodySize, responseBodySize)
-      runInContext = new (F ~> F) {
-        def apply[A](fa: F[A]): F[A] = otel4s.localContext.scope(fa)(context)
-      }
       exchange = new ClientMetricsRecorder.Exchange(
         responseData,
         startAttributes,
@@ -111,12 +110,11 @@ private[middleware] final class ClientMetricsRecorder[F[_]: Temporal] private[cl
 
 private[middleware] object ClientMetricsRecorder {
 
-  def create[F[_]: Temporal](
-      otel4s: Otel4s[F],
-      config: ClientMetricsConfig,
+  def create[F[_]: Temporal: MeterProvider: ContextManager](
+      config: ClientMetricsConfig
   ): F[ClientMetricsRecorder[F]] =
     for {
-      meter <- otel4s.meterProvider
+      meter <- MeterProvider[F]
         .meter("org.http4s.otel4s.middleware.client")
         .withVersion(BuildInfo.version)
         .withSchemaUrl(SchemaUrls.V1_43_0)
@@ -153,7 +151,6 @@ private[middleware] object ClientMetricsRecorder {
           .create
       }
     } yield new ClientMetricsRecorder(
-      otel4s,
       config,
       duration,
       active,

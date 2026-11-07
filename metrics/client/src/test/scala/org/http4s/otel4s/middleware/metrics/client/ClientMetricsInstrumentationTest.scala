@@ -30,7 +30,9 @@ import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.metrics.Histogram
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.metrics.UpDownCounter
 import org.typelevel.otel4s.sdk.metrics.view.InstrumentSelector
 import org.typelevel.otel4s.sdk.metrics.view.View
@@ -73,6 +75,7 @@ class ClientMetricsInstrumentationTest extends CatsEffectSuite with ClientMetric
         val enabled =
           durationEnabled || activeEnabled || requestSizeEnabled || responseSizeEnabled
         OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+          implicit val contextManager: ContextManager[IO] = testkit.contextManager
           var filterCalls = 0
           var labelCalls = 0
           val baseConfig =
@@ -120,7 +123,6 @@ class ClientMetricsInstrumentationTest extends CatsEffectSuite with ClientMetric
                 meter.histogram[Long](HttpExperimentalMetrics.ClientResponseBodySize.name).create
               else IO.pure(Histogram.noop[IO, Long])
             recorder = new ClientMetricsRecorder[IO](
-              testkit,
               config,
               duration,
               active,
@@ -182,12 +184,15 @@ class ClientMetricsInstrumentationTest extends CatsEffectSuite with ClientMetric
           )
         )
         .use { testkit =>
+          implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+          implicit val contextManager: ContextManager[IO] = testkit.contextManager
           val config =
             ClientMetricsConfig.default.optIntoActiveRequests.optIntoRequestBodySize.optIntoResponseBodySize
           val response = Response[IO]().putHeaders(Header.Raw(ci"Content-Length", "5"))
           for {
             releases <- Ref.of[IO, Int](0)
-            middleware <- ClientMetrics.middleware[IO](testkit, config)
+            middleware <- ClientMetrics
+              .middleware[IO](config)
             client = middleware(
               Client[IO](_ => Resource.make(IO.pure(response))(_ => releases.update(_ + 1)))
             )
@@ -225,6 +230,7 @@ class ClientMetricsInstrumentationTest extends CatsEffectSuite with ClientMetric
       s"body-size metrics preserve messages without an enabled observer: configured=$configured"
     ) {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+        implicit val contextManager: ContextManager[IO] = testkit.contextManager
         val config =
           if (configured)
             ClientMetricsConfig.default
@@ -233,7 +239,6 @@ class ClientMetricsInstrumentationTest extends CatsEffectSuite with ClientMetric
           else ClientMetricsConfig.default
         val histogram = Option.when(configured)(Histogram.noop[IO, Long])
         val recorder = new ClientMetricsRecorder[IO](
-          testkit,
           config,
           Histogram.noop[IO, Double],
           None,

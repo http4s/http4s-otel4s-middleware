@@ -32,6 +32,8 @@ import org.http4s.otel4s.middleware.trace.client.ClientMiddleware
 import org.http4s.otel4s.middleware.trace.client.ClientSpanDataProvider
 import org.http4s.otel4s.middleware.trace.client.UriRedactor
 import org.http4s.syntax.literals._
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectation
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectations
@@ -124,15 +126,17 @@ class ClientProtocolVersionTest extends CatsEffectSuite {
       combined: Boolean,
       expectedError: Option[Throwable] = None,
   ): IO[Unit] = OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+    implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+    implicit val contextManager: ContextManager[IO] = kit.contextManager
     implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
     val provider = ClientSpanDataProvider.openTelemetry(new UriRedactor.OnlyRedactUserInfo {})
     val config = ClientMetricsConfig.default
     val wrap =
       if (combined)
-        ClientInstrumentation.middleware[IO](kit, config, ClientTracingConfig(provider))
+        ClientInstrumentation.middleware[IO](config, ClientTracingConfig(provider))
       else
         for {
-          metrics <- ClientMetrics.middleware[IO](kit, config)
+          metrics <- ClientMetrics.middleware[IO](config)
           tracing <- ClientMiddleware.builder[IO](provider).build
         } yield (client: Client[IO]) => tracing.wrapClient(metrics(client))
     val base = Client[IO](_ => Resource.eval(response))

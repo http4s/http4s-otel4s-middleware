@@ -35,7 +35,9 @@ import org.http4s.syntax.literals._
 import org.typelevel.ci.CIString
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.metrics.BucketBoundaries
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.metrics.data.MetricData
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.MetricExpectation
@@ -76,8 +78,11 @@ class ClientRequestBodySizeTest extends CatsEffectSuite with ClientMetricsTestSu
   ).foreach { case (name, sizeConfig, length, consume, expected) =>
     test(s"body size: $name") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
-          middleware <- ClientMetrics.middleware[IO](kit, config(sizeConfig))
+          middleware <- ClientMetrics
+            .middleware[IO](config(sizeConfig))
           effects <- Ref.of[IO, Int](0)
           source = (if (consume == "empty") Stream.empty else payload)
             .onFinalize(effects.update(_ + 1))
@@ -113,13 +118,14 @@ class ClientRequestBodySizeTest extends CatsEffectSuite with ClientMetricsTestSu
     test(s"acquisition failure keeps a known request size: observed=$observed") {
       val boom = new RuntimeException("acquisition failure")
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
           middleware <- ClientMetrics.middleware[IO](
-            kit,
             config(
               if (observed) BodySizeConfig.observe(buckets)
               else BodySizeConfig.contentLength(buckets)
-            ),
+            )
           )
           req = request.putHeaders(Header.Raw(CIString("Content-Length"), "99"))
           base = Client[IO](received =>
@@ -146,8 +152,12 @@ class ClientRequestBodySizeTest extends CatsEffectSuite with ClientMetricsTestSu
     test(s"request failure before observed EOF omits size: cleanup=$cleanup") {
       val boom = new RuntimeException("request failure")
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
-          middleware <- ClientMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+          middleware <- ClientMetrics.middleware[IO](
+            config(BodySizeConfig.observe(buckets))
+          )
           source =
             if (cleanup) payload.onFinalize(IO.raiseError[Unit](boom))
             else payload ++ Stream.raiseError[IO](boom)
@@ -164,11 +174,13 @@ class ClientRequestBodySizeTest extends CatsEffectSuite with ClientMetricsTestSu
 
   test("disabled and excluded requests keep the original request and create no size sample") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        disabled <- ClientMetrics.middleware[IO](kit, ClientMetricsConfig.default)
+        disabled <- ClientMetrics
+          .middleware[IO](ClientMetricsConfig.default)
         excluded <- ClientMetrics.middleware[IO](
-          kit,
-          config(BodySizeConfig.observe(buckets)).withRequestFilter(PerRequestFilter.neverEnabled),
+          config(BodySizeConfig.observe(buckets)).withRequestFilter(PerRequestFilter.neverEnabled)
         )
         base = Client[IO] { req =>
           assert(req eq request)
@@ -184,8 +196,12 @@ class ClientRequestBodySizeTest extends CatsEffectSuite with ClientMetricsTestSu
   List(false, true).foreach { duringRequest =>
     test(s"cancellation freezes request size: duringRequest=$duringRequest") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+        implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+        implicit val contextManager: ContextManager[IO] = kit.contextManager
         for {
-          middleware <- ClientMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+          middleware <- ClientMetrics.middleware[IO](
+            config(BodySizeConfig.observe(buckets))
+          )
           entered <- Deferred[IO, Unit]
           released <- Ref.of[IO, Int](0)
           waiting = Stream.exec(entered.complete(()).void) ++ Stream.never[IO]
@@ -222,8 +238,12 @@ class ClientRequestBodySizeTest extends CatsEffectSuite with ClientMetricsTestSu
 
   test("late request EOF during backend cleanup cannot add a size sample") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ClientMetrics.middleware[IO](kit, config(BodySizeConfig.observe(buckets)))
+        middleware <- ClientMetrics.middleware[IO](
+          config(BodySizeConfig.observe(buckets))
+        )
         entered <- Deferred[IO, Unit]
         proceed <- Deferred[IO, Unit]
         source = payload ++ Stream.exec(entered.complete(()).void >> proceed.get)
@@ -243,9 +263,12 @@ class ClientRequestBodySizeTest extends CatsEffectSuite with ClientMetricsTestSu
 
   test("each acquisition of a reused resource has an independent observer") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       val sizeConfig = config(BodySizeConfig.observe(buckets))
       for {
-        middleware <- ClientMetrics.middleware[IO](kit, sizeConfig)
+        middleware <- ClientMetrics
+          .middleware[IO](sizeConfig)
         base = Client[IO](req => Resource.eval(req.body.compile.drain.as(Response[IO]())))
         resource = middleware(base).run(request)
         _ <- resource.use(_.body.compile.drain)

@@ -38,7 +38,9 @@ import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
 import org.http4s.syntax.literals._
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.metrics.BucketBoundaries
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.context.TraceContext
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.ExemplarExpectation
@@ -58,6 +60,7 @@ import org.typelevel.otel4s.semconv.attributes.UrlAttributes
 import org.typelevel.otel4s.semconv.experimental.metrics.HttpExperimentalMetrics
 import org.typelevel.otel4s.semconv.metrics.HttpMetrics
 import org.typelevel.otel4s.trace.SpanContext
+import org.typelevel.otel4s.trace.TracerProvider
 
 import scala.concurrent.duration._
 
@@ -230,8 +233,12 @@ class ServerInstrumentationMetricsTest extends CatsEffectSuite {
   private def createMiddleware(
       kit: OpenTelemetrySdkTestkit[IO],
       config: ServerMetricsConfig,
-  ): IO[HttpApp[IO] => HttpApp[IO]] =
-    ServerInstrumentation.middleware[IO](kit, config, ServerTracingConfig(provider))
+  ): IO[HttpApp[IO] => HttpApp[IO]] = {
+    implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+    implicit val contextManager: ContextManager[IO] = kit.contextManager
+    implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
+    ServerInstrumentation.middleware[IO](config, ServerTracingConfig(provider))
+  }
 
   private def config(observe: Boolean): ServerMetricsConfig =
     ServerMetricsConfig.default.optIntoActiveRequests

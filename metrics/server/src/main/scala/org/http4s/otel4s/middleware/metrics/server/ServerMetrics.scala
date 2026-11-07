@@ -18,7 +18,8 @@ package org.http4s.otel4s.middleware.metrics.server
 
 import cats.effect.Temporal
 import org.http4s.HttpApp
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 
 /** Server metrics entry point. */
 object ServerMetrics {
@@ -30,9 +31,10 @@ object ServerMetrics {
     * Observed sizes require EOF and successful body cleanup; incomplete observations are omitted.
     * Body effects and recording restore the invocation's full telemetry context.
     * Completion includes body cleanup; it does not establish network delivery.
+    * Supply the meter provider and context manager from the same telemetry instance.
     */
-  def middleware[F[_]: Temporal](
-      otel4s: Otel4s[F],
-      config: ServerMetricsConfig,
-  ): F[HttpApp[F] => HttpApp[F]] = ServerMetricsMiddleware.create(otel4s, config)
+  def middleware[F[_]: Temporal: MeterProvider: ContextManager](
+      config: ServerMetricsConfig
+  ): F[HttpApp[F] => HttpApp[F]] =
+    ServerMetricsMiddleware.create(config)
 }

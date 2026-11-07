@@ -32,6 +32,8 @@ import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.metrics.data.MetricData
 import org.typelevel.otel4s.sdk.testkit.InstrumentationScopeExpectation
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
@@ -340,8 +342,10 @@ class ServerMetricsSemanticConventionsTest extends CatsEffectSuite with ServerMe
       settings: ServerMetricsConfig = config,
   )(verify: List[MetricData] => Unit): IO[Unit] =
     OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+      implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+      implicit val contextManager: ContextManager[IO] = kit.contextManager
       for {
-        middleware <- ServerMetrics.middleware[IO](kit, settings)
+        middleware <- ServerMetrics.middleware[IO](settings)
         response <- middleware(
           HttpApp[IO](_ =>
             IO.pure(Response[IO](status).putHeaders(Header.Raw(ci"Content-Length", "5")))

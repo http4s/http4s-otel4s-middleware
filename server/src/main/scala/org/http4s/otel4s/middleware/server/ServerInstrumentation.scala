@@ -21,8 +21,10 @@ import cats.syntax.flatMap._
 import org.http4s.HttpApp
 import org.http4s.otel4s.middleware.BuildInfo
 import org.http4s.otel4s.middleware.metrics.server.ServerMetricsConfig
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.semconv.SchemaUrls
+import org.typelevel.otel4s.trace.TracerProvider
 
 /** HTTP server metrics and tracing. */
 object ServerInstrumentation {
@@ -38,20 +40,17 @@ object ServerInstrumentation {
     * the span stays open and the request counts as active, including for empty and HEAD responses.
     * Finishing the body does not mean the response reached the client.
     */
-  def middleware[F[_]: Temporal](
-      otel4s: Otel4s[F],
+  def middleware[F[_]: Temporal: MeterProvider: TracerProvider: ContextManager](
       metricsConfig: ServerMetricsConfig,
       tracingConfig: ServerTracingConfig,
   ): F[HttpApp[F] => HttpApp[F]] =
-    otel4s.tracerProvider
+    TracerProvider[F]
       .tracer("org.http4s.otel4s.middleware.server")
       .withVersion(BuildInfo.version)
       .withSchemaUrl(SchemaUrls.V1_43_0)
       .get
-      .flatMap { tracer =>
-        ServerInstrumentationMiddleware.create(
-          otel4s,
-          tracer,
+      .flatMap { implicit tracer =>
+        ServerInstrumentationMiddleware.create[F](
           metricsConfig,
           tracingConfig,
         )

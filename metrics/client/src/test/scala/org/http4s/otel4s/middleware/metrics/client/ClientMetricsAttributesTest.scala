@@ -30,6 +30,8 @@ import org.http4s.client.Client
 import org.http4s.syntax.literals._
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.metrics.data.MetricData
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.semconv.attributes.ErrorAttributes
@@ -44,12 +46,13 @@ class ClientMetricsAttributesTest extends CatsEffectSuite with ClientMetricsTest
     "labels: request labels override shared labels, are evaluated lazily once, and balance active requests"
   ) {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       var label = "captured"
       var evaluations = 0
       for {
         inFlight <- Ref.of[IO, List[MetricData]](Nil)
         middleware <- ClientMetrics.middleware[IO](
-          testkit,
           ClientMetricsConfig.default.optIntoActiveRequests
             .withAttributes(
               Attributes(Attribute("component", "client"), Attribute("operation", "shared"))
@@ -61,7 +64,7 @@ class ClientMetricsAttributesTest extends CatsEffectSuite with ClientMetricsTest
                 Attribute("operation", label),
                 HttpAttributes.HttpRequestMethod("OVERRIDE"),
               )
-            },
+            }
         )
         base = Client[IO](_ =>
           Resource.eval {
@@ -98,6 +101,8 @@ class ClientMetricsAttributesTest extends CatsEffectSuite with ClientMetricsTest
   List("acquire-error", "body-error", "body-cancel").foreach { mode =>
     test(s"labels: request labels survive failure and cancellation: $mode") {
       OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+        implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+        implicit val contextManager: ContextManager[IO] = testkit.contextManager
         var labelsEvaluated = 0
         var statusesEvaluated = 0
         val boom = new IllegalArgumentException("HTTP")
@@ -105,10 +110,9 @@ class ClientMetricsAttributesTest extends CatsEffectSuite with ClientMetricsTest
         for {
           entered <- Deferred[IO, Unit]
           middleware <- ClientMetrics.middleware[IO](
-            testkit,
             ClientMetricsConfig.default.optIntoActiveRequests
               .withRequestAttributes { _ => labelsEvaluated += 1; Attributes(tag) }
-              .withErrorClassifier { (_, _) => statusesEvaluated += 1; false },
+              .withErrorClassifier { (_, _) => statusesEvaluated += 1; false }
           )
           body =
             if (mode == "body-error") Stream.raiseError[IO](boom)
