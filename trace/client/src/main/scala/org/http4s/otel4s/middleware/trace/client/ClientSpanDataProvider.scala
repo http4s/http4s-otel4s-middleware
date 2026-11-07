@@ -18,6 +18,7 @@ package org.http4s
 package otel4s.middleware.trace
 package client
 
+import org.http4s.otel4s.middleware.TypedAttributes
 import org.http4s.otel4s.middleware.client.UriTemplateClassifier
 import org.http4s.otel4s.middleware.trace.redact.HeaderRedactor
 import org.typelevel.otel4s.Attribute
@@ -48,6 +49,12 @@ object ClientSpanDataProvider {
     * with OpenTelemetry semantic conventions.
     */
   sealed trait OpenTelemetryBuilder { self: SpanDataProvider =>
+
+    /** Replaces the default known methods for attributes and span names. Matching is case-sensitive;
+      * an empty set maps every method to `_OTHER` and uses `HTTP` in span names.
+      * Use `TypedAttributes.DefaultKnownMethods` to extend the defaults.
+      */
+    def withKnownMethods(methods: Set[Method]): SpanDataProvider with OpenTelemetryBuilder
 
     /** Sets how to determine the template of an absolute path reference from a
       * URL. The classifier is used for span names and for the `url.template`
@@ -86,13 +93,14 @@ object ClientSpanDataProvider {
       urlRedactor: UriRedactor,
       urlTemplateClassifier: UriTemplateClassifier,
       optIn: OptIn,
+      knownMethods: Set[Method],
   ) extends SpanDataProvider
       with OpenTelemetryBuilder {
     type Shared = OtelData
 
     def processSharedData[F[_]](request: Request[F]): OtelData =
       OtelData(
-        TypedClientTraceAttributes.httpRequestMethod(request.method),
+        TypedClientTraceAttributes.httpRequestMethod(request.method, knownMethods),
         TypedClientTraceAttributes.Experimental
           .urlTemplate(request.uri, urlTemplateClassifier),
       )
@@ -173,12 +181,17 @@ object ClientSpanDataProvider {
     private def copy(
         urlTemplateClassifier: UriTemplateClassifier = this.urlTemplateClassifier,
         optIn: OptIn = this.optIn,
+        knownMethods: Set[Method] = this.knownMethods,
     ): OtelProvider =
       new OtelProvider(
         this.urlRedactor,
         urlTemplateClassifier,
         optIn,
+        knownMethods,
       )
+    def withKnownMethods(methods: Set[Method]): OtelProvider =
+      copy(knownMethods = methods)
+
     def withUrlTemplateClassifier(
         urlTemplateClassifier: UriTemplateClassifier
     ): OtelProvider =
@@ -202,5 +215,10 @@ object ClientSpanDataProvider {
     * @see [[https://opentelemetry.io/docs/specs/semconv/http/http-spans/#http-client]]
     */
   def openTelemetry(urlRedactor: UriRedactor): SpanDataProvider with OpenTelemetryBuilder =
-    new OtelProvider(urlRedactor, UriTemplateClassifier.indeterminate, OptIn())
+    new OtelProvider(
+      urlRedactor,
+      UriTemplateClassifier.indeterminate,
+      OptIn(),
+      TypedAttributes.DefaultKnownMethods,
+    )
 }

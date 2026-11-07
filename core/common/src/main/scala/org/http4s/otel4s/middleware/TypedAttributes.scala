@@ -38,6 +38,10 @@ private[middleware] trait TypedAttributes {
 
   /** @return the `http.request.method` `Attribute` */
   final def httpRequestMethod(method: Method): Attribute[String] =
+    httpRequestMethod(method, DefaultKnownMethods)
+
+  /** Uses an exact, case-sensitive replacement for the default known methods. */
+  final def httpRequestMethod(method: Method, knownMethods: Set[Method]): Attribute[String] =
     if (knownMethods.contains(method)) HttpAttributes.HttpRequestMethod(method.name)
     else _httpRequestMethodOther
 
@@ -65,7 +69,9 @@ private[middleware] trait TypedAttributes {
 
 /** Methods for creating appropriate `Attribute`s from typed HTTP objects. */
 object TypedAttributes extends TypedAttributes {
-  private val knownMethods: Set[Method] = Set(
+
+  /** Default known HTTP methods from the OpenTelemetry HTTP semantic conventions. */
+  val DefaultKnownMethods: Set[Method] = Set(
     Method.CONNECT,
     Method.DELETE,
     Method.GET,

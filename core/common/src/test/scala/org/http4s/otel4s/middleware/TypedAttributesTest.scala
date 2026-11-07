@@ -81,6 +81,19 @@ class TypedAttributesTest extends FunSuite {
     checkAttr(_.httpRequestMethodOther, Attribute("http.request.method", "_OTHER"))
   }
 
+  test("known methods are a case-sensitive replacement, including an empty set") {
+    val methods = Set(Method.PROPFIND, Method.fromString("get").toOption.get)
+    assertEquals(TypedAttributes.httpRequestMethod(Method.PROPFIND, methods).value, "PROPFIND")
+    assertEquals(TypedAttributes.httpRequestMethod(Method.GET, methods).value, "_OTHER")
+    assertEquals(
+      TypedAttributes.httpRequestMethod(Method.fromString("get").toOption.get, methods).value,
+      "get",
+    )
+    assertEquals(TypedAttributes.httpRequestMethod(Method.GET, Set.empty).value, "_OTHER")
+    assertEquals(TypedAttributes.httpRequestMethod(Method.GET).value, "GET")
+    assertEquals(TypedAttributes.httpRequestMethod(Method.PROPFIND).value, "_OTHER")
+  }
+
   test("httpResponseStatusCode") {
     def check(status: Status, expected: Long)(implicit loc: Location): Unit =
       checkAttr(_.httpResponseStatusCode(status), Attribute("http.response.status_code", expected))

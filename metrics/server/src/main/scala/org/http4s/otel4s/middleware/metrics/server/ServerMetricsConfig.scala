@@ -16,9 +16,11 @@
 
 package org.http4s.otel4s.middleware.metrics.server
 
+import org.http4s.Method
 import org.http4s.RequestPrelude
 import org.http4s.otel4s.middleware.ErrorClassifier
 import org.http4s.otel4s.middleware.PerRequestFilter
+import org.http4s.otel4s.middleware.TypedAttributes
 import org.http4s.otel4s.middleware.metrics.BodySizeConfig
 import org.http4s.otel4s.middleware.metrics.MetricsDefaults
 import org.http4s.otel4s.middleware.server.RouteClassifier
@@ -27,6 +29,7 @@ import org.typelevel.otel4s.metrics.BucketBoundaries
 
 /** Immutable server metrics settings. */
 sealed trait ServerMetricsConfig {
+  def knownMethods: Set[Method]
   def attributes: Attributes
   def requestAttributes: RequestPrelude => Attributes
   def requestFilter: PerRequestFilter
@@ -41,6 +44,11 @@ sealed trait ServerMetricsConfig {
 
   /** Sets shared labels. */
   def withAttributes(attributes: Attributes): ServerMetricsConfig
+
+  /** Replaces the default known methods. Matching is case-sensitive; an empty set maps every
+    * method to `_OTHER`. Use `TypedAttributes.DefaultKnownMethods` to extend the defaults.
+    */
+  def withKnownMethods(methods: Set[Method]): ServerMetricsConfig
 
   /** Sets low-cardinality request labels. Automatic HTTP attributes take precedence. */
   def withRequestAttributes(attributes: RequestPrelude => Attributes): ServerMetricsConfig
@@ -87,6 +95,7 @@ object ServerMetricsConfig {
   val default: ServerMetricsConfig = Impl()
 
   private final case class Impl(
+      knownMethods: Set[Method] = TypedAttributes.DefaultKnownMethods,
       attributes: Attributes = Attributes.empty,
       requestAttributes: RequestPrelude => Attributes = _ => Attributes.empty,
       requestFilter: PerRequestFilter = PerRequestFilter.alwaysEnabled,
@@ -99,6 +108,9 @@ object ServerMetricsConfig {
       serverPortEnabled: Boolean = false,
       responseDurationSecondsHistogramBuckets: BucketBoundaries = MetricsDefaults.DurationBuckets,
   ) extends ServerMetricsConfig {
+    def withKnownMethods(methods: Set[Method]): ServerMetricsConfig =
+      copy(knownMethods = methods)
+
     def withAttributes(attributes: Attributes): ServerMetricsConfig = copy(attributes = attributes)
     def withRequestAttributes(attributes: RequestPrelude => Attributes): ServerMetricsConfig =
       copy(requestAttributes = attributes)
