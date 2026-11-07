@@ -36,7 +36,9 @@ import org.http4s.otel4s.middleware.trace.client.UriRedactor
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.metrics.BucketBoundaries
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.context.TraceContext
 import org.typelevel.otel4s.sdk.metrics.data.MetricData
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
@@ -75,6 +77,8 @@ class ClientBodySizeExemplarTest extends CatsEffectSuite {
         s"body sizes have HTTP-span exemplars before span completion: observe=$observed unread=$unread"
       ) {
         OpenTelemetrySdkTestkit.inMemory[IO]().use { kit =>
+          implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+          implicit val contextManager: ContextManager[IO] = kit.contextManager
           implicit val provider: TracerProvider[IO] = kit.tracerProvider
           val sizeConfig =
             if (observed) BodySizeConfig.observe(buckets)
@@ -83,7 +87,8 @@ class ClientBodySizeExemplarTest extends CatsEffectSuite {
             .optIntoRequestBodySize(sizeConfig)
             .optIntoResponseBodySize(sizeConfig)
           for {
-            middleware <- ClientMetrics.middleware[IO](kit, config)
+            middleware <- ClientMetrics
+              .middleware[IO](config)
             tracing <- ClientMiddleware
               .builder[IO](
                 ClientSpanDataProvider.openTelemetry(new UriRedactor.OnlyRedactUserInfo {})

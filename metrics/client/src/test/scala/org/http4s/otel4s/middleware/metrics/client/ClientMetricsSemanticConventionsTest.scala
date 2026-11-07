@@ -37,6 +37,8 @@ import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attribute
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.metrics.data.MetricData
 import org.typelevel.otel4s.sdk.testkit.InstrumentationScopeExpectation
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
@@ -233,6 +235,8 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
 
   test("url.template: templates aggregate requests and unknown paths have no raw-path fallback") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       var classifications = 0
       val classifier: UriTemplateClassifier = uri => {
         classifications += 1
@@ -240,8 +244,7 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
       }
       for {
         middleware <- ClientMetrics.middleware[IO](
-          testkit,
-          ClientMetricsConfig.default.optIntoActiveRequests.withUrlTemplateClassifier(classifier),
+          ClientMetricsConfig.default.optIntoActiveRequests.withUrlTemplateClassifier(classifier)
         )
         client = middleware(Client[IO](_ => Resource.pure(Response[IO]())))
         _ <- client.run(request).use(_.body.compile.drain)
@@ -330,12 +333,15 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
     test(s"conditional response and error attributes: $mode") {
       TestControl.executeEmbed {
         OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+          implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+          implicit val contextManager: ContextManager[IO] = testkit.contextManager
           val error = new IllegalStateException("failed")
           val acquired = mode.startsWith("body")
           val canceled = mode.endsWith("cancel")
           for {
             entered <- Deferred[IO, Unit]
-            middleware <- ClientMetrics.middleware[IO](testkit, config)
+            middleware <- ClientMetrics
+              .middleware[IO](config)
             failure =
               if (canceled) entered.complete(()).void >> IO.never[Unit]
               else IO.raiseError[Unit](error)
@@ -380,10 +386,13 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
 
   test("each distinct metric point retains its own semantic attributes") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       val first = start.added(UrlAttributes.UrlScheme("https"))
       val second = first.added(HttpAttributes.HttpRequestMethod("POST"))
       for {
-        middleware <- ClientMetrics.middleware[IO](testkit, config.optIntoUrlScheme)
+        middleware <- ClientMetrics
+          .middleware[IO](config.optIntoUrlScheme)
         client = middleware(
           Client[IO](req =>
             Resource.pure(
@@ -442,10 +451,13 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
 
   test("active requests use the same start attributes at increment and decrement") {
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       val labels = start.added(UrlAttributes.UrlScheme("https"))
       for {
         during <- Ref.of[IO, List[MetricData]](Nil)
-        middleware <- ClientMetrics.middleware[IO](testkit, config.optIntoUrlScheme)
+        middleware <- ClientMetrics
+          .middleware[IO](config.optIntoUrlScheme)
         client = middleware(
           Client[IO](_ =>
             Resource.eval(
@@ -534,8 +546,11 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
       settings: ClientMetricsConfig = config,
   )(verify: List[MetricData] => Unit): IO[Unit] =
     OpenTelemetrySdkTestkit.inMemory[IO]().use { testkit =>
+      implicit val meterProvider: MeterProvider[IO] = testkit.meterProvider
+      implicit val contextManager: ContextManager[IO] = testkit.contextManager
       for {
-        middleware <- ClientMetrics.middleware[IO](testkit, settings)
+        middleware <- ClientMetrics
+          .middleware[IO](settings)
         client = middleware(
           Client[IO](r =>
             Resource.eval(

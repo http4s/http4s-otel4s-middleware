@@ -35,6 +35,8 @@ import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
 import org.http4s.syntax.literals._
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.context.TraceContext
 import org.typelevel.otel4s.sdk.testkit.OpenTelemetrySdkTestkit
 import org.typelevel.otel4s.sdk.testkit.metrics.ExemplarExpectation
@@ -53,6 +55,7 @@ import org.typelevel.otel4s.semconv.attributes.UrlAttributes
 import org.typelevel.otel4s.semconv.experimental.metrics.HttpExperimentalMetrics
 import org.typelevel.otel4s.semconv.metrics.HttpMetrics
 import org.typelevel.otel4s.trace.SpanContext
+import org.typelevel.otel4s.trace.TracerProvider
 
 import scala.concurrent.duration._
 
@@ -252,15 +255,19 @@ class ServerInstrumentationLifecycleTest extends CatsEffectSuite {
       kit: OpenTelemetrySdkTestkit[IO],
       metricsConfig: ServerMetricsConfig,
       tracingErrors: ErrorClassifier,
-  ): IO[HttpApp[IO] => HttpApp[IO]] = ServerInstrumentation.middleware[IO](
-    kit,
-    metricsConfig,
-    ServerTracingConfig(
-      ServerSpanDataProvider.openTelemetry(
-        new PathRedactor.NeverRedact with QueryRedactor.NeverRedact {}
-      )
-    ).withErrorClassifier(tracingErrors),
-  )
+  ): IO[HttpApp[IO] => HttpApp[IO]] = {
+    implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+    implicit val contextManager: ContextManager[IO] = kit.contextManager
+    implicit val tracerProvider: TracerProvider[IO] = kit.tracerProvider
+    ServerInstrumentation.middleware[IO](
+      metricsConfig,
+      ServerTracingConfig(
+        ServerSpanDataProvider.openTelemetry(
+          new PathRedactor.NeverRedact with QueryRedactor.NeverRedact {}
+        )
+      ).withErrorClassifier(tracingErrors),
+    )
+  }
 
   private def assertSpan(
       spans: List[org.typelevel.otel4s.sdk.trace.data.SpanData],

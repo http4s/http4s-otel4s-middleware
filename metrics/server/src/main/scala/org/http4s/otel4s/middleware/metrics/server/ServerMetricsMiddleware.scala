@@ -27,17 +27,19 @@ import org.http4s.Request
 import org.http4s.RequestPrelude
 import org.http4s.Response
 import org.http4s.ResponsePrelude
-import org.typelevel.otel4s.Otel4s
+import org.typelevel.otel4s.context.ContextManager
+import org.typelevel.otel4s.metrics.MeterProvider
 
 import scala.concurrent.duration.FiniteDuration
 
 private[server] object ServerMetricsMiddleware {
 
-  def create[F[_]: Temporal](
-      otel4s: Otel4s[F],
-      config: ServerMetricsConfig,
+  def create[F[_]: Temporal: MeterProvider: ContextManager](
+      config: ServerMetricsConfig
   ): F[HttpApp[F] => HttpApp[F]] =
-    ServerMetricsRecorder.create(otel4s, config).map(recorder => wrap(recorder, config))
+    ServerMetricsRecorder
+      .create[F](config)
+      .map(recorder => wrap(recorder, config))
 
   def wrap[F[_]: Temporal](
       recorder: ServerMetricsRecorder[F],

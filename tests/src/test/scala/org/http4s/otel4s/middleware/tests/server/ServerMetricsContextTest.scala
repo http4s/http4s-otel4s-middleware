@@ -40,9 +40,11 @@ import org.http4s.otel4s.middleware.trace.server.ServerSpanDataProvider
 import org.http4s.syntax.literals._
 import org.typelevel.ci.CIStringSyntax
 import org.typelevel.otel4s.Attributes
+import org.typelevel.otel4s.context.ContextManager
 import org.typelevel.otel4s.context.propagation.TextMapGetter
 import org.typelevel.otel4s.context.propagation.TextMapPropagator
 import org.typelevel.otel4s.context.propagation.TextMapUpdater
+import org.typelevel.otel4s.metrics.MeterProvider
 import org.typelevel.otel4s.sdk.context.Context
 import org.typelevel.otel4s.sdk.context.TraceContext
 import org.typelevel.otel4s.sdk.metrics.data.MetricData
@@ -88,13 +90,14 @@ class ServerMetricsContextTest extends CatsEffectSuite {
                 )
               )
               .use { kit =>
+                implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+                implicit val contextManager: ContextManager[IO] = kit.contextManager
                 for {
                   tracer <- kit.tracerProvider.get("test")
                   middleware <- ServerMetrics.middleware[IO](
-                    kit,
                     ServerMetricsConfig.default.optIntoActiveRequests
                       .optIntoRequestBodySize(BodySizeConfig.observe)
-                      .optIntoResponseBodySize(BodySizeConfig.observe),
+                      .optIntoResponseBodySize(BodySizeConfig.observe)
                   )
                   entered <- Deferred[IO, Unit]
                   seen <- Ref.of[IO, Vector[String]](Vector.empty)
@@ -240,15 +243,16 @@ class ServerMetricsContextTest extends CatsEffectSuite {
         OpenTelemetrySdkTestkit
           .inMemory[IO](_.addTextMapPropagators(W3CTraceContextPropagator.default))
           .use { kit =>
+            implicit val meterProvider: MeterProvider[IO] = kit.meterProvider
+            implicit val contextManager: ContextManager[IO] = kit.contextManager
             implicit val provider: TracerProvider[IO] = kit.tracerProvider
             for {
               tracer <- kit.tracerProvider.get("test")
               middleware <- ServerMetrics
                 .middleware[IO](
-                  kit,
                   ServerMetricsConfig.default.optIntoActiveRequests
                     .optIntoRequestBodySize(BodySizeConfig.observe)
-                    .optIntoResponseBodySize(BodySizeConfig.observe),
+                    .optIntoResponseBodySize(BodySizeConfig.observe)
                 )
               tracing <- ServerMiddleware
                 .builder[IO](
