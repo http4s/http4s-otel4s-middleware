@@ -43,11 +43,19 @@ class TypedClientAttributesTest extends FunSuite {
     def check(port: Option[Port], url: Uri, expected: Option[Long])(implicit loc: Location): Unit =
       checkOpt(_.serverPort(port, url), expected.map(Attribute("server.port", _)))
 
-    check(Port.fromInt(4140), uri"http://localhost:8080", Some(4140L))
+    check(Port.fromInt(4140), uri"http://localhost:8080", Some(8080L))
+    check(Port.fromInt(9443), uri"https://example.com:8443", Some(8443L))
+    check(Port.fromInt(4140), uri"http://localhost", Some(80L))
+    check(Port.fromInt(9443), uri"https://example.com", Some(443L))
+    check(Port.fromInt(9443), uri"https://[2001:db8::1]:8443", Some(8443L))
+    check(Port.fromInt(9443), uri"custom://example.com:9000", Some(9000L))
+    check(Port.fromInt(9443), uri"custom://example.com", Some(9443L))
     check(Port.fromInt(4140), uri"//localhost", Some(4140L))
+    check(Port.fromInt(4140), uri"/items", Some(4140L))
     check(None, uri"http://localhost:8080", Some(8080L))
     check(None, uri"https://example.com", Some(443L))
     check(None, uri"//localhost", None)
+    check(None, uri"custom://example.com", None)
   }
 
   test("urlScheme") {

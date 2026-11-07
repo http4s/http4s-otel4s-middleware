@@ -135,19 +135,25 @@ class ClientMetricsSemanticConventionsTest extends CatsEffectSuite with ClientMe
     }
   }
 
-  test("server.port prefers connection information to the URI port and scheme default") {
-    val req = request
-      .withUri(uri"https://example.test:8443/items")
-      .withAttribute(
-        Request.Keys.ConnectionInfo,
-        Request.Connection(
-          SocketAddress(ip"127.0.0.1", port"12345"),
-          SocketAddress(ip"192.0.2.1", port"9443"),
-          secure = true,
-        ),
-      )
-    exchange(req = req) { metrics =>
-      check(metrics, start.added(ServerAttributes.ServerPort(9443L)), completed())
+  List(
+    (uri"https://example.test:8443/items", 8443L),
+    (uri"https://example.test/items", 443L),
+    (uri"http://example.test/items", 80L),
+  ).foreach { case (uri, expected) =>
+    test(s"server.port prefers the destination to the connection port: $uri") {
+      val req = request
+        .withUri(uri)
+        .withAttribute(
+          Request.Keys.ConnectionInfo,
+          Request.Connection(
+            SocketAddress(ip"127.0.0.1", port"12345"),
+            SocketAddress(ip"192.0.2.1", port"9443"),
+            secure = true,
+          ),
+        )
+      exchange(req = req) { metrics =>
+        check(metrics, start.added(ServerAttributes.ServerPort(expected)), completed())
+      }
     }
   }
 
