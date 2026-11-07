@@ -66,6 +66,13 @@ class ClientMiddlewareTest extends CatsEffectSuite {
 
   private val spanLimits = SpanLimits.default
 
+  test("request metadata does not establish the actual protocol version") {
+    val provider = ClientSpanDataProvider.openTelemetry(MinimalRedactor)
+    val request = Request[IO](httpVersion = HttpVersion.`HTTP/2`)
+    val attributes = provider.requestAttributes(request, provider.processSharedData(request))
+    assertEquals(attributes.get(NetworkAttributes.NetworkProtocolVersion), None)
+  }
+
   test("composes middlewares") {
     def middleware(name: String)(implicit tracer: Tracer[IO]): ClientMiddleware[IO] =
       client =>
@@ -302,7 +309,6 @@ class ClientMiddlewareTest extends CatsEffectSuite {
               val attributes = Attributes(
                 ErrorAttributes.ErrorType(error.getClass.getName),
                 HttpAttributes.HttpRequestMethod(HttpAttributes.HttpRequestMethodValue.Get),
-                NetworkAttributes.NetworkProtocolVersion("1.1"),
                 ServerAttributes.ServerAddress("localhost"),
                 ServerAttributes.ServerPort(80L),
                 UrlAttributes.UrlFull("http://localhost/"),
