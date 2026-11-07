@@ -59,9 +59,12 @@ import org.http4s.otel4s.middleware.client.ClientInstrumentation
 import org.http4s.otel4s.middleware.client.ClientTracingConfig
 import org.http4s.otel4s.middleware.trace.client.ClientSpanDataProvider
 import org.http4s.otel4s.middleware.trace.client.UriRedactor
+import org.http4s.otel4s.middleware.trace.redact.QueryRedactor
 
 val tracingConfig = ClientTracingConfig(
-  ClientSpanDataProvider.openTelemetry(new UriRedactor.OnlyRedactUserInfo {})
+  ClientSpanDataProvider.openTelemetry(
+    new UriRedactor.OnlyRedactUserInfo with QueryRedactor.RedactSensitive {}
+  )
 )
 
 def instrumentClient[F[_]: Temporal](otel4s: Otel4s[F], client: Client[F]): F[Client[F]] =
@@ -116,7 +119,7 @@ import org.typelevel.otel4s.Otel4s
 
 val serverTracingConfig = ServerTracingConfig(
   ServerSpanDataProvider.openTelemetry(
-    new PathRedactor.NeverRedact with QueryRedactor.NeverRedact {}
+    new PathRedactor.NeverRedact with QueryRedactor.RedactSensitive {}
   )
 )
 
