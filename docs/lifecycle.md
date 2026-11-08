@@ -1,10 +1,94 @@
 # Lifecycle and limitations
 
+## Lifecycle explorer
+
+Choose a client or server scenario, then use **Next event** to see how spans, metrics and
+propagation change during an HTTP exchange. Select a span, metric or HTTP message for details.
+This is a simulation: timestamps and IDs are illustrative; byte counts come from the actual UTF-8 fixtures.
+
+<div id="lifecycle-widget" class="lifecycle-explorer" hidden>
+  <div class="lifecycle-controls">
+    <label>Side<select id="lifecycle-side"><option value="client">Client</option><option value="server">Server</option></select></label>
+    <label>Outcome<select id="lifecycle-scenario"><option value="success">Body completes</option><option value="body-error">Body fails</option><option value="body-cancel">Body canceled</option><option value="unread">Body never starts</option><option value="app-error">Acquisition / app fails</option><option value="app-cancel">Acquisition / app canceled</option></select></label>
+  </div>
+  <details class="lc-disclosure lc-config"><summary>Configure scenario</summary>
+    <div class="lifecycle-controls">
+      <label>Method<select id="lifecycle-method"><option value="GET">GET</option><option value="POST">POST</option><option value="HEAD">HEAD</option></select></label>
+      <label>Response status<select id="lifecycle-status"><option value="200">200 OK</option><option value="204">204 No Content</option><option value="404">404 Not Found</option><option value="503">503 Unavailable</option></select></label>
+      <label>Response-size source<select id="lifecycle-bodySize"><option value="observe">Observe stream</option><option value="contentLength">Content-Length</option></select></label>
+    </div>
+    <fieldset class="lc-policies"><legend>Request policies</legend>
+      <label><input id="lifecycle-metrics" type="checkbox" checked> Metrics enabled</label>
+      <label><input id="lifecycle-tracing" type="checkbox" checked> Tracing enabled</label>
+      <label><input id="lifecycle-propagate" type="checkbox" checked> Client request propagation</label>
+      <label><input id="lifecycle-parent" type="checkbox" checked> <span id="lifecycle-parent-label">Caller context + baggage</span></label>
+      <label><input id="lifecycle-reverse" type="checkbox"> Server response propagation</label>
+      <label><input id="lifecycle-captureHeaders" type="checkbox"> Capture allowed headers as span attributes</label>
+    </fieldset>
+  </details>
+  <div class="lifecycle-controls lc-transport"><button type="button" id="lifecycle-reset">Reset</button><button type="button" id="lifecycle-back">Previous</button><button type="button" id="lifecycle-next">Next event →</button><span class="lc-toolbar-spacer"></span><button type="button" id="lifecycle-request">Inspect request</button><button type="button" id="lifecycle-response">Inspect response</button></div>
+  <details class="lc-disclosure" open><summary>Exchange events · jump to any step</summary><div id="lifecycle-steps"></div></details>
+  <div id="lifecycle-state" role="status" aria-live="polite" aria-atomic="true"></div>
+  <p id="lifecycle-explanation" class="lc-muted"></p>
+  <div id="lifecycle-metrics-overview" aria-label="Metrics; select a row or measurement to inspect"></div>
+  <h3 class="lc-overview-title">Trace waterfall</h3>
+  <div id="lifecycle-trace"></div>
+  <div class="lc-signal-row lc-axis-row"><span>Simulated time</span><div id="lifecycle-time-axis"></div></div>
+  <p class="lc-muted">Dashed: external parent. Accent: open span. Green: ended. Red: ended with error. Select a row to expand or collapse its details.</p>
+  <div id="lifecycle-inspector-home">
+  <section id="lifecycle-inspector" class="lc-inspector" aria-labelledby="lifecycle-inspector-title" hidden>
+    <div class="lc-inspector-heading"><h3 id="lifecycle-inspector-title"></h3><button type="button" id="lifecycle-inspector-close" aria-label="Close inspector">Close</button></div>
+    <p id="lifecycle-field-note" class="lc-field-note" role="status" aria-live="polite"></p>
+    <div id="lifecycle-inspector-content"></div>
+  </section>
+  </div>
+</div>
+
+Try these comparisons:
+
+- Open **Inspect request**, then step through **Body completes**: each response chunk reveals its
+  exact byte slice; duration and size record once at completion, followed by span end at the same timestamp.
+- Select **Server + Body never starts**: the active count stays at one and no histogram sample appears.
+- Compare **404** on client and server: default client classification marks it as an error; server classification does not.
+- Turn **tracing off**: metrics continue, but client injection and server context extraction stop.
+- Turn **client request propagation off**: its local span remains, but no new request context is injected.
+- Enable **server response propagation**: response headers contain the server span context once headers exist.
+- Compare **Observe stream** and **Content-Length** with an unread or interrupted body: incomplete observed sizes are omitted;
+  declared length can still be recorded at completion.
+- Choose **POST** under **Configure scenario** to step through request-body chunks before response headers.
+- Click a metric point to inspect its attributes and buckets; follow its exemplar to the associated span.
+- Select a URL or header in the inspector to highlight related telemetry. The demo query value is redacted in URL attributes.
+
+### How to read the simulation
+
+Each reset starts with zero measurements. The active-request plot is a step chart; duration and
+response-size plots show individual recorded measurements, in milliseconds and bytes respectively.
+The duration instrument itself uses seconds. All three plots share the same simulated time axis.
+With JavaScript disabled, the completion table below provides the same rules.
+
+The body previews show only evaluated chunks. The fixtures containing `café` intentionally split the UTF-8
+encoding of `é` across chunks; its character appears when the next chunk completes it. Byte ranges and hex values
+are available under **exact bytes**. **Remaining example body** shows only data still awaiting evaluation
+and disappears once all bytes have been evaluated. Destination badges identify where shared attributes
+are recorded. Chunks are stream evaluations, not
+HTTP chunked-transfer frames. HEAD can declare a representation length while evaluating zero body
+bytes; 204 has no Content-Length header or payload.
+
+The example assumes W3C Trace Context and Baggage propagators, sampled spans, active requests and
+response-body sizes opted in, and an SDK that retains exemplars. Real exemplar retention and
+export timing depend on your backend. A span shown as open has not ended and may not appear in a
+real trace backend yet. HTTP span naming and bounded metric labels use a configured `/widgets/{id}` classifier.
+The URL redactor explicitly includes `access_token`; default sensitive-query keys alone do not
+include it. Allowed header capture is opt-in and uses the default header redactor. Body contents
+and baggage do not become span attributes automatically. The simulated server backend has
+no ambient span. Metrics-only middleware can capture an ambient context supplied elsewhere, but
+does not itself extract incoming request headers.
+
+## Completion boundaries
+
 HTTP response creation and body completion are separate events in http4s. The rules below apply
 to **combined instrumentation and standalone metrics**. Existing tracing-only builders use
 response resource scope on the client and app evaluation on the server.
-
-## Completion boundaries
 
 | Scenario | Client | Server |
 | --- | --- | --- |
@@ -22,26 +106,6 @@ A status already classified as an error remains an error even if body terminatio
 Client completion precedes backend resource release finalizers. Caller code errors do not become
 HTTP failures. Server completion includes response-body cleanup, but does not prove that bytes
 reached the remote client.
-
-## Lifecycle explorer
-
-This simulation illustrates the rules above with tracing and active requests enabled. It does
-not issue requests. Scenarios correspond to the client and server instrumentation lifecycle test
-suites; timing is illustrative. All scenarios use a 200 response, so only observed exceptions set
-error status.
-
-<div id="lifecycle-explorer" class="lifecycle-explorer" hidden>
-  <div class="lifecycle-controls">
-    <label>Side <select id="lifecycle-side"><option value="client">Client</option><option value="server">Server</option></select></label>
-    <label>Scenario <select id="lifecycle-scenario"><option value="success">Body completes</option><option value="body-error">Body fails</option><option value="body-cancel">Body canceled</option><option value="unread">Body never starts</option><option value="app-error">Acquisition / app fails</option><option value="app-cancel">Acquisition / app canceled</option></select></label>
-  </div>
-  <ol id="lifecycle-steps" class="lifecycle-steps"></ol>
-  <div class="lifecycle-controls"><button type="button" id="lifecycle-reset">Reset</button><button type="button" id="lifecycle-next">Next event</button></div>
-  <div id="lifecycle-state" role="status" aria-live="polite" aria-atomic="true"></div>
-  <p id="lifecycle-explanation"></p>
-</div>
-
-With JavaScript disabled, the completion table above provides the same rules.
 
 ## Bodies that never start
 
