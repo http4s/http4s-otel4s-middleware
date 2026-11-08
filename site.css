@@ -1,0 +1,111 @@
+/* Compact signal overview and one inspector, using Helium's light/dark theme. */
+.lifecycle-explorer {
+  --lc-bg: var(--bg-color);
+  --lc-border: var(--component-border);
+  --lc-text: var(--text-color);
+  --lc-accent: var(--primary-color);
+  --lc-green: #177349;
+  --lc-red: var(--messages-error);
+  color: var(--lc-text);
+  margin: 1.5rem 0 2rem;
+  font-size: inherit;
+}
+.lifecycle-controls { display: flex; flex-wrap: wrap; gap: .6rem; align-items: end; margin: .75rem 0; }
+.lifecycle-controls label { position: relative; display: grid; gap: .3rem; flex: 1 1 140px; }
+.lifecycle-controls label::after {
+  content: ""; position: absolute; right: .75rem; bottom: calc(.4rem + .5em);
+  width: .35rem; height: .35rem; border-right: 1.25px solid currentColor;
+  border-bottom: 1.25px solid currentColor; transform: rotate(45deg); pointer-events: none;
+}
+.lifecycle-controls select, .lifecycle-explorer button {
+  font: inherit; color: inherit; background: var(--lc-bg); border: 1px solid var(--lc-border);
+  border-radius: .25rem; padding: .4rem .6rem; max-width: 100%; cursor: pointer;
+}
+.lifecycle-controls select { appearance: none; -webkit-appearance: none; padding-inline-end: 2rem; }
+.lifecycle-controls select option { color: var(--lc-text); background: var(--lc-bg); }
+.lifecycle-explorer button:disabled, .lifecycle-explorer select:disabled, .lifecycle-explorer input:disabled { opacity: .45; cursor: default; }
+.lifecycle-explorer :focus-visible { outline: 3px solid var(--lc-accent); outline-offset: 2px; }
+.lifecycle-explorer .lc-disclosure { margin: .5rem 0 .75rem; }
+.lifecycle-explorer summary { cursor: pointer; font-size: .85rem; padding: .35rem 0; }
+.lifecycle-explorer .lc-policies { border: 0; padding: .4rem 0; margin: 0; display: flex; flex-wrap: wrap; gap: .6rem 1rem; min-width: 0; }
+.lifecycle-explorer .lc-policies legend { font-size: .8rem; padding: 0; }
+.lifecycle-explorer .lc-policies label { display: flex; align-items: center; gap: .4rem; }
+.lifecycle-explorer input[type="checkbox"] { accent-color: var(--lc-accent); }
+.lifecycle-explorer .lc-transport { align-items: center; }
+.lifecycle-explorer .lc-toolbar-spacer { flex: 1; }
+#lifecycle-next { border-color: var(--lc-accent); color: var(--lc-accent); }
+#lifecycle-steps { display: flex; flex-wrap: wrap; gap: .35rem; margin: .5rem 0; }
+.lifecycle-explorer .lc-event { font-size: .75rem; text-align: left; opacity: .65; }
+.lifecycle-explorer .lc-event[data-reached="true"] { opacity: 1; }
+.lifecycle-explorer .lc-event[aria-current="step"] { border-color: var(--lc-accent); color: var(--lc-accent); }
+#lifecycle-state { font-weight: bold; margin: .75rem 0 .35rem; }
+.lifecycle-explorer .lc-muted { font-size: .8rem; line-height: 1.5; }
+.lifecycle-explorer .lc-overview-title { font-size: .9rem; color: inherit; margin: 1rem 0 .5rem; }
+.lifecycle-explorer .lc-signal-row { display: grid; grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr); gap: .75rem; align-items: center; width: 100%; box-sizing: border-box; }
+.lifecycle-explorer .lc-metric-row { border-top: 1px solid var(--lc-border); padding: .5rem 0; }
+.lifecycle-explorer .lc-metric-row[data-selected="true"], .lifecycle-explorer .lc-trace-select[data-selected="true"] { background: var(--primary-light); }
+.lifecycle-explorer .lc-metric-summary { border: 0; text-align: left; padding: .4rem 0; background: transparent; }
+.lifecycle-explorer .lc-metric-summary span { display: block; font-size: .85rem; }
+.lifecycle-explorer .lc-metric-summary strong { display: block; font-size: .85rem; color: var(--lc-green); font-weight: normal; }
+.lifecycle-explorer .lc-mini-plot { padding: 0; border: 0; background: transparent; line-height: 0; }
+.lifecycle-explorer .lc-mini-plot svg { display: block; width: 100%; height: 64px; overflow: visible; }
+#lifecycle-time-axis svg { display: block; width: 100%; height: auto; overflow: visible; }
+.lifecycle-explorer .lc-grid-line { stroke: var(--lc-border); stroke-width: 1; }
+.lifecycle-explorer .lc-time-cursor { stroke: var(--lc-text); opacity: .3; stroke-dasharray: 2 3; }
+.lifecycle-explorer .lc-active-line, .lifecycle-explorer .lc-duration-line { fill: none; stroke-width: 2; stroke: var(--lc-accent); }
+.lifecycle-explorer .lc-chart-point { fill: var(--lc-green); }
+.lifecycle-explorer .lc-trace-select { border: 0; padding: .5rem 0; text-align: left; background: transparent; border-radius: 0; }
+.lifecycle-explorer .lc-signal-label { font: .75rem var(--code-font, monospace); overflow-wrap: anywhere; }
+.lifecycle-explorer .lc-signal-label > span, .lifecycle-explorer .lc-signal-label > small { display: block; }
+.lifecycle-explorer .lc-signal-label > small { font: .7rem var(--body-font, sans-serif); margin-top: .2rem; }
+.lifecycle-explorer .lc-trace-track { display: block; height: 1.75rem; position: relative; background: var(--subtle-highlight); border-radius: .2rem; }
+.lifecycle-explorer .lc-trace-inner { position: absolute; inset: 0 5.5556%; }
+.lifecycle-explorer .lc-trace-bar { position: absolute; top: .2rem; height: 1.35rem; border-radius: .2rem; background: var(--lc-accent); color: var(--lc-bg); font: .68rem/1.35rem var(--code-font, monospace); white-space: nowrap; padding-left: .2rem; box-sizing: border-box; min-width: 4px; }
+.lifecycle-explorer .lc-span-parent { background: transparent; border: 1px dashed var(--lc-text); color: var(--lc-text); }
+.lifecycle-explorer .lc-span-ended { background: var(--lc-green); }
+.lifecycle-explorer .lc-span-error { background: var(--lc-red); }
+.lifecycle-explorer .lc-axis-row { font-size: .7rem; }
+#lifecycle-time-axis text { fill: var(--lc-text); font-size: 11px; }
+.lifecycle-explorer .lc-inspector { margin: 0 0 1rem; padding: .75rem .85rem; border-top: 1px solid var(--lc-border); border-left: 2px solid var(--lc-accent); }
+.lifecycle-explorer .lc-inspector-heading { display: flex; justify-content: space-between; align-items: start; gap: .75rem; }
+.lifecycle-explorer .lc-inspector-heading h3 { font-size: 1rem; color: inherit; overflow-wrap: anywhere; margin: .2rem 0 .6rem; }
+.lifecycle-explorer .lc-inspector-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: .75rem; }
+.lifecycle-explorer .lc-message, .lifecycle-explorer .lc-related { min-width: 0; }
+.lifecycle-explorer .lc-message-tabs { display: flex; gap: .5rem; margin-bottom: .65rem; }
+.lifecycle-explorer .lc-tab[aria-pressed="true"] { color: var(--lc-accent); border-color: var(--lc-accent); }
+.lifecycle-explorer .lc-related h4 { font-size: .85rem; color: inherit; margin: .4rem 0; }
+.lifecycle-explorer .lc-http-code { font: .72rem/1.6 var(--code-font, monospace); overflow-wrap: anywhere; padding: .65rem; background: var(--subtle-highlight); border-radius: .25rem; }
+.lifecycle-explorer .lc-http-line { min-height: 1em; }
+.lifecycle-explorer .lc-http-field { font: inherit; border: 0; border-radius: 0; background: transparent; padding: 0; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere; }
+.lifecycle-explorer .lc-body-preview { cursor: pointer; text-align: left; background: transparent; color: inherit; font: inherit; padding: .5rem 0 0; margin: .5rem 0 0; border-top: 1px solid var(--lc-border); white-space: pre-wrap; overflow: visible; }
+.lifecycle-explorer .lc-body-chunk { display: inline; }
+.lifecycle-explorer .lc-body-chunk[data-latest="true"] { box-shadow: inset 0 -2px var(--lc-accent); }
+.lifecycle-explorer .lc-fixture-preview { font: .7rem/1.6 var(--code-font, monospace); white-space: pre-wrap; overflow-wrap: anywhere; padding: .5rem; }
+.lifecycle-explorer .lc-detail-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .6rem; padding: .45rem 0; border: 0; border-top: 1px solid var(--lc-border); border-radius: 0; text-align: left; width: 100%; font-size: .75rem; background: transparent; box-sizing: border-box; }
+.lifecycle-explorer .lc-detail-row span, .lifecycle-explorer .lc-detail-row code { overflow-wrap: anywhere; }
+.lifecycle-explorer .lc-detail-row code { color: inherit; background: transparent; font-size: .7rem; padding: 0; white-space: normal; }
+.lifecycle-explorer .lc-linked[data-highlighted="true"], .lifecycle-explorer .lc-http-field[data-highlighted="true"], .lifecycle-explorer .lc-body-preview[data-highlighted="true"] { background: var(--primary-light); outline: 1px solid var(--lc-accent); outline-offset: 1px; }
+.lifecycle-explorer .lc-linked:hover, .lifecycle-explorer .lc-http-field:hover { color: var(--lc-accent); }
+.lifecycle-explorer .lc-body-progress { display: block; font-size: .75rem; border: 0; padding: .5rem 0; text-align: left; background: transparent; width: 100%; }
+.lifecycle-explorer .lc-field-note { font-size: .8rem; padding-left: .75rem; border-left: 2px solid var(--lc-accent); margin-top: 1rem; }
+.lifecycle-explorer .lc-exemplar { font-size: .75rem; overflow-wrap: anywhere; text-align: left; margin: .4rem 0; color: var(--lc-accent); }
+@media (max-width: 650px) {
+  .lifecycle-explorer .lc-inspector-grid { grid-template-columns: minmax(0, 1fr); }
+  .lifecycle-explorer .lc-signal-row { grid-template-columns: minmax(105px, 1fr) minmax(0, 2fr); gap: .5rem; }
+  .lifecycle-explorer .lc-transport { gap: .4rem; }
+  .lifecycle-explorer .lc-toolbar-spacer { display: none; }
+}
+@media (prefers-color-scheme: dark) { .lifecycle-explorer { --lc-green: #75d7a1; } }
+
+.lifecycle-explorer .lc-message-separator { border: 0; border-top: 1px solid var(--lc-border); margin: 1rem 0; }
+
+.lifecycle-explorer .lc-span-identity { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem 1rem; margin: .5rem 0 1rem; }
+.lifecycle-explorer .lc-span-identity dt { font-size: .75rem; font-weight: normal; margin: 0 0 .2rem; }
+.lifecycle-explorer .lc-span-identity dd { margin: 0; }
+.lifecycle-explorer .lc-span-identity code { color: inherit; background: transparent; padding: 0; font-size: .72rem; white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 650px) { .lifecycle-explorer .lc-span-identity { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.lifecycle-explorer .lc-span-summary { font-size: .8rem; margin: .2rem 0 .65rem; }
+.lifecycle-explorer .lc-attribute-value { min-width: 0; }
+.lifecycle-explorer .lc-destinations { display: flex; flex-wrap: wrap; gap: .2rem .35rem; margin-top: .3rem; }
+.lifecycle-explorer .lc-destination { font: .65rem var(--body-font, sans-serif); padding: .1rem .3rem; border-radius: .2rem; background: var(--subtle-highlight); }
