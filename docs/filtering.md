@@ -1,10 +1,11 @@
 # Filtering and errors
 
-## Select requests independently
+## Choose which requests to record
 
-Metrics, tracing and propagation have separate policies. `PerRequestFilter` receives the
-`RequestPrelude`, so selection is based on request metadata rather than the response or body.
-It is evaluated for each client acquisition or server app execution.
+Metrics, tracing and propagation each have a request filter. A `PerRequestFilter` receives a
+`RequestPrelude` with request metadata, including the method, URI and headers. It runs each time
+the client acquires a response or the server runs the app. The response and body are not
+available to the filter.
 
 ```scala mdoc:silent
 import org.http4s.otel4s.middleware.{PerRequestConfig, PerRequestFilter}
@@ -29,11 +30,15 @@ val tracingConfig = ClientTracingConfig(spanDataProvider)
   .withPropagationFilter(PerRequestFilter.alwaysEnabled)
 ```
 
-The last setting permits propagation for traced requests; it does not override a disabled tracing
-filter. Server tracing has `withReversePropagationFilter` for response headers. Compose filters
-with `and` or `or`, and use `alwaysEnabled` or `neverEnabled` for fixed policies.
+In this example, `/health` requests produce neither metrics nor spans.
+`withPropagationFilter(alwaysEnabled)` allows context injection only for requests that pass the
+tracing filter.
 
-## Classify response statuses
+Use `and` or `or` to combine filters. Use `alwaysEnabled` or `neverEnabled` to allow or disable
+every request. On the server, `withReversePropagationFilter` controls context injection into
+response headers.
+
+## Choose which responses count as errors
 
 | Default | Client | Server |
 | --- | --- | --- |
@@ -52,19 +57,22 @@ val customTracingConfig = tracingConfig.withErrorClassifier(policy)
 ```
 
 `ErrorClassifier.serverError` selects 5xx, and `ErrorClassifier.never` disables response-status
-error classification. `included` adds statuses, `excluding` removes them; classifiers also
-compose with `and` and `or`.
+error classification. Use `included` to add statuses and `excluding` to remove them. Combine
+classifiers with `and` or `or`.
 
 ## Exceptions and cancellation
 
-For combined instrumentation and standalone metrics, observed acquisition/app and body exceptions
-take precedence over a response-status classification. Setting `ErrorClassifier.never` does not
-hide those exceptions. An observed body failure remains an HTTP failure even if downstream code
-catches it. A backend can expose a transport failure as normal stream termination; instrumentation
-can classify only the outcome visible at its boundary.
+The combined middleware and metrics-only middleware record exceptions raised while acquiring a
+response, running the server app or evaluating a body. These exceptions take precedence over
+errors based on the response status. `ErrorClassifier.never` does not hide them. If the
+middleware sees a body failure, it records it even if code outside the middleware catches the
+exception.
 
-Caller failures outside the client body and errors in the client's later backend release are not
-classified as HTTP failures. Cancellation alone does not set error status or `error.type`; a
-response status already classified as an error can still make the exchange an error.
+The middleware can only record failures it sees. For example, if a backend ends a stream
+normally after a transport failure, the middleware cannot tell that the transport failed.
 
-See [Lifecycle and limitations](lifecycle.md) for exactly which work each boundary includes.
+Errors in caller code and later client backend cleanup do not count as HTTP failures.
+Cancellation alone does not set the span status to `Error` or add `error.type`. A response
+status that already counts as an error still does.
+
+See [Streaming lifecycle](streaming-lifecycle.md) for when the middleware finishes recording.

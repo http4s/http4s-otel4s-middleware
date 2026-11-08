@@ -2,7 +2,7 @@
 
 ## Metrics and tracing together
 
-Use the `client` artifact. Construct the middleware once and reuse the wrapped client:
+Use the `client` artifact. Create the middleware once and reuse the wrapped client:
 
 ```scala mdoc:silent
 import cats.effect.Temporal
@@ -22,14 +22,16 @@ val clientConfig = ClientMetricsConfig.default
 val tracingConfig = ClientTracingConfig(spanDataProvider)
 
 def instrument[F[_]: Temporal: MeterProvider: TracerProvider: ContextManager](
-    raw: Client[F]
+    client: Client[F]
 ): F[Client[F]] =
-  ClientInstrumentation.middleware[F](clientConfig, tracingConfig).map(_(raw))
+  ClientInstrumentation
+    .middleware[F](clientConfig, tracingConfig)
+    .map(middleware => middleware(client))
 ```
 
-Supply providers from the same backend, as in [Getting started](getting-started.md).
-The combined middleware records metrics before ending its HTTP span, enabling exemplar
-correlation when supported and configured by the backend.
+Use providers from the same telemetry instance, as in [Getting started](getting-started.md). The
+middleware records metrics before ending the HTTP span. If your backend supports exemplars, it
+can link those measurements to the span.
 
 ## Metrics only
 
@@ -38,8 +40,10 @@ Use the `metrics-client` artifact. It needs a meter provider and context manager
 ```scala mdoc:silent
 import org.http4s.otel4s.middleware.metrics.client.ClientMetrics
 
-def metricsOnly[F[_]: Temporal: MeterProvider: ContextManager](raw: Client[F]): F[Client[F]] =
-  ClientMetrics.middleware[F](clientConfig).map(_(raw))
+def metricsOnly[F[_]: Temporal: MeterProvider: ContextManager](client: Client[F]): F[Client[F]] =
+  ClientMetrics
+    .middleware[F](clientConfig)
+    .map(middleware => middleware(client))
 ```
 
 ## Tracing only
@@ -50,24 +54,30 @@ Use the `trace-client` artifact and its builder:
 import cats.effect.MonadCancelThrow
 import org.http4s.otel4s.middleware.trace.client.ClientMiddleware
 
-def tracingOnly[F[_]: MonadCancelThrow: TracerProvider](raw: Client[F]): F[Client[F]] =
-  ClientMiddleware.builder[F](spanDataProvider).build.map(_.wrapClient(raw))
+def tracingOnly[F[_]: MonadCancelThrow: TracerProvider](client: Client[F]): F[Client[F]] =
+  ClientMiddleware
+    .builder[F](spanDataProvider)
+    .build
+    .map(middleware => middleware.wrapClient(client))
 ```
 
-The tracing-only builder is a separate API; its completion behavior should not be assumed to
-match the new combined middleware. See [Migrating to 0.20](migration.md).
+The tracing-only builder ends its span when the response resource is released. The combined
+middleware can end it earlier, when the body finishes. See [Migrating to 0.20](migration.md).
 
-## Streaming and resource ownership
+## Reading and releasing responses
 
-For combined instrumentation and standalone metrics, completion occurs when the response body
-terminates, or when the response resource is released if the body is unread. Release the resource
-even when you do not need the body. The middleware does not drain unread bodies for you.
+The combined middleware and metrics-only middleware finish recording when the response body
+finishes, fails or is canceled, including its cleanup. If the body is never read, they finish
+recording when the response resource is released. Always release the response resource, even
+when you do not need the body. The middleware does not read unread bodies for you.
 
-Request and response body effects run in the HTTP span's context. Code consuming the response
-body retains its own context. HTTP failures observed in acquisition or body processing are distinct
-from errors in caller code or backend resource release.
+With tracing enabled, request and response body effects run in the HTTP span's context. The code
+that consumes the response body keeps its own context.
 
-Instrument the client once. Putting retry logic outside the instrumented client produces a
-separate exchange for each acquisition attempt. Use low-cardinality URL templates rather than raw
-paths for metric labels. See [Metrics](metrics.md), [Tracing](tracing.md) and
-[Lifecycle and limitations](lifecycle.md).
+Errors while acquiring the response or running its body count as HTTP failures. Errors in caller
+code or later backend resource cleanup do not.
+
+Instrument the client once. If retry logic wraps the instrumented client, each attempt gets its
+own span and measurements. Use URL templates such as `/users/{id}` for metric labels. Raw paths
+containing IDs create a separate metric series for every value. See [Metrics](metrics.md),
+[Tracing](tracing.md) and [Streaming lifecycle](streaming-lifecycle.md).

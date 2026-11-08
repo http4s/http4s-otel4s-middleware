@@ -1,7 +1,8 @@
 # Metrics
 
-The `metrics-client` and `metrics-server` modules record HTTP semantic-convention metrics.
-The combined `client` and `server` modules use the same recorders.
+The `metrics-client` and `metrics-server` modules record the HTTP metrics defined by the
+OpenTelemetry semantic conventions. The combined `client` and `server` modules record the same
+metrics.
 
 ## Instruments and defaults
 
@@ -9,15 +10,15 @@ The combined `client` and `server` modules use the same recorders.
 | --- | --- | --- | --- |
 | `http.client.request.duration` | seconds | Enabled | Client exchange completes |
 | `http.server.request.duration` | seconds | Enabled | Server exchange completes |
-| `http.client.active_requests` | requests | Disabled | Increment at acquisition; decrement at completion |
-| `http.server.active_requests` | requests | Disabled | Increment before app execution; decrement at completion |
+| `http.client.active_requests` | requests | Disabled | Increment when acquisition starts, decrement when recording finishes |
+| `http.server.active_requests` | requests | Disabled | Increment before the app runs, decrement when recording finishes |
 | `http.client.request.body.size` / `http.server.request.body.size` | bytes | Disabled | Exchange completes and a size is available |
 | `http.client.response.body.size` / `http.server.response.body.size` | bytes | Disabled | Exchange completes and a size is available |
 
-Active requests and body-size instruments are opt-ins. Duration covers the exchange through its
-[completion boundary](lifecycle.md), rather than just time to headers. The standard duration
-bucket boundaries, in seconds, are `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75,
-1, 2.5, 5, 7.5, 10`.
+Active requests and body sizes are disabled by default. Duration includes body processing and
+cleanup, as described in [Streaming lifecycle](streaming-lifecycle.md). The standard duration
+bucket boundaries, in seconds, are `0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1,
+2.5, 5, 7.5, 10`.
 
 ```scala mdoc:silent
 import org.http4s.otel4s.middleware.metrics.BodySizeConfig
@@ -33,49 +34,58 @@ val config = ClientMetricsConfig.default
   )
 ```
 
-The server config has corresponding opt-ins and duration bucket configuration. Histogram bucket
-settings are advice to the backend; configure SDK views or aggregation where your backend requires
-it. Backend instrument enablement also controls what is recorded.
+The server config has the same methods for enabling metrics and setting duration buckets. The
+backend may use different histogram buckets. Configure SDK views or aggregation if needed to
+make it use your chosen boundaries. The backend can also disable individual instruments.
 
 ## Body sizes
 
-Choose the source separately for request and response:
+Choose how to measure request and response bodies separately:
 
 | Strategy | Meaning | Incomplete or unread body |
 | --- | --- | --- |
-| `BodySizeConfig.contentLength` | Declared `Content-Length`; this is also the no-argument opt-in | Declared length can still be recorded; missing lengths are omitted |
+| `BodySizeConfig.contentLength` | Declared `Content-Length` | Records the declared length if present |
 | `BodySizeConfig.observe` | Bytes from the first body evaluation | Incomplete observations are omitted |
 
-Observed sizes count bytes flowing through the instrumented stream. They are not a wire-size
+Calling `optIntoRequestBodySize` or `optIntoResponseBodySize` without an argument uses
+`BodySizeConfig.contentLength`.
+
+Observed sizes count bytes passing through the instrumented stream. They are not a wire-size
 measurement and do not include HTTP framing or TLS overhead. Compression placement affects the
-bytes seen by the observer. Observation does not force or buffer body evaluation.
+bytes seen by the observer. Observation does not read or buffer the body on its own.
 
-Responses that cannot carry a body, such as HEAD and 204, have a protocol-known zero response
-size. That does not change the server completion requirement: its response body must still be
-run. Custom size buckets are supplied to `BodySizeConfig.contentLength(buckets)` or
-`BodySizeConfig.observe(buckets)` and use bytes.
+Responses that cannot carry a body, such as HEAD and 204, have a response size of zero
+regardless of the declared length. The server still needs to run the response body before it can
+finish recording. To set custom size buckets, pass them to
+`BodySizeConfig.contentLength(buckets)` or `BodySizeConfig.observe(buckets)` using bytes as the
+unit.
 
-## Attributes and cardinality
+## Metric labels
 
 Use `withAttributes` for shared labels and `withRequestAttributes` for request-derived labels.
-Request labels override shared labels; generated semantic attributes take precedence over both.
-Avoid identifiers, raw URLs and arbitrary query values in metric labels.
+Request labels override shared labels. The standard HTTP attributes override both. Avoid IDs,
+raw URLs and query values in labels. Each distinct combination of label values creates another
+metric series.
 
-Client metrics include destination attributes when available. URL scheme and URL template are
-opt-ins; configure a `UriTemplateClassifier` and use `optIntoUrlScheme` as needed. Server metrics
-accept a `RouteClassifier`; server address and port are separate opt-ins. Unclassified templates
-are omitted, without a raw-path fallback.
+Client metrics include the destination address and port when available. To add a URL template,
+configure a `UriTemplateClassifier`. To add the URL scheme, use `optIntoUrlScheme`.
 
-Known methods use a bounded set. Unknown methods become `_OTHER`; matching is case-sensitive.
-Extend `TypedAttributes.DefaultKnownMethods` with `withKnownMethods` if your service uses more
-methods. An empty known-method set maps every method to `_OTHER`.
+Server metrics use a `RouteClassifier` for route templates. Server address and port must be
+enabled separately. If a classifier does not match, the template attribute is omitted. The
+library does not use the raw path as a fallback.
 
-## Exemplars
+Only known HTTP methods appear as label values. Other methods become `_OTHER`. Matching is
+case-sensitive. Pass an extended `TypedAttributes.DefaultKnownMethods` set to `withKnownMethods`
+if your service uses more methods. An empty set maps every method to `_OTHER`.
 
-Combined instrumentation records metrics in the HTTP context before ending the span. A backend
-configured to retain exemplars can therefore associate measurements with the HTTP span. Sampling,
-exemplar filtering, storage and display belong to the SDK and observability backend; a measurement
-does not guarantee a visible exemplar. Standalone metrics use the captured ambient context.
+## Link measurements to traces
 
-For the older http4s `MetricsOps` adapter in the `metrics` artifact, see
-[Migrating to 0.20](migration.md); its instruments and boundaries differ.
+An exemplar links a metric measurement to a trace. The combined middleware records metrics in
+the HTTP context before ending the span, so a backend that keeps exemplars can link them to that
+span. Whether the link appears depends on sampling, SDK settings and backend support.
+
+Metrics-only middleware uses the context that was current when the request started. It does not
+create a span.
+
+For the older http4s `MetricsOps` adapter in the `metrics` artifact, see [Migrating to
+0.20](migration.md). It records different metrics at different points in a request.

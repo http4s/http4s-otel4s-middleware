@@ -110,23 +110,23 @@
       const seen = progress(payload, index + 1);
       const request = direction === "request";
       push((request ? "Request" : "Response") + " chunk " + (index + 1) + " · +" + chunk.bytes.length + " B", time,
-        "Evaluate fixture bytes [" + chunk.start + ", " + chunk.end + ") in the HTTP source context. " +
-        seen.bytes.length + "/" + payload.bytes.length + " body bytes have passed this boundary. " +
-        "Partial UTF-8 characters wait for the next chunk; chunks do not record histogram samples.",
+        "Read example bytes [" + chunk.start + ", " + chunk.end + ") in the HTTP context. " +
+        seen.bytes.length + "/" + payload.bytes.length + " body bytes have been read. " +
+        "A split UTF-8 character waits for the next chunk. Reading a chunk does not record a histogram sample.",
         Object.assign({ phase: request ? "request-body" : "body", chunk: { direction, index, start: chunk.start,
           end: chunk.end, bytes: chunk.bytes } }, request ? { requestBytes: seen.bytes.length, requestChunkCount: index + 1 }
           : { bytes: seen.bytes.length, chunkCount: index + 1, bodyStarted: true }));
     }
-    push("Before request", 0, "A synthetic request is prepared. No HTTP exchange or body evaluation has started.");
+    push("Before request", 0, "The example request is ready. The HTTP exchange has not started and no body bytes have been read.");
     push(client ? "Start acquisition" : "Start app", 5,
-      config.tracing ? "Start the HTTP span. Enabled metrics increment active requests independently."
-        : "Tracing is filtered out. Enabled metrics still capture ambient context and increment active requests.",
+      config.tracing ? "Start the HTTP span. If metrics are enabled, increase the active-request count."
+        : "Tracing is disabled for this request. If metrics are enabled, capture the current context and increase the active-request count.",
       { phase: "start", span: config.tracing ? "open" : "disabled", active: config.metrics ? 1 : 0 });
     messages.request.body.chunks.forEach((_, index) => consume("request", index, 10 + index * 5));
     if (messages.request.body.bytes.length) {
-      push("Request body reaches EOF", 18, "All request fixture bytes were evaluated. This example opts into response-size metrics only.", { phase: "request-eof", requestComplete: true });
+      push("Request body reaches EOF", 18, "All request body bytes have been read. This example measures response sizes only.", { phase: "request-eof", requestComplete: true });
     } else {
-      push("Evaluate empty request body", 10, "The request fixture has no payload bytes. Evaluating its empty body reaches EOF.", { phase: "request-eof", requestComplete: true });
+      push("Evaluate empty request body", 10, "The request has no body bytes. Running its empty body reaches the end of the stream (EOF).", { phase: "request-eof", requestComplete: true });
     }
     function complete(time, exception) {
       const statusError = current.response && (client ? config.status >= 400 : config.status >= 500);
@@ -134,31 +134,31 @@
       const size = !current.response ? null : messages.response.noBody ? 0
         : config.bodySize === "contentLength" ? messages.response.declaredLength : current.bodyComplete ? current.bytes : null;
       push("Record metrics", time,
-        config.metrics ? "Record duration and available size, then decrement active requests." +
+        config.metrics ? "Record duration and any available body size, then reduce the active-request count." +
           (config.tracing ? " The HTTP span has not ended yet." : " No HTTP span was created.")
-          : "Metrics are filtered out: no instruments change. Span completion remains independent.",
+          : "Metrics are disabled for this request. The span still ends in the next step if tracing is enabled.",
         { phase: "metrics", completed: true, active: 0, duration: config.metrics,
           durationSeconds: (time - 5) / 1000, bodySize: config.metrics ? size : null, error: !!errorType, errorType });
       push(config.tracing ? "End HTTP span" : "Exchange complete", time,
         config.tracing ? "Add response/error attributes and end the span after metrics. Select its bar or a metric to inspect the recorded data."
-          : "No HTTP span was created. Metrics-only recording uses the captured ambient context.",
+          : "No HTTP span was created. Metrics use the context captured when the request started.",
         { phase: "end", span: config.tracing ? "ended" : "disabled" });
     }
     if (config.scenario === "app-error" || config.scenario === "app-cancel") {
       const failed = config.scenario === "app-error";
       push(failed ? "Acquisition / app fails" : "Acquisition / app canceled", 20,
         failed ? "An exception is observed before response headers."
-          : "Cancellation alone is neutral; no response status exists to classify.", { phase: "terminal" });
+          : "Cancellation alone does not count as an error. There is no response status to check.", { phase: "terminal" });
       complete(20, failed ? "demo.AcquisitionFailure" : null);
       return result;
     }
     push("Response headers available", 25,
-      "The response now exists. Content-Length describes the declared payload, not how many bytes have been evaluated.",
+      "The response headers are available. Content-Length gives the declared size. No response body bytes have been read yet.",
       { phase: "headers", response: true });
     if (config.scenario === "unread") {
       push(client ? "Release unread response" : "Discard body without starting", 80,
-        client ? "Release supplies the completion signal without draining the body. No fixture chunks have been evaluated."
-          : "No response body evaluation means no terminal signal. Its span and enabled active count remain open.", { phase: "terminal" });
+        client ? "Releasing the response lets the middleware finish recording without reading the body."
+          : "The body never ran, so the middleware cannot finish recording. Its span stays open and the active-request count stays at one if enabled.", { phase: "terminal" });
       if (client) {
         complete(80, null);
         push("Backend release finalizers", 95, "Already completed. No second measurement or span end.");
@@ -176,11 +176,11 @@
       });
     }
     push(config.scenario === "body-error" ? "Body fails" : config.scenario === "body-cancel" ? "Body canceled" : "Body reaches EOF", 110,
-      interrupted ? "The remaining fixture bytes are not evaluated. An incomplete observation is omitted; declared length can still be recorded."
-        : "EOF confirms the first body evaluation is complete. Its actual byte count is now eligible for recording after cleanup.",
+      interrupted ? "The remaining body bytes are not read. No observed size will be recorded, but the declared length can still be recorded."
+        : "The first body read has reached EOF. Its byte count can be recorded after cleanup.",
       { phase: "terminal", bodyComplete: !interrupted });
     complete(125, config.scenario === "body-error" ? "demo.BodyFailure" : null);
-    if (client) { push("Backend release finalizers", 155, "HTTP recording is complete. Later release or caller failures are outside its duration."); }
+    if (client) { push("Backend release finalizers", 155, "HTTP recording has finished. Later backend cleanup and caller work are outside its duration."); }
     return result;
   }
   function snapshot(configValue, event) {
@@ -334,21 +334,21 @@
         element.setAttribute("aria-pressed", String(source === selectedField));
       });
       const notes = {
-        method: "The request method supplies http.request.method. Known methods are normalized; this fixture uses a known method.",
-        target: "The path and query supply URL attributes. access_token is explicitly redacted in this example; /widgets/{id} is a configured classifier result, not the literal URL. Metric labels never use the raw URL.",
-        host: "The request authority supplies server.address and server.port. Server metric address/port opt-ins are off in this example.",
-        status: "Response status supplies http.response.status_code at completion. Default client errors: 4xx/5xx; server: 5xx. Observed exceptions take precedence for error.type.",
+        method: "The request method sets http.request.method. This example uses a known method. Unknown methods become _OTHER.",
+        target: "The path and query set URL attributes. This example masks access_token. The /widgets/{id} template comes from a classifier. Metric labels do not use the raw URL.",
+        host: "The host and port set server.address and server.port. These labels are disabled for server metrics in this example.",
+        status: "The response status sets http.response.status_code when recording finishes. By default, 4xx and 5xx count as client errors. Only 5xx count as server errors. An observed exception overrides the status-based error.type.",
         protocol: "network.protocol.version comes from response metadata on the client and request metadata on the server.",
         traceparent: "Trace Context links parent and child spans. This header is not automatically a span attribute. Request propagation and server extraction require tracing in this middleware.",
         baggage: "Baggage travels in context and supported propagation headers. It is not automatically copied to span attributes or metric labels.",
-        "response-length": "Content-Length declares the representation length; it does not measure consumption. The declared strategy can record it for incomplete bodies. HEAD/204 have protocol-known zero payload size.",
-        "request-length": "This Content-Length is computed from the UTF-8 request fixture. It is independent of which body chunks have been evaluated.",
-        "response-body": "Chunk counts and byte totals come from the exact fixture slices below. Observe records after normal EOF and cleanup; incomplete observations are omitted. Protocol-known zero sizes do not need observation. Body contents are not span attributes.",
-        "request-body": "The request preview includes only evaluated fixture chunks. Request body-size metrics are not opted into in this example. Body contents are not span attributes.",
+        "response-length": "Content-Length gives the declared size. It does not say how many bytes were read. The Content-Length strategy can record it for incomplete bodies. HEAD and 204 response sizes are always zero.",
+        "request-length": "This Content-Length comes from the example request’s UTF-8 bytes. It stays the same as body chunks are read.",
+        "response-body": "Chunk counts and byte totals come from the example body. Observe records a size after normal EOF and cleanup. Incomplete sizes are omitted. HEAD and 204 response sizes are zero without observation. Body contents are not span attributes.",
+        "request-body": "The request preview shows only chunks that have been read. Request body-size metrics are disabled in this example. Body contents are not span attributes.",
         exception: "This observed exception is recorded as an exception event and error.type when the HTTP span ends. It is not an HTTP header."
       };
       byId("field-note").hidden = !selectedField;
-      byId("field-note").textContent = selectedField ? notes[selectedField] || "Header capture is opt-in. This fixture header is allowed by the default HeaderRedactor; propagation headers are elided." : "";
+      byId("field-note").textContent = selectedField ? notes[selectedField] || "Header capture is disabled by default. The default HeaderRedactor allows this example header. It excludes context propagation headers." : "";
     }
     function linked(text, source, className) {
       const element = button(text, () => { selectedField = selectedField === source ? null : source; highlight(); }, className || "lc-linked");
@@ -509,9 +509,9 @@
       const unread = remainder(model.body, response ? event.chunkCount : event.requestChunkCount);
       if (unread.bytes.length) {
         const example = node("div");
-        example.appendChild(node("p", "Example data awaiting evaluation.", "lc-muted"));
+        example.appendChild(node("p", "Example bytes that have not been read.", "lc-muted"));
         if (unread.completesCharacter) {
-          example.appendChild(node("p", "The first character completes the UTF-8 sequence begun in the evaluated bytes.", "lc-muted"));
+          example.appendChild(node("p", "The first character completes the UTF-8 sequence started in the previous chunk.", "lc-muted"));
         }
         example.appendChild(node("pre", unread.text, "lc-fixture-preview"));
         container.appendChild(details("Remaining example body · " + unread.bytes.length + " B", example));

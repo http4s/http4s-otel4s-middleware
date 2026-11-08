@@ -4,7 +4,7 @@ Examples use Scala 3. The library also supports Scala 2.13.
 
 ## Dependencies
 
-For metrics and tracing on both sides, add:
+To record metrics and traces for both clients and servers, add:
 
 ```scala
 libraryDependencies ++= Seq(
@@ -13,14 +13,16 @@ libraryDependencies ++= Seq(
 )
 ```
 
-Install only the side you need. These modules include the tracing and metrics modules transitively;
-you do not need to list `core` separately. For metrics alone, use `metrics-client` or
-`metrics-server`; for tracing alone, use `trace-client` or `trace-server`.
+Add only the client or server module if you do not need both. They include the required metrics,
+tracing and core dependencies.
+
+For metrics alone, use `metrics-client` or `metrics-server`. For tracing alone, use
+`trace-client` or `trace-server`.
 
 In an sbt cross-project, use `%%%` instead of `%%`. Choose an otel4s backend that supports your
-platform. The middleware does not configure exporters or start a collector.
+platform. Configure exporters and a collector separately.
 
-## A complete JVM client
+## Send a request on the JVM
 
 This example uses the OtelJava backend and Ember. Add these alongside the client middleware:
 
@@ -58,14 +60,16 @@ object FirstRequest extends IOApp.Simple {
       val clientConfig = ClientMetricsConfig.default
       val tracingConfig = ClientTracingConfig(spanDataProvider)
 
-      val client = for {
-        raw <- EmberClientBuilder.default[IO].build
-        instrumented <- Resource.eval(
-          ClientInstrumentation.middleware[IO](clientConfig, tracingConfig).map(_(raw))
+      val instrumentedClient = for {
+        client <- EmberClientBuilder.default[IO].build
+        middleware <- Resource.eval(
+          ClientInstrumentation.middleware[IO](clientConfig, tracingConfig)
         )
-      } yield instrumented
+      } yield middleware(client)
 
-      client.use(_.expect[String](uri"http://localhost:8080/hello").flatMap(IO.println))
+      instrumentedClient.use { client =>
+        client.expect[String](uri"http://localhost:8080/hello").flatMap(IO.println)
+      }
     }
   }
 }
@@ -89,7 +93,9 @@ If using `sbt run`, fork the application JVM and add
 setup and exporter configuration.
 
 The meter provider, tracer provider and `ContextManager` must come from the same telemetry
-instance. Keep its resource alive for the lifetime of the instrumented application.
-`expect` consumes and releases the response; with `client.run`, always use the returned resource.
+instance. Keep that resource open while your application uses the middleware.
+
+`expect` reads the response body and releases the response. If you use `client.run` instead,
+call `use` on the returned resource so the response is released.
 
 Continue with [Client instrumentation](client.md) or [Server instrumentation](server.md).

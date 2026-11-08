@@ -24,12 +24,14 @@ val tracingConfig = ServerTracingConfig(spanDataProvider)
 def instrument[F[_]: Temporal: MeterProvider: TracerProvider: ContextManager](
     finalApp: HttpApp[F]
 ): F[HttpApp[F]] =
-  ServerInstrumentation.middleware[F](serverConfig, tracingConfig).map(_(finalApp))
+  ServerInstrumentation
+    .middleware[F](serverConfig, tracingConfig)
+    .map(middleware => middleware(finalApp))
 ```
 
-Convert routes to an app and apply response-transforming middleware before calling `instrument`.
-Pass the resulting app to your server builder. This lets instrumentation observe the response
-that will actually be consumed, including errors recovered by inner middleware.
+Convert routes to an app, then apply error handlers and any middleware that changes the
+response. Pass that app to `instrument`, then give the wrapped app to your server builder. The
+instrumentation will see the final response, including responses returned by error handlers.
 
 ## Metrics only
 
@@ -39,7 +41,9 @@ Use the `metrics-server` artifact:
 import org.http4s.otel4s.middleware.metrics.server.ServerMetrics
 
 def metricsOnly[F[_]: Temporal: MeterProvider: ContextManager](app: HttpApp[F]): F[HttpApp[F]] =
-  ServerMetrics.middleware[F](serverConfig).map(_(app))
+  ServerMetrics
+    .middleware[F](serverConfig)
+    .map(middleware => middleware(app))
 ```
 
 ## Tracing only
@@ -51,16 +55,19 @@ import cats.effect.MonadCancelThrow
 import org.http4s.otel4s.middleware.trace.server.ServerMiddleware
 
 def tracingOnly[F[_]: MonadCancelThrow: TracerProvider](app: HttpApp[F]): F[HttpApp[F]] =
-  ServerMiddleware.builder[F](spanDataProvider).build.map(_.wrapHttpApp(app))
+  ServerMiddleware
+    .builder[F](spanDataProvider)
+    .build
+    .map(middleware => middleware.wrapHttpApp(app))
 ```
 
-The tracing-only builder remains a separate API. The lifecycle rules below describe combined
-instrumentation and standalone metrics.
+The tracing-only builder ends its span when the app returns a response. The combined middleware
+keeps it open until the response body finishes, including cleanup.
 
-## Route classification
+## Route templates
 
-Supply a low-cardinality route template to both metrics and tracing. Classification is explicit;
-the library does not infer the route matched by your application:
+Give metrics and tracing the same route template, such as `/users/{id}`. The library does not
+know which route your app matched, so you need to provide a `RouteClassifier`:
 
 ```scala mdoc:silent
 import cats.effect.IO
@@ -70,24 +77,31 @@ import org.http4s.otel4s.middleware.server.RouteClassifier
 val routes = RouteClassifier.of[IO] {
   case GET -> Root / "users" / _ => "/users/{id}"
 }
+
 val classifiedMetricsConfig = serverConfig.withRouteClassifier(routes)
 val classifiedSpanDataProvider = spanDataProvider.withRouteClassifier(routes)
 val classifiedTracingConfig = tracingConfig.withSpanDataProvider(classifiedSpanDataProvider)
 ```
 
-An unclassified route is omitted; do not substitute the raw request path.
+If the classifier does not match, the route attribute is omitted. Avoid using raw paths with IDs
+or other values that change for each request.
 
-## Completion and propagation
+## When recording finishes
 
-App failure or cancellation completes instrumentation immediately. A successful app response
-completes only when its body is evaluated and terminates, including cleanup. This also applies to
-empty and HEAD responses. An outer middleware that discards the instrumented body can leave the
-span open and active-request count incremented. Body completion does not establish delivery to
-the remote client.
+The combined middleware and metrics-only middleware finish recording immediately if the app
+fails or is canceled. If the app returns a response, recording finishes only after its body runs
+and finishes, fails or is canceled, including cleanup. Empty and HEAD response bodies must run
+too.
 
-App and response body effects run in the context extracted from request headers, including
-baggage. Response context propagation is disabled by default; enable it with
-`tracingConfig.withReversePropagationFilter(...)` if your protocol requires it.
+If an outer middleware replaces the response without running its original body, the span can
+stay open and the active-request count can stay at one. Finishing the body does not prove that
+the remote client received the bytes.
 
-See [Lifecycle and limitations](lifecycle.md) for scenarios and
-[Tracing and propagation](tracing.md) for privacy and context configuration.
+## Request and response context
+
+With tracing enabled, app and response body effects run in the context read from request
+headers, including baggage. Adding context to response headers is disabled by default. To enable
+it, use `tracingConfig.withReversePropagationFilter(...)`.
+
+See [Streaming lifecycle](streaming-lifecycle.md) for completion rules and [Tracing and
+propagation](tracing.md) for privacy and context configuration.

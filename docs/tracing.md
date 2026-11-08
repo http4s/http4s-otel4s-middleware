@@ -2,19 +2,22 @@
 
 ## Span names and attributes
 
-`ClientSpanDataProvider.openTelemetry` and `ServerSpanDataProvider.openTelemetry` implement the
-HTTP semantic-convention span data. Client spans use kind `Client`; server spans use kind `Server`.
-Known request methods form span names, with a classified URL template or route when available.
-Unknown methods use `HTTP` in span names and `_OTHER` in the normalized method attribute.
+`ClientSpanDataProvider.openTelemetry` and `ServerSpanDataProvider.openTelemetry` provide span
+names and attributes that follow the OpenTelemetry HTTP semantic conventions. Client spans have
+kind `Client`. Server spans have kind `Server`.
+
+Span names contain a known request method and a URL template or route when configured, such as
+`GET /users/{id}`. Unknown methods use `HTTP` in span names and `_OTHER` in the method
+attribute.
 
 Providers supply names, request attributes, response attributes and exception attributes.
 Implement `SpanDataProvider` for custom behavior, or use the OpenTelemetry provider's builder
-methods to enable additional attributes. Header capture is opt-in.
+methods to add attributes. Header capture is disabled by default.
 
 ## URL and header redaction
 
-Client providers require a `UriRedactor`; server providers require a path-and-query redactor.
-Choose these deliberately because span attributes can contain application data. For example:
+A client provider needs a `UriRedactor`. A server provider needs a path and query redactor.
+These control which parts of a URL appear in span attributes. For example:
 
 ```scala mdoc:silent
 import org.http4s.otel4s.middleware.trace.client.{ClientSpanDataProvider, UriRedactor}
@@ -28,20 +31,20 @@ val spanDataProvider = ClientSpanDataProvider.openTelemetry(redactor)
   .optIntoHttpRequestHeaders(HeaderRedactor.default)
 ```
 
-`OnlyRedactUserInfo` masks URI credentials but retains paths, query values and fragments.
-Mixing in `RedactSensitive` additionally masks values for selected query keys. Matching is
-**case-sensitive**. Overriding `sensitiveQueryParameters` replaces the defaults, so extend the
-set when you want to preserve them. This is a selected-key policy, not a guarantee that every
-secret is removed. Review path segments, fragments and application-specific parameters too.
+`OnlyRedactUserInfo` masks URI credentials but keeps paths, query values and fragments. Adding
+`RedactSensitive` also masks values for selected query keys. Matching is **case-sensitive**.
+Overriding `sensitiveQueryParameters` replaces the defaults, so extend the set when you want to
+preserve them. Only the selected keys are masked. Check whether paths, fragments or other query
+parameters contain sensitive values too.
 
-Server providers accept a redactor such as
-`new PathRedactor.NeverRedact with QueryRedactor.RedactSensitive {}`. For paths containing
-sensitive data, supply your own path policy. Redaction changes telemetry attributes; it does not
-rewrite the HTTP request sent to the service.
+Server providers accept a redactor such as `new PathRedactor.NeverRedact with
+QueryRedactor.RedactSensitive {}`. If paths contain sensitive data, provide a redactor that
+masks it. Redaction changes the span attributes. The HTTP request sent to the service stays the
+same.
 
 ## Context across a request
 
-For combined instrumentation, the flow is:
+With combined client and server instrumentation, context flows like this:
 
 ```text
 caller span
@@ -50,27 +53,30 @@ caller span
 ```
 
 Client request propagation is enabled by default for traced requests. The server extracts the
-incoming context, including baggage. Configure propagators on your otel4s backend; the middleware
-uses that configuration rather than implementing a separate propagation format.
+incoming context, including baggage. Configure propagators on your otel4s backend. The
+middleware uses those propagators to read and write context headers.
 
-Request and response body effects retain the captured HTTP context even when evaluated later.
-Code consuming a body retains its own context. Supply the meter provider, tracer provider and
-context manager from the same telemetry instance so recording and propagation agree.
+Request and response body effects keep the HTTP context even when they run later. The code that
+consumes the body keeps its own context. Use the meter provider, tracer provider and context
+manager from the same telemetry instance.
 
-Filtering tracing off also bypasses the combined middleware's tracing propagation for that
-request. Disabling propagation alone does not disable the local span. Metrics have an independent
-filter. See [Filtering and errors](filtering.md).
+If the tracing filter disables tracing for a request, the combined middleware also skips context
+injection on the client and context extraction on the server. Disabling only the propagation
+filter still allows the client to create a local span. Metrics use a separate filter. See
+[Filtering and errors](filtering.md).
 
 ## Response propagation
 
-Server response propagation is disabled by default. Enable it selectively with
-`ServerTracingConfig.withReversePropagationFilter` to inject context into response headers.
-It is separate from extraction of incoming request context. Existing unrelated headers are
-preserved.
+Server response propagation is disabled by default. Use
+`ServerTracingConfig.withReversePropagationFilter` to choose which responses get context
+headers. This setting does not affect context extraction from incoming requests. Other response
+headers stay unchanged.
 
-## Completion
+## When spans end
 
-Combined instrumentation ends its span after recording metrics at the shared exchange completion
-boundary. Existing tracing-only builders have different boundaries: client spans follow the
-response resource scope, and server spans follow app evaluation through response creation.
-See [Lifecycle and limitations](lifecycle.md) before choosing an API.
+The combined middleware ends its span after recording metrics, once the body finishes or an
+unread client response is released.
+
+The tracing-only builders end spans at different points. Client spans end when the response
+resource is released. Server spans end when the app returns a response. See [Streaming
+lifecycle](streaming-lifecycle.md) before choosing an API.

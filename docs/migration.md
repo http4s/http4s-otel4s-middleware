@@ -1,58 +1,66 @@
 # Migrating to 0.20
 
-This guide describes the upcoming 0.20 APIs. Use a published 0.20 version when available, or a
-snapshot containing these modules while evaluating them.
+Version 0.20 adds modules for metrics alone and for metrics and tracing together. This guide
+explains how they differ from the existing tracing builders and http4s metrics adapter.
 
 ## Choose an API
 
 | Existing use | 0.20 option | What to review |
 | --- | --- | --- |
-| `ClientMiddleware` / `ServerMiddleware` | Keep tracing-only builders, or adopt `ClientInstrumentation` / `ServerInstrumentation` | Combined instrumentation follows body completion |
-| `OtelMetrics` with http4s Metrics middleware | Keep the adapter, or adopt `ClientMetrics` / `ServerMetrics` | New instrument names, attributes and completion boundaries |
-| Separate tracing and metrics wrappers | Use combined instrumentation | A shared completion boundary records metrics before ending the HTTP span |
+| `ClientMiddleware` / `ServerMiddleware` | Keep tracing-only builders, or adopt `ClientInstrumentation` / `ServerInstrumentation` | Recording includes the response body and its cleanup |
+| `OtelMetrics` with http4s Metrics middleware | Keep the adapter, or adopt `ClientMetrics` / `ServerMetrics` | Different metric names, labels and recording times |
+| Separate tracing and metrics wrappers | Use combined instrumentation | Metrics are recorded before the HTTP span ends |
 
-The existing `metrics`, `trace-client` and `trace-server` artifacts remain distinct from the new
-`metrics-client`, `metrics-server`, `client` and `server` artifacts. This is not an artifact rename.
-Replace old wrappers when adopting the combined middleware to avoid duplicate instrumentation.
+The existing `metrics`, `trace-client` and `trace-server` modules are still available. The new
+`metrics-client`, `metrics-server`, `client` and `server` modules provide separate APIs.
 
-## Provider and context wiring
+When switching to combined instrumentation, remove the old metrics and tracing wrappers so each
+request is recorded once.
 
-New combined and standalone metrics factories take providers through contextual parameters. Supply
-`MeterProvider`, `TracerProvider` where required, and `ContextManager` from the same telemetry
-instance. Configuration values contain policies, not backend instances. See the complete
-[Getting started](getting-started.md) example.
+## Providers and context
+
+The new middleware takes providers as contextual parameters, supplied with `given` in Scala 3.
+Metrics-only middleware needs `MeterProvider` and `ContextManager`. The combined middleware also
+needs `TracerProvider`. Use providers from the same telemetry instance. Configure the backend
+separately from the middleware. See the complete [Getting started](getting-started.md) example.
 
 The shared `ErrorClassifier`, `PerRequestFilter` and `PerRequestConfig` types now live under
-`org.http4s.otel4s.middleware`. Existing tracing-package compatibility types remain, but new
-code should use the shared imports.
+`org.http4s.otel4s.middleware`. The old tracing-package types are still available for
+compatibility. Use the shared imports in new code.
 
 ## Metrics and dashboards
 
-The `OtelMetrics` adapter follows http4s `MetricsOps` callbacks. The new dedicated middleware uses
-HTTP duration, active-request and optional body-size instruments. It does not reproduce every
-legacy header/total timing, abnormal-termination or classifier-based series. Update dashboard
-queries and alerts against the [new instrument table](metrics.md), including units and labels.
+The `OtelMetrics` adapter records metrics through http4s `MetricsOps` callbacks. The new metrics
+middleware records HTTP duration, active requests and body sizes. Some old series have no direct
+replacement, including separate header and total timings, abnormal termination counts and series
+grouped by the old classifier.
 
-Duration is enabled by default. Active requests and body sizes require explicit opt-ins. Unknown
-methods normalize to `_OTHER`; use route and URL templates for bounded cardinality.
+Update dashboard queries and alerts to use the [new metrics](metrics.md). Check names, units and
+labels.
+
+Duration is enabled by default. Enable active requests and body sizes if you need them. Unknown
+HTTP methods use `_OTHER` as their label value. Use route and URL templates such as
+`/users/{id}` to avoid creating a separate metric series for each ID.
 
 ## Streaming behavior
 
-The old server tracing wrapper ends after app evaluation produces a response. Combined server
-instrumentation continues through response-body termination and cleanup. Apply it once to the
-final app so outer transformations cannot discard its body unnoticed.
+The old server tracing wrapper ends its span when the app returns a response. The combined
+server middleware keeps recording until the response body finishes, including cleanup. Wrap the
+final app, after routing, error handlers and middleware that changes the response.
 
-The old client tracing wrapper follows response resource scope. Combined client instrumentation
-completes at body termination or unread response release, before backend release finalizers.
-Review code that assumed caller work inside `use` was part of HTTP duration.
+The old client tracing wrapper ends its span when the response resource is released. The
+combined client middleware can finish earlier, when the body finishes. If the body is unread, it
+finishes when the response is released. In both cases, recording finishes before backend
+resource cleanup. Caller work inside `use` is no longer necessarily part of the HTTP span.
 
-A successful server response whose body never starts has no completion signal. Its span stays
-open, duration and sizes are not recorded, and enabled active requests remain incremented.
-Test middleware ordering and the server backend with empty, HEAD and replaced responses.
-See [Lifecycle and limitations](lifecycle.md).
+If a server response body never runs, the middleware cannot finish recording. Its span stays
+open, no duration or sizes are recorded, and the active-request count stays incremented if
+enabled. Check that your middleware stack runs empty, HEAD and replaced response bodies. See
+[Streaming lifecycle](streaming-lifecycle.md).
 
 ## Before deploying
 
-Compare a representative request's spans and measurements, including streaming, failures and
-cancellation. Verify provider wiring, filters, redaction, sampling and exemplar configuration.
-Run old and new dashboards against the resulting telemetry before removing legacy queries.
+Compare spans and measurements for typical requests, streamed responses, failures and
+cancellation. Check that the middleware uses the right providers, filters and redactors. If you
+use trace sampling or exemplars, check those too. Verify the new dashboard queries before
+removing the old ones.
