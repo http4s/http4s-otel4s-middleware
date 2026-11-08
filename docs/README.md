@@ -4,10 +4,6 @@ OpenTelemetry metrics and tracing for http4s clients and servers, built on
 [otel4s](https://typelevel.org/otel4s/). Record spans and metrics for streaming requests and
 responses. Request and response body effects keep the HTTP context, even when they run later.
 
-This documentation describes the upcoming **0.20.0** APIs. The modules that provide metrics
-alone or metrics and tracing together were added after 0.19.0. See [Migrating to
-0.20](migration.md) if you already use the library.
-
 ## Start here
 
 1. [Getting started](getting-started.md): add dependencies and send your first request.
@@ -37,5 +33,4 @@ OtelJava example in this guide runs on the JVM.
 - [Lifecycle explorer](lifecycle.md): watch spans, metrics and headers change one step at a time.
 
 Source and API reference: [GitHub](https://github.com/http4s/http4s-otel4s-middleware) ·
-[Published API docs](https://javadoc.io/doc/org.http4s/http4s-otel4s-middleware-client_3) (new
-module API docs become available after the first release).
+[API reference](https://javadoc.io/doc/org.http4s/http4s-otel4s-middleware-client_3).
