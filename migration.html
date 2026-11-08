@@ -109,6 +109,7 @@
   <ul class="nav-list">
     <li class="level1 nav-leaf"><a href="#choose-an-api">Choose an API</a></li>
     <li class="level1 nav-leaf"><a href="#providers-and-context">Providers and context</a></li>
+    <li class="level1 nav-leaf"><a href="#tracing-attributes-and-redaction">Tracing attributes and redaction</a></li>
     <li class="level1 nav-leaf"><a href="#metrics-and-dashboards">Metrics and dashboards</a></li>
     <li class="level1 nav-leaf"><a href="#streaming-behavior">Streaming behavior</a></li>
     <li class="level1 nav-leaf"><a href="#before-deploying">Before deploying</a></li>
@@ -165,13 +166,34 @@
         <code>org.http4s.otel4s.middleware</code>. The old tracing-package types are still available for
         compatibility. Use the shared imports in new code.</p>
         
+        <h2 id="tracing-attributes-and-redaction" class="section"><a class="anchor-link left" href="#tracing-attributes-and-redaction"><i class="icofont-laika link">&#xef71;</i></a>Tracing attributes and redaction</h2>
+        <p>Client spans now use the response&#39;s HTTP protocol version. The destination address comes from
+        the request URI&#39;s host, with the <code>Host</code> header as a fallback. The destination port comes from
+        the URI, or from <code>Host</code> if the URI has no authority. A known URI scheme supplies a default port
+        before connection metadata is used. If you use relative request URIs, check dashboards that
+        group spans by destination.</p>
+        <p>Both OpenTelemetry span data providers now have <code>withKnownMethods</code>. Metrics configs have the same
+        setting. Include your custom methods if you want them to appear by name instead of <code>HTTP</code> in span
+        names or <code>_OTHER</code> in method attributes. Method matching is case-sensitive.</p>
+        <p><code>QueryRedactor.RedactSensitive</code> now masks values for the default sensitive query keys. If you use
+        this redactor, those values will no longer appear in URL attributes. Extend
+        <code>DefaultSensitiveQueryParameters</code> with application-specific keys such as <code>access_token</code>.
+        Overriding <code>sensitiveQueryParameters</code> replaces the default set. See
+        <a href="tracing.html#url-and-header-redaction">URL and header redaction</a> for an example.</p>
+        
         <h2 id="metrics-and-dashboards" class="section"><a class="anchor-link left" href="#metrics-and-dashboards"><i class="icofont-laika link">&#xef71;</i></a>Metrics and dashboards</h2>
         <p>The <code>OtelMetrics</code> adapter records metrics through http4s <code>MetricsOps</code> callbacks. The new metrics
         middleware records HTTP duration, active requests and body sizes. Some old series have no direct
         replacement, including separate header and total timings, abnormal termination counts and series
         grouped by the old classifier.</p>
-        <p>Update dashboard queries and alerts to use the <a href="metrics.html">new metrics</a>. Check names, units and
-        labels.</p>
+        <p>Update dashboard queries and alerts to use the <a href="metrics.html">new metrics</a>. Duration is measured
+        in seconds, body sizes in bytes and active requests as a count. Duration uses one measurement
+        per completed exchange, without the old header/total phase label. Body processing and cleanup
+        can make it longer than a headers-only measurement.</p>
+        <p>Compare the old and new label sets before updating queries. Route and URL templates replace
+        arbitrary classifier values. The new middleware does not emit the old abnormal-termination
+        instrument. Exceptions and error responses add <code>error.type</code> to duration and available body-size
+        measurements instead.</p>
         <p>Duration is enabled by default. Enable active requests and body sizes if you need them. Unknown
         HTTP methods use <code>_OTHER</code> as their label value. Use route and URL templates such as
         <code>/users/{id}</code> to avoid creating a separate metric series for each ID.</p>
