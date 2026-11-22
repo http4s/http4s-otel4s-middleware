@@ -20,6 +20,7 @@ libraryDependencies ++= Seq(
   "org.http4s" %% "http4s-otel4s-middleware-server" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics-client" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics-server" % "<version>",
+  "org.http4s" %% "http4s-otel4s-middleware-ember-client-metrics" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-metrics" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-trace-core" % "<version>",
   "org.http4s" %% "http4s-otel4s-middleware-trace-client" % "<version>",
@@ -54,6 +55,12 @@ def instrument[F[_]: Temporal: MeterProvider: ContextManager](client: Client[F])
 | `http.client.active_requests` | Opt-in with `optIntoActiveRequests`; increment before acquisition and decrement once at completion. |
 | `http.client.request.body.size` | Opt-in with `optIntoRequestBodySize`; request body size in bytes. |
 | `http.client.response.body.size` | Opt-in with `optIntoResponseBodySize`; response body size in bytes. |
+
+## Ember connection pool metrics
+
+Use `ember-client-metrics` and `EmberClientPoolMetrics.provider` to record HTTP/1 connection
+counts and pool timings. See [Ember client connection pool metrics](docs/ember-client-pool-metrics.md)
+for builder wiring, configuration and available instruments.
 
 ## Client metrics and tracing
 

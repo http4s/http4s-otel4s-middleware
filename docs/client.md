@@ -64,6 +64,13 @@ def tracingOnly[F[_]: MonadCancelThrow: TracerProvider](client: Client[F]): F[Cl
 The tracing-only builder ends its span when the response resource is released. The combined
 middleware can end it earlier, when the body finishes. See [Migrating to 0.20](migration.md).
 
+## Ember connection pool metrics
+
+Use the `ember-client-metrics` artifact to observe Ember's HTTP/1 connection pool. Configure
+`EmberClientPoolMetrics.provider` on the builder when creating the client. It works independently
+of request metrics and tracing. See [Ember client connection pool metrics](ember-client-pool-metrics.md)
+for setup, configuration and limitations.
+
 ## Reading and releasing responses
 
 The combined middleware and metrics-only middleware finish recording when the response body
@@ -79,5 +86,5 @@ code or later backend resource cleanup do not.
 
 Instrument the client once. If retry logic wraps the instrumented client, each attempt gets its
 own span and measurements. Use URL templates such as `/users/{id}` for metric labels. Raw paths
-containing IDs create a separate metric series for every value. See [Metrics](metrics.md),
+containing IDs create a separate metric series for every value. See [HTTP request metrics](metrics.md),
 [Tracing](tracing.md) and [Streaming lifecycle](streaming-lifecycle.md).

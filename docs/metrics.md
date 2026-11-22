@@ -1,8 +1,11 @@
-# Metrics
+# HTTP request metrics
 
 The `metrics-client` and `metrics-server` modules record the HTTP metrics defined by the
 OpenTelemetry semantic conventions. The combined `client` and `server` modules record the same
 metrics.
+
+For Ember connection counts and pool timings, see
+[Ember client connection pool metrics](ember-client-pool-metrics.md).
 
 ## Instruments and defaults
 

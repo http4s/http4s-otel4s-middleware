@@ -18,6 +18,7 @@ ThisBuild / tlJdkRelease := Some(8)
 
 val catsEffectV = "3.7.1"
 val http4sV = "0.23.38"
+val keypoolV = "0.4.12"
 val munitV = "1.3.6"
 val munitCatsEffectV = "2.2.1"
 val openTelemetryV = "1.68.0"
@@ -60,6 +61,7 @@ lazy val `http4s-otel4s-middleware` = tlCrossRootProject
     `metrics-core`,
     `metrics-client`,
     `metrics-server`,
+    `ember-client-metrics`,
     `trace-core`,
     `trace-client`,
     `trace-server`,
@@ -147,6 +149,23 @@ lazy val `metrics-server` = crossProject(JVMPlatform, JSPlatform, NativePlatform
       "org.typelevel" %%% "otel4s-semconv-metrics-experimental" % otel4sV % Test,
     ),
     tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
+  )
+  .jsSettings(sharedJsTestSettings)
+
+lazy val `ember-client-metrics` = crossProject(JVMPlatform, JSPlatform, NativePlatform)
+  .crossType(CrossType.Pure)
+  .in(file("ember/client-metrics"))
+  .settings(sharedTestSettings)
+  .settings(
+    name := s"$baseName-ember-client-metrics",
+    tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
+    libraryDependencies ++= Seq(
+      "org.typelevel" %%% "cats-effect-kernel" % catsEffectV,
+      "org.typelevel" %%% "keypool" % keypoolV,
+      "org.typelevel" %%% "keypool-otel4s" % keypoolV,
+      "org.typelevel" %%% "otel4s-core-common" % otel4sV,
+      "org.typelevel" %%% "otel4s-core-metrics" % otel4sV,
+    ),
   )
   .jsSettings(sharedJsTestSettings)
 
@@ -310,7 +329,7 @@ lazy val examples = project
 lazy val site = project
   .in(file("site"))
   .enablePlugins(TypelevelSitePlugin)
-  .dependsOn(client.jvm, server.jvm, metrics.jvm)
+  .dependsOn(client.jvm, server.jvm, metrics.jvm, `ember-client-metrics`.jvm)
   .settings(
     scalaVersion := scala3,
     tlSiteApiUrl := Some(

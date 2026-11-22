@@ -18,6 +18,7 @@ responses. Request and response body effects keep the HTTP context, even when th
 | Server metrics and tracing | `server` | `ServerInstrumentation` |
 | Client metrics only | `metrics-client` | `ClientMetrics` |
 | Server metrics only | `metrics-server` | `ServerMetrics` |
+| [Ember client connection pool metrics](ember-client-pool-metrics.md) | `ember-client-metrics` | `EmberClientPoolMetrics` |
 | Client tracing only | `trace-client` | `ClientMiddleware` |
 | Server tracing only | `trace-server` | `ServerMiddleware` |
 
@@ -27,7 +28,8 @@ OtelJava example in this guide runs on the JVM.
 
 ## Explore
 
-- [Metrics](metrics.md): available metrics, body sizes, labels and links to traces.
+- [HTTP request metrics](metrics.md): available metrics, body sizes, labels and links to traces.
+- [Ember client connection pool metrics](ember-client-pool-metrics.md): pool setup, instruments and configuration.
 - [Tracing and propagation](tracing.md): context, span attributes and redaction.
 - [Filtering and errors](filtering.md): choose which requests to record and which responses count as errors.
 - [Lifecycle explorer](lifecycle.md): watch spans, metrics and headers change one step at a time.
