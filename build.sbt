@@ -158,7 +158,7 @@ lazy val `ember-client-metrics` = crossProject(JVMPlatform, JSPlatform, NativePl
   .settings(sharedTestSettings)
   .settings(
     name := s"$baseName-ember-client-metrics",
-    tlVersionIntroduced := Map("2.13" -> "0.20", "3" -> "0.20"),
+    tlVersionIntroduced := Map("2.13" -> "0.21", "3" -> "0.21"),
     libraryDependencies ++= Seq(
       "org.typelevel" %%% "cats-effect-kernel" % catsEffectV,
       "org.typelevel" %%% "keypool" % keypoolV,
